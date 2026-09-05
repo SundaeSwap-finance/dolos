@@ -1434,7 +1434,7 @@ dependencies = [
  "log",
  "miette",
  "nix",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "pallas 1.1.1",
@@ -1507,7 +1507,7 @@ dependencies = [
  "futures-util",
  "hex",
  "itertools 0.14.0",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "pallas 1.1.1",
  "proptest",
  "rayon",
@@ -1697,7 +1697,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "jsonrpsee",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "pallas 1.1.1",
  "rand 0.9.3",
  "serde",
@@ -3601,6 +3601,20 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaf416e4cb72756655126f7dd7bb0af49c674f4c1b9903e80c009e0c37e552e6"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "opentelemetry"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0142c63252a9e054e68a4c61a5778f7b14f576274d593f8ce883d191a099682"
@@ -3622,7 +3636,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "http",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "reqwest 0.13.4",
 ]
 
@@ -3633,7 +3647,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9966929966d17620d7c316c643ba62631826e10021409357772d5eea84f62c35"
 dependencies = [
  "http",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry-http",
  "opentelemetry-proto",
  "opentelemetry_sdk",
@@ -3651,7 +3665,7 @@ version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56d658ba1faf63f7b9c492cfbe6e0ec365440a16132d3270c1065f7b33f1b638"
 dependencies = [
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry_sdk",
  "prost 0.14.4",
  "tonic 0.14.6",
@@ -3667,7 +3681,7 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "percent-encoding",
  "portable-atomic",
  "rand 0.9.3",
@@ -3685,7 +3699,7 @@ checksum = "1036865bb9422d3300cf723f657c2851d0e9ab12567854b1f4eba3d77decf564"
 [[package]]
 name = "pallas"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "pallas-addresses 1.1.1",
  "pallas-codec 1.1.1",
@@ -3693,6 +3707,7 @@ dependencies = [
  "pallas-crypto 1.1.1",
  "pallas-hardano",
  "pallas-network 1.1.1",
+ "pallas-network2",
  "pallas-primitives 1.1.1",
  "pallas-traverse 1.1.1",
  "pallas-txbuilder 1.1.1",
@@ -3721,7 +3736,7 @@ dependencies = [
 [[package]]
 name = "pallas-addresses"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "base58",
  "bech32 0.11.1",
@@ -3752,7 +3767,7 @@ dependencies = [
 [[package]]
 name = "pallas-codec"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "hex",
  "minicbor 0.26.4",
@@ -3775,7 +3790,7 @@ dependencies = [
 [[package]]
 name = "pallas-configs"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "base64 0.22.1",
  "num-rational",
@@ -3806,7 +3821,7 @@ dependencies = [
 [[package]]
 name = "pallas-crypto"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "cryptoxide 0.4.4",
  "hex",
@@ -3833,7 +3848,7 @@ dependencies = [
 [[package]]
 name = "pallas-hardano"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "binary-layout",
  "hex",
@@ -3853,7 +3868,7 @@ dependencies = [
 [[package]]
 name = "pallas-network"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "byteorder",
  "hex",
@@ -3886,9 +3901,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallas-network2"
+version = "1.1.1"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
+dependencies = [
+ "byteorder",
+ "chrono",
+ "futures",
+ "hex",
+ "opentelemetry 0.30.0",
+ "pallas-codec 1.1.1",
+ "rand 0.10.1",
+ "socket2 0.6.3",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "trait-variant",
+]
+
+[[package]]
 name = "pallas-primitives"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "hex",
  "pallas-codec 1.1.1",
@@ -3913,7 +3947,7 @@ dependencies = [
 [[package]]
 name = "pallas-traverse"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "hex",
  "itertools 0.14.0",
@@ -3946,7 +3980,7 @@ dependencies = [
 [[package]]
 name = "pallas-txbuilder"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "hex",
  "pallas-addresses 1.1.1",
@@ -3979,7 +4013,7 @@ dependencies = [
 [[package]]
 name = "pallas-utxorpc"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "pallas-codec 1.1.1",
  "pallas-crypto 1.1.1",
@@ -4008,7 +4042,7 @@ dependencies = [
 [[package]]
 name = "pallas-validate"
 version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=5d854b1cd0e1b0b2f51e6b3038b0376a354ba405#5d854b1cd0e1b0b2f51e6b3038b0376a354ba405"
+source = "git+https://github.com/geofflittle/pallas?rev=9b7e43362a3702537874be2eb9f24f6e3fe698cb#9b7e43362a3702537874be2eb9f24f6e3fe698cb"
 dependencies = [
  "amaru-uplc",
  "chrono",
@@ -5887,6 +5921,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.6.3",
@@ -6296,7 +6331,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adbc64cba7137545b8044cb1fe9814f7aacf3c6b5f9b45be8bb5db538befdb26"
 dependencies = [
  "js-sys",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "smallvec",
  "tracing",
  "tracing-core",
