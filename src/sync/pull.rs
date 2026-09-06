@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use dolos_cardano::consensus::{ChainFragment, RollbackResult};
@@ -5,7 +6,9 @@ use dolos_core::config::{PeerConfig, SyncConfig, SyncLimit};
 use dolos_core::ChainPoint;
 use gasket::framework::*;
 use itertools::Itertools;
-use pallas::ledger::traverse::leios::CertificationTracker;
+use pallas::ledger::traverse::leios::{
+    AnnouncedEndorserBlock, CertificationTracker, PendingAnnouncement,
+};
 use pallas::ledger::traverse::MultiEraHeader;
 use pallas::network::facades::PeerClient;
 use pallas::network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
@@ -14,7 +17,90 @@ use tracing::{debug, error, info, warn};
 
 use crate::adapters::WalAdapter;
 use crate::prelude::*;
-use crate::sync::leios::{CertifiedPayload, LeiosClient, PendingPayloads};
+use crate::sync::leios::{
+    resume_walk, CertifiedPayload, LeiosClient, PendingPayloads, ResumedWalk,
+};
+
+/// How far back the certification walk reads stored blocks looking for the
+/// Leios event that settles what is waiting.
+///
+/// The write ahead log is already bounded by its own retention, so this only
+/// caps a deployment that keeps a very long one. Reaching it is reported as a
+/// walk that could not settle, with the number of blocks read, and never as a
+/// walk that found nothing waiting.
+const RESUME_SCAN_LIMIT: usize = 50_000;
+
+/// Reads the certification walk back out of the blocks already stored at a
+/// point, then out of the block `fetch` returns at the point the log was reset
+/// to when the stored blocks settle nothing.
+///
+/// Nothing on the chain records which announcement is waiting for a certificate,
+/// so the blocks themselves are the only honest source. Deriving it here rather
+/// than saving a copy beside the cursor means the two cannot disagree after a
+/// crash or a rollback.
+async fn walk_at(
+    wal: &WalAdapter,
+    point: &ChainPoint,
+    fetch: impl AsyncFnOnce(Point) -> Result<BlockBody, WorkerError>,
+) -> Result<CertificationTracker, WorkerError> {
+    let (stored, reset) = {
+        let blocks = wal
+            .iter_blocks(None, Some(point.clone()))
+            .or_panic()?
+            .rev()
+            .filter(|(_, raw)| !raw.is_empty())
+            .take(RESUME_SCAN_LIMIT)
+            .map(|(_, raw)| raw);
+
+        let stored = resume_walk(blocks).or_panic()?;
+
+        let reset = wal
+            .iter_blocks(None, Some(point.clone()))
+            .or_panic()?
+            .next()
+            .filter(|(_, raw)| raw.is_empty())
+            .map(|(at, _)| at);
+
+        (stored, reset)
+    };
+
+    let unsettled =
+        matches!(stored.state, PendingAnnouncement::Unknown) && stored.scanned < RESUME_SCAN_LIMIT;
+
+    let resumed = match reset {
+        Some(ChainPoint::Specific(slot, hash)) if unsettled => {
+            info!(
+                slot,
+                %hash,
+                "the walk reached the reset point of the log, reading the peer's block there"
+            );
+
+            let raw = fetch(Point::Specific(slot, hash.to_vec())).await?;
+            let further = resume_walk(std::iter::once(Arc::new(raw))).or_panic()?;
+
+            ResumedWalk {
+                scanned: stored.scanned + further.scanned,
+                ..further
+            }
+        }
+        _ => stored,
+    };
+
+    info!(
+        slot = point.slot(),
+        scanned = resumed.scanned,
+        settled_at = resumed.settled_at,
+        state = ?resumed.state,
+        "certification walk read back from stored blocks"
+    );
+
+    Ok(CertificationTracker::resume_from(resumed.state))
+}
+
+/// The block at `point` as the peer serves it.
+async fn peer_block(peer: &mut PeerClient, point: Point) -> Result<BlockBody, WorkerError> {
+    peer.blockfetch().fetch_single(point).await.or_restart()
+}
 
 fn to_traverse(header: &HeaderContent) -> Result<MultiEraHeader<'_>, WorkerError> {
     let out = match header.byron_prefix {
@@ -96,8 +182,15 @@ pub struct Worker {
     certification: CertificationTracker,
 
     /// Endorser blocks already fetched, waiting for the ranking block that
-    /// certified them to arrive from blockfetch.
+    /// certified them to arrive from blockfetch, and the certifications still
+    /// owed one.
     payloads: PendingPayloads,
+
+    /// Which endorser block each recorded certification is owed, so a fetch
+    /// that failed can be tried again. The walk consumed the announcement when
+    /// it observed the certificate and will not offer it a second time, so this
+    /// is the only place it survives.
+    outstanding: BTreeMap<u64, AnnouncedEndorserBlock>,
 }
 
 impl Worker {
@@ -169,6 +262,11 @@ impl Worker {
             }
         }
 
+        // A fetch that failed in an earlier pass leaves its endorser block
+        // owed. It is fetched here, before the drain, so a second failure
+        // retries with the points still pending.
+        self.fetch_outstanding(stage).await?;
+
         let points = self.chain.take_pending();
 
         if points.is_empty() {
@@ -185,31 +283,35 @@ impl Worker {
     /// A peer that does not hold the endorser block answers with a well formed
     /// empty body rather than an error, and that answer is refused by the size
     /// the announcement committed to, several layers down in
-    /// `EndorserBlockBody::decode_announced`. It surfaces here as a retry, which
-    /// reconnects, rather than as a block with no transactions.
+    /// `EndorserBlockBody::decode_announced`. It surfaces here as a retry rather
+    /// than as a block with no transactions.
+    ///
+    /// A failed fetch drops the Leios connection and builds a new one. The
+    /// networking stack surfaces a peer that has completed its handshake and
+    /// never a peer that has gone away, so a client holding a peer identity has
+    /// no way to learn that its session ended, and every later request would
+    /// wait out its own timeout against a peer that is not there. Rebuilding
+    /// costs one handshake and is the only thing here that can tell the two
+    /// apart.
     async fn follow_endorsement(
         &mut self,
         header: &MultiEraHeader<'_>,
         stage: &mut Stage,
     ) -> Result<(), WorkerError> {
-        let Some(client) = self.leios.as_mut() else {
+        if self.leios.is_none() {
             return Ok(());
-        };
+        }
 
+        // Stopping is the only honest answer to a certificate the walk cannot
+        // resolve. Continuing would apply a certifying block with no
+        // transactions and leave the ledger short with no error anywhere, which
+        // is the whole failure this stage exists to prevent, and skipping the
+        // block is the same thing one layer up.
         let outcome = self.certification.observe(header).map_err(|err| {
-            // The walk carries the announcement a later block certifies, and
-            // nothing persists it, so a sync that resumes between an
-            // announcement and its certificate starts cold and meets the
-            // certificate with nothing to fetch. Stopping is the only honest
-            // answer: continuing would apply a certifying block with no
-            // transactions and leave the ledger short with no error anywhere,
-            // which is the whole failure this stage exists to prevent.
             error!(
                 %err,
                 slot = header.slot(),
-                "the certification walk cannot resolve this block. If this is a resumed sync, \
-                 it began between an announcement and its certificate. Sync from origin, or \
-                 from a point that is not inside an endorsement window."
+                "the certification walk cannot resolve this block"
             );
             WorkerError::Panic
         })?;
@@ -225,28 +327,68 @@ impl Worker {
             "a ranking block certifies an endorser block"
         );
 
-        let txs = client.fetch(&eb).await.map_err(|err| {
-            warn!(%err, eb = %eb.hash, "endorser block fetch failed, retrying");
-            WorkerError::Retry
-        })?;
+        // The debt is recorded before anything is fetched. The walk has already
+        // consumed the announcement by this point and will never offer it again,
+        // so a fetch that fails and is forgotten here is an endorser block no
+        // later pass can know was missing.
+        self.payloads.expect(header.slot());
+        self.outstanding.insert(header.slot(), eb);
 
-        stage.endorser_block_count.inc(1);
-        stage.endorser_tx_count.inc(txs.len() as u64);
+        self.fetch_outstanding(stage).await
+    }
 
-        info!(
-            certifying_slot = header.slot(),
-            eb = %eb.hash,
-            txs = txs.len(),
-            "endorser block fetched"
-        );
+    /// Fetches the endorser block of every certification recorded and not yet
+    /// delivered, oldest first.
+    ///
+    /// A fetch that fails leaves its certification recorded and reconnects, so
+    /// the next pass tries again and the batch cannot be flushed in the
+    /// meantime. That is what turns a peer that stopped answering into a sync
+    /// that pauses rather than a ledger that is quietly short an endorser block.
+    async fn fetch_outstanding(&mut self, stage: &mut Stage) -> Result<(), WorkerError> {
+        let Some(client) = self.leios.as_mut() else {
+            return Ok(());
+        };
 
-        self.payloads.insert(
-            header.slot(),
-            CertifiedPayload {
-                endorser_block: eb,
-                txs,
-            },
-        );
+        for slot in self.payloads.outstanding() {
+            let Some(eb) = self.outstanding.get(&slot).cloned() else {
+                continue;
+            };
+
+            let txs = match client.fetch(&eb).await {
+                Ok(txs) => txs,
+                Err(err) => {
+                    warn!(%err, eb = %eb.hash, slot, "endorser block fetch failed, reconnecting");
+
+                    let address = stage
+                        .leios_peer_address
+                        .as_ref()
+                        .expect("a leios client exists only when an address is configured");
+
+                    self.leios = Some(LeiosClient::new(address, stage.network_magic).or_panic()?);
+
+                    return Err(WorkerError::Retry);
+                }
+            };
+
+            stage.endorser_block_count.inc(1);
+            stage.endorser_tx_count.inc(txs.len() as u64);
+
+            info!(
+                certifying_slot = slot,
+                eb = %eb.hash,
+                txs = txs.len(),
+                "endorser block fetched"
+            );
+
+            self.outstanding.remove(&slot);
+            self.payloads.deliver(
+                slot,
+                CertifiedPayload {
+                    endorser_block: eb,
+                    txs,
+                },
+            );
+        }
 
         Ok(())
     }
@@ -348,23 +490,30 @@ impl gasket::framework::Worker<Stage> for Worker {
 
         info!(?intersection, "found intersection");
 
-        let leios = match &stage.leios_peer_address {
-            None => None,
+        let intersection = ChainPoint::from(intersection);
+
+        let (leios, certification) = match &stage.leios_peer_address {
+            None => (None, CertificationTracker::default()),
             Some(address) => {
                 info!(address, "connecting to a Leios peer for endorser blocks");
 
                 let client = LeiosClient::new(address, stage.network_magic).or_panic()?;
+                let walk = walk_at(&stage.wal, &intersection, async |at| {
+                    peer_block(&mut peer_session, at).await
+                })
+                .await?;
 
-                Some(client)
+                (Some(client), walk)
             }
         };
 
         let worker = Self {
             peer_session,
-            chain: ChainFragment::start(ChainPoint::from(intersection)),
+            chain: ChainFragment::start(intersection),
             leios,
-            certification: CertificationTracker::default(),
+            certification,
             payloads: PendingPayloads::default(),
+            outstanding: BTreeMap::new(),
         };
 
         Ok(worker)
@@ -401,9 +550,20 @@ impl gasket::framework::Worker<Stage> for Worker {
                 // for a block that is no longer on the chain. The endorser
                 // transactions of a rolled back block are undone with it,
                 // because they are part of the block bytes the log holds.
-                debug!("rollback resets the certification walk");
-                self.certification = CertificationTracker::default();
+                //
+                // The walk is read back out of the stored blocks at the rollback
+                // point rather than emptied. Emptying it would say nothing is
+                // waiting, which is a claim about the chain that a rollback
+                // gives no grounds for, and the first certificate after the
+                // rollback would then be answered with no payload at all.
                 self.payloads = PendingPayloads::default();
+                self.outstanding.clear();
+
+                if self.leios.is_some() {
+                    let peer = &mut self.peer_session;
+                    self.certification =
+                        walk_at(&stage.wal, &point, async |at| peer_block(peer, at).await).await?;
+                }
 
                 stage.flush_rollback(point).await?
             }
@@ -489,5 +649,179 @@ impl Stage {
 
     fn track_tip(&self, tip: &Tip) {
         self.chain_tip.set(tip.0.slot_or_default() as i64);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dolos_core::import::{seed_wal_from_state, WalSeed};
+    use dolos_core::{StateStore as _, StateWriter as _};
+    use pallas::ledger::traverse::MultiEraBlock;
+    use pallas::network::facades::PeerServer;
+
+    use super::*;
+    use crate::adapters::StateStoreBackend;
+
+    fn certify_only() -> Vec<u8> {
+        hex::decode(include_str!("../../test_data/dijkstra-certify-only.block").trim()).unwrap()
+    }
+
+    fn point_of(cbor: &[u8]) -> ChainPoint {
+        let decoded = MultiEraBlock::decode(cbor).unwrap();
+        ChainPoint::Specific(decoded.slot(), decoded.hash())
+    }
+
+    fn certifying() -> Vec<u8> {
+        hex::decode(include_str!("../../test_data/dijkstra-certifying.block").trim()).unwrap()
+    }
+
+    fn quiet() -> Vec<u8> {
+        hex::decode(include_str!("../../test_data/dijkstra-quiet.block").trim()).unwrap()
+    }
+
+    fn logged(wal: &WalAdapter, cbor: &[u8]) {
+        wal.append_entries(vec![(
+            point_of(cbor),
+            LogValue {
+                block: cbor.to_vec(),
+                delta: Vec::new(),
+                inputs: Default::default(),
+            },
+        )])
+        .unwrap();
+    }
+
+    async fn walk_from(
+        wal: &WalAdapter,
+        point: &ChainPoint,
+        served: &[u8],
+    ) -> (CertificationTracker, Vec<Point>) {
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+        let mut asked = Vec::new();
+
+        let walk = walk_at(wal, point, async |at| {
+            asked.push(at);
+            Ok(served.to_vec())
+        })
+        .await
+        .unwrap();
+
+        (walk, asked)
+    }
+
+    fn certified_next(mut walk: CertificationTracker, next: &[u8]) -> Option<u64> {
+        let decoded = MultiEraBlock::decode(next).unwrap();
+        let outcome = walk.observe(&decoded.header()).unwrap();
+        outcome.certified.map(|eb| eb.slot)
+    }
+
+    /// MUST FIRE: a log seeded from the state cursor holds no block at the
+    /// cursor, so the walk reads the peer's block there, and the certificate
+    /// in the next header names its announcement.
+    #[tokio::test]
+    async fn a_log_seeded_from_the_state_walks_the_peers_block_at_the_cursor() {
+        let parent = certifying();
+        let point = point_of(&parent);
+        let wal = WalAdapter::in_memory().unwrap();
+        let state = StateStoreBackend::in_memory().unwrap();
+
+        let writer = state.start_writer().unwrap();
+        writer.set_cursor(point.clone()).unwrap();
+        writer.commit().unwrap();
+
+        assert_eq!(
+            seed_wal_from_state(&state, &wal).unwrap(),
+            WalSeed::Seeded(point.clone())
+        );
+
+        let (walk, asked) = walk_from(&wal, &point, &parent).await;
+
+        assert_eq!(certified_next(walk, &certify_only()), Some(2_514_319));
+        assert_eq!(asked, vec![Point::try_from(point).unwrap()]);
+    }
+
+    /// MUST FIRE: blocks logged after a reset that settle nothing leave the
+    /// walk to the peer's block at the reset point.
+    #[tokio::test]
+    async fn a_walk_unsettled_at_the_reset_entry_reads_the_peers_block_there() {
+        let wal = WalAdapter::in_memory().unwrap();
+        let point = point_of(&quiet());
+        let reset = ChainPoint::Specific(point.slot() - 1, point_of(&certifying()).hash().unwrap());
+
+        wal.reset_to(&reset).unwrap();
+        logged(&wal, &quiet());
+
+        let (walk, asked) = walk_from(&wal, &point, &certifying()).await;
+
+        assert_eq!(certified_next(walk, &certify_only()), Some(2_514_319));
+        assert_eq!(asked, vec![Point::try_from(reset).unwrap()]);
+    }
+
+    /// MUST NOT FIRE: a block logged after a reset that settles the walk
+    /// leaves the peer asked for nothing.
+    #[tokio::test]
+    async fn a_walk_settled_after_a_reset_asks_the_peer_nothing() {
+        let wal = WalAdapter::in_memory().unwrap();
+        let point = point_of(&certify_only());
+        let reset = ChainPoint::Specific(point.slot() - 1, point.hash().unwrap());
+
+        wal.reset_to(&reset).unwrap();
+        logged(&wal, &certify_only());
+
+        let (walk, asked) = walk_from(&wal, &point, &certifying()).await;
+
+        assert_eq!(walk.pending(), &PendingAnnouncement::Nothing);
+        assert_eq!(asked, Vec::<Point>::new());
+    }
+
+    /// MUST NOT FIRE: a log reset to the origin has no block to read there,
+    /// and the peer is asked for nothing.
+    #[tokio::test]
+    async fn a_log_reset_to_the_origin_asks_the_peer_nothing() {
+        let wal = WalAdapter::in_memory().unwrap();
+
+        wal.reset_to(&ChainPoint::Origin).unwrap();
+
+        let (walk, asked) = walk_from(&wal, &ChainPoint::Origin, &certifying()).await;
+
+        assert_eq!(walk.pending(), &PendingAnnouncement::Unknown);
+        assert_eq!(asked, Vec::<Point>::new());
+    }
+
+    /// MUST FIRE: the block read at a reset point is the one a blockfetch
+    /// server answers for that point.
+    #[tokio::test]
+    async fn the_block_at_a_reset_point_is_fetched_over_blockfetch() {
+        let parent = certifying();
+        let point = point_of(&parent);
+        let wal = WalAdapter::in_memory().unwrap();
+
+        wal.reset_to(&point).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let served = parent.clone();
+
+        let server = tokio::spawn(async move {
+            let mut server = PeerServer::accept(&listener, 164).await.unwrap();
+            let request = server.blockfetch().recv_while_idle().await.unwrap();
+            server
+                .blockfetch()
+                .send_block_range(vec![served])
+                .await
+                .unwrap();
+            request.map(|request| request.0)
+        });
+
+        let mut peer = PeerClient::connect(&address, 164).await.unwrap();
+        let walk = walk_at(&wal, &point, async |at| peer_block(&mut peer, at).await)
+            .await
+            .unwrap();
+        peer.abort().await;
+
+        assert_eq!(certified_next(walk, &certify_only()), Some(2_514_319));
+
+        let at = Point::try_from(point).unwrap();
+        assert_eq!(server.await.unwrap(), Some((at.clone(), at)));
     }
 }
