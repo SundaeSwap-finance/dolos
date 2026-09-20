@@ -806,6 +806,11 @@ mod tests {
 
     }
 
+    /// Blake2b-256 of the endorser block body fixture, the hash the ranking
+    /// block header announced it under.
+    const REAL_EB_BODY_HASH: &str =
+        "a8f2a746b33a74bf39f9f8a56e108746d1512a5af91f48ba4336a61b81cf5fcd";
+
     /// A real 425 transaction endorser block off Musashi, with its body and
     /// every transaction as the wire carried them.
     ///
@@ -813,6 +818,9 @@ mod tests {
     /// transaction has one hash and a delivery filed under the wrong index
     /// would verify anyway, which is exactly the defect one of these tests
     /// exists to catch.
+    ///
+    /// The announcement carries the body's own hash, because a fetch is only
+    /// answered when the body it gets back is the body that was committed to.
     fn real_eb() -> (Vec<u8>, Vec<Vec<u8>>, AnnouncedEndorserBlock) {
         let body = hex::decode(include_str!("../../test_data/dijkstra-eb3.ebbody").trim()).unwrap();
 
@@ -826,7 +834,7 @@ mod tests {
 
         let announced = AnnouncedEndorserBlock {
             slot: 376_369,
-            hash: Hash::new([9; 32]),
+            hash: REAL_EB_BODY_HASH.parse().expect("fixture precondition"),
             size: body.len() as u32,
         };
 
@@ -965,6 +973,44 @@ mod tests {
                 assert_eq!(index, 0, "the first position is the one that misfiles");
                 assert_eq!(asked, 425);
                 assert_eq!(delivered, 150);
+            }
+            other => panic!("wrong refusal: {other}"),
+        }
+    }
+
+    /// MUST FIRE: a body served under an announcement that named a different
+    /// hash is refused, and the refusal names both hashes.
+    ///
+    /// The announced size alone does not identify a body, because any other
+    /// body of the same length passes it. Only the hash says the peer served
+    /// the endorser block the chain certified, and applying a different one
+    /// under a certified block's name puts transactions nobody voted on into
+    /// the ledger.
+    ///
+    /// MUST NOT FIRE: every other test in this module fetches the same body
+    /// under its own hash and is answered, so the check refuses the wrong body
+    /// rather than refusing every body.
+    #[tokio::test]
+    async fn a_body_served_under_a_hash_it_does_not_have_is_refused() {
+        let (body, wire_txs, mut announced) = real_eb();
+        let real = announced.hash;
+        announced.hash = Hash::new([9; 32]);
+        let point: EbId = Point::Specific(announced.slot, announced.hash.to_vec());
+
+        let mut client = client(FakeRelay::new(point, body, wire_txs, usize::MAX), 64);
+
+        let err = client
+            .fetch(&announced)
+            .await
+            .expect_err("a body that is not the announced one must be refused");
+
+        match err {
+            Error::Endorser(pallas::ledger::traverse::leios::Error::BodyHash {
+                announced: named,
+                found,
+            }) => {
+                assert_eq!(named, announced.hash, "the refusal names what was asked for");
+                assert_eq!(found, real, "the refusal names what the peer served");
             }
             other => panic!("wrong refusal: {other}"),
         }
