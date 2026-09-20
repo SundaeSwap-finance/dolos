@@ -1437,7 +1437,7 @@ dependencies = [
  "opentelemetry 0.32.0",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "paste",
  "protoc-wkt",
  "rayon",
@@ -1487,7 +1487,7 @@ dependencies = [
  "itertools 0.14.0",
  "num-bigint",
  "num-rational",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "paste",
  "proptest",
  "rayon",
@@ -1508,7 +1508,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "opentelemetry 0.32.0",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "proptest",
  "rayon",
  "regex",
@@ -1533,7 +1533,7 @@ dependencies = [
  "dolos-flatfiles",
  "dolos-testing",
  "fjall",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -1574,7 +1574,7 @@ dependencies = [
  "num-bigint",
  "num-rational",
  "num-traits",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "rayon",
  "reqwest 0.12.28",
  "serde",
@@ -1598,7 +1598,7 @@ dependencies = [
  "dolos-testing",
  "hex",
  "http-body-util",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "serde",
  "serde_json",
  "tokio",
@@ -1629,7 +1629,7 @@ dependencies = [
  "futures-util",
  "hex",
  "itertools 0.14.0",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "redb",
  "serde",
  "tempfile",
@@ -1651,7 +1651,7 @@ dependencies = [
  "dolos-testing",
  "hex",
  "minicbor 0.26.4",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "rustls",
  "serde",
  "serde_json",
@@ -1677,7 +1677,7 @@ dependencies = [
  "futures-util",
  "hex",
  "itertools 0.14.0",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "rand 0.9.3",
  "serde",
  "tempfile",
@@ -1698,7 +1698,7 @@ dependencies = [
  "itertools 0.14.0",
  "jsonrpsee",
  "opentelemetry 0.32.0",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "rand 0.9.3",
  "serde",
  "serde_json",
@@ -3698,25 +3698,6 @@ checksum = "1036865bb9422d3300cf723f657c2851d0e9ab12567854b1f4eba3d77decf564"
 
 [[package]]
 name = "pallas"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
-dependencies = [
- "pallas-addresses 1.1.1",
- "pallas-codec 1.1.1",
- "pallas-configs 1.1.1",
- "pallas-crypto 1.1.1",
- "pallas-hardano",
- "pallas-network 1.1.1",
- "pallas-network2",
- "pallas-primitives 1.1.1",
- "pallas-traverse 1.1.1",
- "pallas-txbuilder 1.1.1",
- "pallas-utxorpc 1.1.1",
- "pallas-validate 1.1.1",
-]
-
-[[package]]
-name = "pallas"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d0c4055a1a049ce7a04700dadf377155ef036a27455a8ac4e63fbf283d0cc9f"
@@ -3734,18 +3715,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallas-addresses"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+name = "pallas"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
- "base58",
- "bech32 0.11.1",
- "crc",
- "cryptoxide 0.4.4",
- "hex",
- "pallas-codec 1.1.1",
- "pallas-crypto 1.1.1",
- "thiserror 2.0.18",
+ "pallas-addresses 1.4.0",
+ "pallas-codec 1.4.0",
+ "pallas-configs 1.4.0",
+ "pallas-crypto 1.4.0",
+ "pallas-hardano",
+ "pallas-network 1.4.0",
+ "pallas-network2",
+ "pallas-primitives 1.4.0",
+ "pallas-traverse 1.4.0",
+ "pallas-txbuilder 1.4.0",
+ "pallas-utxorpc 1.4.0",
+ "pallas-validate 1.4.0",
 ]
 
 [[package]]
@@ -3765,13 +3750,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallas-codec"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+name = "pallas-addresses"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
+ "base58",
+ "bech32 0.11.1",
+ "crc",
+ "cryptoxide 0.4.4",
  "hex",
- "minicbor 0.26.4",
- "serde",
+ "pallas-codec 1.4.0",
+ "pallas-crypto 1.4.0",
  "thiserror 2.0.18",
 ]
 
@@ -3788,18 +3777,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallas-configs"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+name = "pallas-codec"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
- "base64 0.22.1",
- "num-rational",
- "pallas-addresses 1.1.1",
- "pallas-crypto 1.1.1",
- "pallas-primitives 1.1.1",
+ "hex",
+ "minicbor 0.26.4",
  "serde",
- "serde_json",
- "serde_with 3.21.0",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3819,16 +3804,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallas-crypto"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+name = "pallas-configs"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
- "cryptoxide 0.4.4",
- "hex",
- "pallas-codec 1.1.1",
- "rand_core 0.10.1",
+ "base64 0.22.1",
+ "num-rational",
+ "pallas-addresses 1.4.0",
+ "pallas-crypto 1.4.0",
+ "pallas-primitives 1.4.0",
  "serde",
- "thiserror 2.0.18",
+ "serde_json",
+ "serde_with 3.21.0",
 ]
 
 [[package]]
@@ -3846,39 +3833,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallas-crypto"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+dependencies = [
+ "cryptoxide 0.4.4",
+ "hex",
+ "pallas-codec 1.4.0",
+ "rand_core 0.10.1",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "pallas-hardano"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
  "binary-layout",
  "hex",
- "pallas-addresses 1.1.1",
- "pallas-codec 1.1.1",
- "pallas-crypto 1.1.1",
- "pallas-network 1.1.1",
- "pallas-traverse 1.1.1",
+ "pallas-addresses 1.4.0",
+ "pallas-codec 1.4.0",
+ "pallas-crypto 1.4.0",
+ "pallas-network 1.4.0",
+ "pallas-traverse 1.4.0",
  "serde",
  "serde_json",
  "serde_with 3.21.0",
  "tap",
  "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "pallas-network"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
-dependencies = [
- "byteorder",
- "hex",
- "itertools 0.14.0",
- "pallas-codec 1.1.1",
- "pallas-crypto 1.1.1",
- "rand 0.10.1",
- "socket2 0.6.3",
- "thiserror 2.0.18",
- "tokio",
  "tracing",
 ]
 
@@ -3901,34 +3884,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallas-network"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+dependencies = [
+ "byteorder",
+ "hex",
+ "itertools 0.14.0",
+ "pallas-codec 1.4.0",
+ "pallas-crypto 1.4.0",
+ "rand 0.10.1",
+ "socket2 0.6.3",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "pallas-network2"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
  "byteorder",
  "chrono",
  "futures",
  "hex",
  "opentelemetry 0.30.0",
- "pallas-codec 1.1.1",
+ "pallas-codec 1.4.0",
  "rand 0.10.1",
  "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "trait-variant",
-]
-
-[[package]]
-name = "pallas-primitives"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
-dependencies = [
- "hex",
- "pallas-codec 1.1.1",
- "pallas-crypto 1.1.1",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -3945,19 +3933,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallas-traverse"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+name = "pallas-primitives"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
  "hex",
- "itertools 0.14.0",
- "pallas-addresses 1.1.1",
- "pallas-codec 1.1.1",
- "pallas-crypto 1.1.1",
- "pallas-primitives 1.1.1",
- "paste",
+ "pallas-codec 1.4.0",
+ "pallas-crypto 1.4.0",
  "serde",
- "thiserror 2.0.18",
+ "serde_json",
 ]
 
 [[package]]
@@ -3978,18 +3962,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallas-txbuilder"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+name = "pallas-traverse"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
  "hex",
- "pallas-addresses 1.1.1",
- "pallas-codec 1.1.1",
- "pallas-crypto 1.1.1",
- "pallas-primitives 1.1.1",
- "pallas-traverse 1.1.1",
+ "itertools 0.14.0",
+ "pallas-addresses 1.4.0",
+ "pallas-codec 1.4.0",
+ "pallas-crypto 1.4.0",
+ "pallas-primitives 1.4.0",
+ "paste",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -4011,17 +3995,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallas-utxorpc"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+name = "pallas-txbuilder"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
- "pallas-codec 1.1.1",
- "pallas-crypto 1.1.1",
- "pallas-primitives 1.1.1",
- "pallas-traverse 1.1.1",
- "pallas-validate 1.1.1",
- "prost-types 0.13.5",
- "utxorpc-spec 0.19.0",
+ "hex",
+ "pallas-addresses 1.4.0",
+ "pallas-codec 1.4.0",
+ "pallas-crypto 1.4.0",
+ "pallas-primitives 1.4.0",
+ "pallas-traverse 1.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4040,22 +4026,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallas-validate"
-version = "1.1.1"
-source = "git+https://github.com/geofflittle/pallas?rev=b8b18ba6ec9ad5192cf0ff90b8e833139b53beee#b8b18ba6ec9ad5192cf0ff90b8e833139b53beee"
+name = "pallas-utxorpc"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
 dependencies = [
- "amaru-uplc",
- "chrono",
- "hex",
- "itertools 0.14.0",
- "pallas-addresses 1.1.1",
- "pallas-codec 1.1.1",
- "pallas-crypto 1.1.1",
- "pallas-primitives 1.1.1",
- "pallas-traverse 1.1.1",
- "serde",
- "thiserror 2.0.18",
- "tracing",
+ "pallas-codec 1.4.0",
+ "pallas-crypto 1.4.0",
+ "pallas-primitives 1.4.0",
+ "pallas-traverse 1.4.0",
+ "pallas-validate 1.4.0",
+ "prost-types 0.13.5",
+ "utxorpc-spec 0.19.0",
 ]
 
 [[package]]
@@ -4072,6 +4053,25 @@ dependencies = [
  "pallas-crypto 1.3.0",
  "pallas-primitives 1.3.0",
  "pallas-traverse 1.3.0",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "pallas-validate"
+version = "1.4.0"
+source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+dependencies = [
+ "amaru-uplc",
+ "chrono",
+ "hex",
+ "itertools 0.14.0",
+ "pallas-addresses 1.4.0",
+ "pallas-codec 1.4.0",
+ "pallas-crypto 1.4.0",
+ "pallas-primitives 1.4.0",
+ "pallas-traverse 1.4.0",
  "serde",
  "thiserror 2.0.18",
  "tracing",
@@ -7319,7 +7319,7 @@ dependencies = [
  "hdrhistogram",
  "hex",
  "libc",
- "pallas 1.1.1",
+ "pallas 1.4.0",
  "postgres",
  "postgres-native-tls",
  "reqwest 0.12.28",
