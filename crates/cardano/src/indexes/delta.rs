@@ -328,7 +328,7 @@ impl CardanoIndexDeltaBuilder {
             }
 
             for script in tx.native_scripts() {
-                self.add_script_hash(script.original_hash().to_vec());
+                self.add_script_hash(script.hash().to_vec());
             }
             for script in tx.plutus_v1_scripts() {
                 self.add_script_hash(script.compute_hash().to_vec());
