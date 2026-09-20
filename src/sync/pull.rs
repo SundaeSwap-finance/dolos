@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use dolos_cardano::consensus::{ChainFragment, RollbackResult};
@@ -5,14 +6,54 @@ use dolos_core::config::{PeerConfig, SyncConfig, SyncLimit};
 use dolos_core::ChainPoint;
 use gasket::framework::*;
 use itertools::Itertools;
+use pallas::ledger::traverse::leios::{AnnouncedEndorserBlock, CertificationTracker};
 use pallas::ledger::traverse::MultiEraHeader;
 use pallas::network::facades::PeerClient;
 use pallas::network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
 use pallas::network::miniprotocols::Point;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::adapters::WalAdapter;
 use crate::prelude::*;
+use crate::sync::leios::{resume_walk, CertifiedPayload, LeiosClient, PendingPayloads};
+
+/// How far back the certification walk reads stored blocks looking for the
+/// Leios event that settles what is waiting.
+///
+/// The write ahead log is already bounded by its own retention, so this only
+/// caps a deployment that keeps a very long one. Reaching it is reported as a
+/// walk that could not settle, with the number of blocks read, and never as a
+/// walk that found nothing waiting.
+const RESUME_SCAN_LIMIT: usize = 50_000;
+
+/// Reads the certification walk back out of the blocks already stored at a
+/// point.
+///
+/// Nothing on the chain records which announcement is waiting for a certificate,
+/// so the blocks themselves are the only honest source. Deriving it here rather
+/// than saving a copy beside the cursor means the two cannot disagree after a
+/// crash or a rollback.
+fn walk_at(wal: &WalAdapter, point: &ChainPoint) -> Result<CertificationTracker, WorkerError> {
+    let blocks = wal
+        .iter_blocks(None, Some(point.clone()))
+        .or_panic()?
+        .rev()
+        .take(RESUME_SCAN_LIMIT)
+        .map(|(_, raw)| raw);
+
+    let resumed = resume_walk(blocks).or_panic()?;
+
+    info!(
+        slot = point.slot(),
+        scanned = resumed.scanned,
+        settled_at = resumed.settled_at,
+        state = ?resumed.state,
+        "certification walk read back from stored blocks"
+    );
+
+    Ok(CertificationTracker::resume_from(resumed.state))
+}
+
 
 fn to_traverse(header: &HeaderContent) -> Result<MultiEraHeader<'_>, WorkerError> {
     let out = match header.byron_prefix {
@@ -84,6 +125,26 @@ impl From<SyncLimit> for PullQuota {
 pub struct Worker {
     peer_session: PeerClient,
     chain: ChainFragment,
+
+    /// Present only when a Leios peer is configured. Without it the chain is
+    /// followed as an ordinary Praos chain, which on a Leios network builds a
+    /// ledger that is short by every endorsed transaction.
+    leios: Option<LeiosClient>,
+
+    /// The walk over headers that decides which endorser blocks are certified.
+    certification: CertificationTracker,
+
+    /// Endorser blocks already fetched, waiting for the ranking block that
+    /// certified them to arrive from blockfetch, and the certifications still
+    /// owed one.
+    payloads: PendingPayloads,
+
+    /// Which endorser block each recorded certification is owed, so a fetch
+    /// that failed can be tried again. The walk consumed the announcement when
+    /// it observed the certificate and will not offer it a second time, so this
+    /// is the only place it survives.
+    outstanding: BTreeMap<u64, AnnouncedEndorserBlock>,
+
 }
 
 impl Worker {
@@ -133,6 +194,8 @@ impl Worker {
                     debug!(%point, "header received from upstream peer");
                     gathered += 1;
 
+                    self.follow_endorsement(&header, stage).await?;
+
                     stage.track_tip(&tip);
                 }
                 NextResponse::RollBackward(point, tip) => {
@@ -160,6 +223,123 @@ impl Worker {
         } else {
             Ok(PullResult::Blocks(points))
         }
+    }
+
+    /// Reads one header's Leios fields and, when it certifies an endorser
+    /// block, fetches that endorser block whole so it is ready when the
+    /// certifying block's body arrives.
+    ///
+    /// A peer that does not hold the endorser block answers with a well formed
+    /// empty body rather than an error, and that answer is refused by the size
+    /// the announcement committed to, several layers down in
+    /// `EndorserBlockBody::decode_announced`. It surfaces here as a retry rather
+    /// than as a block with no transactions.
+    ///
+    /// A failed fetch drops the Leios connection and builds a new one. The
+    /// networking stack surfaces a peer that has completed its handshake and
+    /// never a peer that has gone away, so a client holding a peer identity has
+    /// no way to learn that its session ended, and every later request would
+    /// wait out its own timeout against a peer that is not there. Rebuilding
+    /// costs one handshake and is the only thing here that can tell the two
+    /// apart.
+    async fn follow_endorsement(
+        &mut self,
+        header: &MultiEraHeader<'_>,
+        stage: &mut Stage,
+    ) -> Result<(), WorkerError> {
+        if self.leios.is_none() {
+            return Ok(());
+        }
+
+        // Stopping is the only honest answer to a certificate the walk cannot
+        // resolve. Continuing would apply a certifying block with no
+        // transactions and leave the ledger short with no error anywhere, which
+        // is the whole failure this stage exists to prevent, and skipping the
+        // block is the same thing one layer up.
+        let outcome = self.certification.observe(header).map_err(|err| {
+            error!(
+                %err,
+                slot = header.slot(),
+                "the certification walk cannot resolve this block"
+            );
+            WorkerError::Panic
+        })?;
+
+        let Some(eb) = outcome.certified else {
+            return Ok(());
+        };
+
+        debug!(
+            certifying_slot = header.slot(),
+            eb = %eb.hash,
+            size = eb.size,
+            "a ranking block certifies an endorser block"
+        );
+
+        // The debt is recorded before anything is fetched. The walk has already
+        // consumed the announcement by this point and will never offer it again,
+        // so a fetch that fails and is forgotten here is an endorser block no
+        // later pass can know was missing.
+        self.payloads.expect(header.slot());
+        self.outstanding.insert(header.slot(), eb);
+
+        self.fetch_outstanding(stage).await
+    }
+
+    /// Fetches the endorser block of every certification recorded and not yet
+    /// delivered, oldest first.
+    ///
+    /// A fetch that fails leaves its certification recorded and reconnects, so
+    /// the next pass tries again and the batch cannot be flushed in the
+    /// meantime. That is what turns a peer that stopped answering into a sync
+    /// that pauses rather than a ledger that is quietly short an endorser block.
+    async fn fetch_outstanding(&mut self, stage: &mut Stage) -> Result<(), WorkerError> {
+        let Some(client) = self.leios.as_mut() else {
+            return Ok(());
+        };
+
+        for slot in self.payloads.outstanding() {
+            let Some(eb) = self.outstanding.get(&slot).cloned() else {
+                continue;
+            };
+
+            let txs = match client.fetch(&eb).await {
+                Ok(txs) => txs,
+                Err(err) => {
+                    warn!(%err, eb = %eb.hash, slot, "endorser block fetch failed, reconnecting");
+
+                    let address = stage
+                        .leios_peer_address
+                        .as_ref()
+                        .expect("a leios client exists only when an address is configured");
+
+                    self.leios = Some(LeiosClient::new(address, stage.network_magic).or_panic()?);
+
+                    return Err(WorkerError::Retry);
+                }
+            };
+
+            stage.endorser_block_count.inc(1);
+            stage.endorser_tx_count.inc(txs.len() as u64);
+
+            info!(
+                certifying_slot = slot,
+                eb = %eb.hash,
+                txs = txs.len(),
+                "endorser block fetched"
+            );
+
+            self.outstanding.remove(&slot);
+            self.payloads.deliver(
+                slot,
+                CertifiedPayload {
+                    endorser_block: eb,
+                    txs,
+                },
+            );
+        }
+
+        Ok(())
     }
 
     /// Fetch block bodies for the given points and flush them downstream.
@@ -193,6 +373,26 @@ impl Worker {
         };
 
         debug!(len = blocks.len(), "block batch pulled from peer");
+
+        // Nothing is flushed while a certification is still owed its endorser
+        // block. A failed fetch earlier in this batch left its certification
+        // recorded, and this is where the sync waits for it rather than
+        // applying the block that certifies it with no transactions in it.
+        self.fetch_outstanding(stage).await?;
+
+        // Each payload is attached to the block of the slot that certified it,
+        // never to a position in the batch, so a short or reordered batch cannot
+        // move one block's endorsed transactions onto another. A payload no
+        // block claimed is refused rather than dropped.
+        let blocks = self.payloads.apply(blocks).map_err(|err| {
+            warn!(%err, "resolving a certified block failed");
+            WorkerError::Panic
+        })?;
+
+        self.payloads.refuse_undelivered().map_err(|err| {
+            warn!(%err, "an endorser block was fetched and never applied");
+            WorkerError::Panic
+        })?;
 
         stage.quota.consume_blocks(blocks.len() as u64);
         stage.flush_blocks(blocks).await?;
@@ -245,9 +445,27 @@ impl gasket::framework::Worker<Stage> for Worker {
 
         info!(?intersection, "found intersection");
 
+        let intersection = ChainPoint::from(intersection);
+
+        let (leios, certification) = match &stage.leios_peer_address {
+            None => (None, CertificationTracker::default()),
+            Some(address) => {
+                info!(address, "connecting to a Leios peer for endorser blocks");
+
+                let client = LeiosClient::new(address, stage.network_magic).or_panic()?;
+                let walk = walk_at(&stage.wal, &intersection)?;
+
+                (Some(client), walk)
+            }
+        };
+
         let worker = Self {
             peer_session,
-            chain: ChainFragment::start(ChainPoint::from(intersection)),
+            chain: ChainFragment::start(intersection),
+            leios,
+            certification,
+            payloads: PendingPayloads::default(),
+            outstanding: BTreeMap::new(),
         };
 
         Ok(worker)
@@ -278,7 +496,27 @@ impl gasket::framework::Worker<Stage> for Worker {
 
         match self.pull_headers(max_headers, stage).await? {
             PullResult::Blocks(points) => self.fetch_and_flush(&points, stage).await?,
-            PullResult::Rollback(point) => stage.flush_rollback(point).await?,
+            PullResult::Rollback(point) => {
+                // The certification walk is a property of the chain, so a
+                // rollback invalidates both what it carries and anything fetched
+                // for a block that is no longer on the chain. The endorser
+                // transactions of a rolled back block are undone with it,
+                // because they are part of the block bytes the log holds.
+                //
+                // The walk is read back out of the stored blocks at the rollback
+                // point rather than emptied. Emptying it would say nothing is
+                // waiting, which is a claim about the chain that a rollback
+                // gives no grounds for, and the first certificate after the
+                // rollback would then be answered with no payload at all.
+                self.payloads = PendingPayloads::default();
+                self.outstanding.clear();
+
+                if self.leios.is_some() {
+                    self.certification = walk_at(&stage.wal, &point)?;
+                }
+
+                stage.flush_rollback(point).await?
+            }
             PullResult::Empty => (),
         }
 
@@ -294,6 +532,7 @@ impl gasket::framework::Worker<Stage> for Worker {
 #[stage(name = "pull", unit = "WorkUnit", worker = "Worker")]
 pub struct Stage {
     peer_address: String,
+    leios_peer_address: Option<String>,
     network_magic: u64,
     block_fetch_batch_size: usize,
     wal: WalAdapter,
@@ -303,6 +542,12 @@ pub struct Stage {
 
     #[metric]
     block_count: gasket::metrics::Counter,
+
+    #[metric]
+    endorser_block_count: gasket::metrics::Counter,
+
+    #[metric]
+    endorser_tx_count: gasket::metrics::Counter,
 
     #[metric]
     chain_tip: gasket::metrics::Gauge,
@@ -317,12 +562,15 @@ impl Stage {
     ) -> Self {
         Self {
             peer_address: upstream.peer_address.clone(),
+            leios_peer_address: upstream.leios_peer_address.clone(),
             network_magic,
             quota: config.sync_limit.clone().into(),
             block_fetch_batch_size: config.pull_batch_size(),
             wal,
             downstream: Default::default(),
             block_count: Default::default(),
+            endorser_block_count: Default::default(),
+            endorser_tx_count: Default::default(),
             chain_tip: Default::default(),
         }
     }

@@ -11,12 +11,13 @@ use pallas::{
         addresses::{Address, Network, ShelleyPaymentPart, StakeAddress, StakePayload},
         primitives::{
             alonzo::{self, Certificate as AlonzoCert},
-            conway::{Certificate as ConwayCert, DRep, DatumOption, RedeemerTag, ScriptRef},
+            conway::{Certificate as ConwayCert, DRep, DatumOption},
             Epoch, ExUnitPrices, ExUnits, PlutusData, StakeCredential,
         },
         traverse::{
             ComputeHash, MultiEraBlock, MultiEraCert, MultiEraInput, MultiEraOutput,
-            MultiEraRedeemer, MultiEraTx, MultiEraValue, OriginalHash,
+            MultiEraRedeemer, MultiEraRedeemerTag, MultiEraScriptRef, MultiEraTx, MultiEraValue,
+            OriginalHash,
         },
     },
 };
@@ -1227,7 +1228,7 @@ impl IntoModel<String> for Result<Address, pallas::ledger::addresses::Error> {
     }
 }
 
-impl<'a> IntoModel<String> for ScriptRef<'a> {
+impl<'a> IntoModel<String> for MultiEraScriptRef<'a> {
     type SortKey = ();
 
     fn into_model(self) -> Result<String, StatusCode> {
@@ -2147,7 +2148,7 @@ impl TxModelBuilder<'_> {
         let tx = self.tx()?;
 
         match redeemer.tag() {
-            RedeemerTag::Spend => {
+            MultiEraRedeemerTag::Spend => {
                 let inputs = tx.inputs_sorted_set();
                 let Some(input) = inputs.get(index) else {
                     return Ok(None);
@@ -2169,7 +2170,7 @@ impl TxModelBuilder<'_> {
                     _ => Ok(None),
                 }
             }
-            RedeemerTag::Mint => {
+            MultiEraRedeemerTag::Mint => {
                 let mints = tx.mints();
                 Ok(mints.get(index).map(|x| x.policy()).cloned())
             }
@@ -2221,10 +2222,10 @@ impl TxModelBuilder<'_> {
 
         let out = TxContentRedeemersInner {
             purpose: match redeemer.tag() {
-                RedeemerTag::Spend => Purpose::Spend,
-                RedeemerTag::Mint => Purpose::Mint,
-                RedeemerTag::Cert => Purpose::Cert,
-                RedeemerTag::Reward => Purpose::Reward,
+                MultiEraRedeemerTag::Spend => Purpose::Spend,
+                MultiEraRedeemerTag::Mint => Purpose::Mint,
+                MultiEraRedeemerTag::Cert => Purpose::Cert,
+                MultiEraRedeemerTag::Reward => Purpose::Reward,
                 // TODO: discuss with BF team if schema should be extended to include these
                 _ => return Err(StatusCode::INTERNAL_SERVER_ERROR),
             },

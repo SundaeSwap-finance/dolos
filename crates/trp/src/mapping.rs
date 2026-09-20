@@ -7,7 +7,10 @@ use pallas::{
     codec::{minicbor, utils::KeyValuePairs},
     ledger::{
         primitives::{conway::DatumOption, BigInt, Constr, PlutusData},
-        traverse::{Era, MultiEraAsset, MultiEraOutput, MultiEraPolicyAssets, MultiEraValue},
+        traverse::{
+            Era, MultiEraAsset, MultiEraOutput, MultiEraPolicyAssets, MultiEraScriptRef,
+            MultiEraValue,
+        },
     },
 };
 
@@ -138,9 +141,7 @@ pub fn into_tx3_utxo(
     // the language tag.
     let script = parsed
         .script_ref()
-        .map(|script_ref| minicbor::to_vec(&script_ref))
-        .transpose()
-        .map_err(|e| tx3_resolver::Error::StoreError(e.to_string()))?
+        .map(|script_ref| script_ref.encode())
         .map(Expression::Bytes);
 
     Ok(tx3_resolver::Utxo {

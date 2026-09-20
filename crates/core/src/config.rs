@@ -31,6 +31,13 @@ impl UpstreamConfig {
             _ => None,
         }
     }
+
+    pub fn leios_peer_address(&self) -> Option<&str> {
+        match self {
+            Self::Peer(peer) => peer.leios_peer_address.as_deref(),
+            Self::Emulator(_) => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,6 +48,20 @@ pub struct EmulatorConfig {
 #[derive(Serialize, Deserialize)]
 pub struct PeerConfig {
     pub peer_address: String,
+
+    /// A peer that speaks the Leios endorser block protocols, for a chain whose
+    /// ranking blocks certify endorser blocks.
+    ///
+    /// On such a chain most transactions are never in a ranking block, so a
+    /// client that follows only chainsync and blockfetch builds a ledger that is
+    /// silently short. Set this and the pull stage fetches every certified
+    /// endorser block over leios-fetch and resolves the certifying block against
+    /// it. Leave it unset and the chain is followed as an ordinary Praos chain.
+    ///
+    /// It is a separate address because leios-fetch lives in the newer
+    /// networking stack, so it cannot ride the chainsync connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leios_peer_address: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
@@ -70,6 +91,25 @@ pub struct SyncConfig {
 
     #[serde(default, skip_serializing_if = "SyncLimit::is_default")]
     pub sync_limit: SyncLimit,
+
+    /// Apply blocks the way the Leios prototype node applies them, rather than
+    /// the way the ledger specification says to.
+    ///
+    /// This mirrors one deployment's observed behaviour and is not a reading of
+    /// any specification. On the Musashi Leios devnet a certified endorser
+    /// block's transactions are applied by the producing node with validation
+    /// switched off, and the chain that follows depends on what that does. A
+    /// transaction whose input does not exist consumes nothing and still creates
+    /// its outputs, and a transaction carried a second time re-creates outputs
+    /// that were spent in between. A follower applying the ledger rules strictly
+    /// computes a different UTxO set and stops on an input the network holds.
+    ///
+    /// With this on, every transaction of every block is applied in wire order,
+    /// an input that is not there is left unconsumed and counted rather than
+    /// refused, and outputs are always created. It is off by default because on
+    /// any other network the same leniency would hide a real defect.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub leios_lenient_apply: bool,
 }
 
 impl SyncConfig {
@@ -87,6 +127,7 @@ impl SyncConfig {
             && self.max_history.is_none()
             && self.max_rollback.is_none()
             && self.sync_limit.is_default()
+            && !self.leios_lenient_apply
     }
 }
 

@@ -181,7 +181,42 @@ impl<'a> BlockModelBuilder<'a> {
                         .to_string(),
                 ),
             ),
-            _ => (None, None),
+            MultiEraHeader::Dijkstra(x) => (
+                Some(hex::encode(
+                    x.header_body
+                        .operational_cert
+                        .operational_cert_hot_vkey
+                        .as_slice(),
+                )),
+                Some(
+                    x.header_body
+                        .operational_cert
+                        .operational_cert_sequence_number
+                        .to_string(),
+                ),
+            ),
+            // Byron headers carry no operational certificate, so an absent one
+            // is the right answer and the only right one. Still written out
+            // rather than folded into the arm below, because these two mean
+            // "there is no certificate" and that one means "this build does
+            // not know".
+            MultiEraHeader::EpochBoundary(_) | MultiEraHeader::Byron(_) => (None, None),
+            // A header era this build does not model. `MultiEraHeader` is
+            // non_exhaustive, so the compile error a new era used to cause
+            // here is gone and this arm is the only notice there is.
+            //
+            // The two nulls it answers with are indistinguishable from Byron's
+            // real answer, which is why the log line exists and why it is at
+            // error level. A caller that needs to tell the two apart cannot,
+            // and fixing that means giving this function a third answer rather
+            // than another arm.
+            other => {
+                tracing::error!(
+                    slot = other.slot(),
+                    "no operational certificate rule for this header era, reporting none"
+                );
+                (None, None)
+            }
         }
     }
 
