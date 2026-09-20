@@ -7,17 +7,14 @@ use pallas::ledger::addresses::{
 };
 use pallas::ledger::primitives::alonzo::MoveInstantaneousReward;
 use pallas::ledger::primitives::conway::{
-    CostModels, DRep, DRepVotingThresholds, PoolVotingThresholds, ScriptRef,
+    CostModels, DRep, DRepVotingThresholds, PoolVotingThresholds,
 };
-use pallas::ledger::primitives::dijkstra::ScriptRef as DijkstraScriptRef;
 use pallas::ledger::primitives::{
     alonzo::Certificate as AlonzoCert, conway::Certificate as ConwayCert,
     dijkstra::Certificate as DijkstraCert, PoolMetadata, RationalNumber, Relay, StakeCredential,
 };
 use pallas::ledger::primitives::{Epoch, ExUnitPrices, ExUnits, Nonce, NonceVariant};
-use pallas::ledger::traverse::{
-    ComputeHash, MultiEraCert, MultiEraScriptRef, MultiEraTx, OriginalHash,
-};
+use pallas::ledger::traverse::{MultiEraCert, MultiEraScriptRef, MultiEraTx};
 use serde::{Deserialize, Serialize};
 
 use crate::eras::ChainSummary;
@@ -57,7 +54,10 @@ fn dijkstra_cert_as_conway(cert: &DijkstraCert) -> ConwayCert {
             cost: *cost,
             margin: margin.clone(),
             reward_account: reward_account.clone(),
-            pool_owners: pool_owners.clone(),
+            // The Dijkstra era has its own set type, which records whether the
+            // bytes carried the 258 tag. Conway's set has no field for that, so
+            // the owners become a plain vector.
+            pool_owners: pool_owners.to_vec().into(),
             relays: relays.clone(),
             pool_metadata: pool_metadata.clone(),
         },
@@ -522,18 +522,11 @@ pub fn default_cost_models() -> CostModels {
 
 /// The language of a script, across every era that can carry one.
 ///
-/// Dijkstra adds PlutusV4. The enum is exhaustive on purpose: a language that
-/// no consumer has a case for must be a compile error, because the alternative
-/// is a catch-all that reports a real script as absent or as the wrong
-/// language.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScriptLanguage {
-    Native,
-    PlutusV1,
-    PlutusV2,
-    PlutusV3,
-    PlutusV4,
-}
+/// Taken from pallas, which now names the same five languages and is the side
+/// that decides what a reference script reports. The type is exhaustive there
+/// too, so a language no consumer has a case for is still a compile error
+/// rather than a catch-all reporting a real script as absent.
+pub use pallas::ledger::traverse::script_ref::ScriptLanguage;
 
 /// A reference script decomposed into everything a consumer needs from it.
 ///
@@ -551,66 +544,34 @@ pub struct ScriptRefParts {
 /// Decompose a reference script from any era into its language, on-chain hash
 /// and bytes.
 ///
-/// Both era arms are written out rather than collapsed, because the Dijkstra
-/// script reference is a different type with a fifth variant and folding it
-/// into the Conway type would mean dropping a PlutusV4 script.
+/// The language drives the read, because it is the one answer that covers
+/// every variant of every era. A native script is the only kind whose bytes
+/// are not the script itself, and it is asked for by name.
 pub fn script_ref_parts(script_ref: &MultiEraScriptRef) -> ScriptRefParts {
-    match script_ref {
-        MultiEraScriptRef::Conway(x) => match x.deref() {
-            ScriptRef::NativeScript(x) => ScriptRefParts {
-                language: ScriptLanguage::Native,
-                hash: x.original_hash(),
-                bytes: x.raw_cbor().to_vec(),
-            },
-            ScriptRef::PlutusV1Script(x) => ScriptRefParts {
-                language: ScriptLanguage::PlutusV1,
-                hash: x.compute_hash(),
-                bytes: x.as_ref().to_vec(),
-            },
-            ScriptRef::PlutusV2Script(x) => ScriptRefParts {
-                language: ScriptLanguage::PlutusV2,
-                hash: x.compute_hash(),
-                bytes: x.as_ref().to_vec(),
-            },
-            ScriptRef::PlutusV3Script(x) => ScriptRefParts {
-                language: ScriptLanguage::PlutusV3,
-                hash: x.compute_hash(),
-                bytes: x.as_ref().to_vec(),
-            },
-        },
-        MultiEraScriptRef::Dijkstra(x) => match x.deref() {
-            DijkstraScriptRef::NativeScript(x) => ScriptRefParts {
-                language: ScriptLanguage::Native,
-                hash: x.original_hash(),
-                bytes: x.raw_cbor().to_vec(),
-            },
-            DijkstraScriptRef::PlutusV1Script(x) => ScriptRefParts {
-                language: ScriptLanguage::PlutusV1,
-                hash: x.compute_hash(),
-                bytes: x.as_ref().to_vec(),
-            },
-            DijkstraScriptRef::PlutusV2Script(x) => ScriptRefParts {
-                language: ScriptLanguage::PlutusV2,
-                hash: x.compute_hash(),
-                bytes: x.as_ref().to_vec(),
-            },
-            DijkstraScriptRef::PlutusV3Script(x) => ScriptRefParts {
-                language: ScriptLanguage::PlutusV3,
-                hash: x.compute_hash(),
-                bytes: x.as_ref().to_vec(),
-            },
-            DijkstraScriptRef::PlutusV4Script(x) => ScriptRefParts {
-                language: ScriptLanguage::PlutusV4,
-                hash: x.compute_hash(),
-                bytes: x.as_ref().to_vec(),
-            },
-        },
+    let language = script_ref.language();
+
+    let bytes = match language {
+        ScriptLanguage::Native => script_ref.native_script().map(|script| script.encode()),
+        ScriptLanguage::PlutusV1
+        | ScriptLanguage::PlutusV2
+        | ScriptLanguage::PlutusV3
+        | ScriptLanguage::PlutusV4 => script_ref.plutus_bytes().map(|bytes| bytes.to_vec()),
+    };
+
+    ScriptRefParts {
+        language,
+        hash: script_ref.hash(),
+        // Reachable only if the language a reference script reports and the
+        // bytes it returns disagree. No variant of ScriptRefParts can state
+        // that, and serving a script with the wrong bytes under the right hash
+        // is worse than stopping.
+        bytes: bytes.expect("a reference script reporting a language carries that language's bytes"),
     }
 }
 
 /// Compute the on-chain script hash of a reference script.
 pub fn script_ref_hash(script_ref: &MultiEraScriptRef) -> Hash<28> {
-    script_ref_parts(script_ref).hash
+    script_ref.hash()
 }
 
 pub const DREP_KEY_PREFIX: u8 = 0b00100010;
@@ -665,6 +626,99 @@ pub fn tx_treasury_donation(tx: &MultiEraTx) -> Option<Lovelace> {
 }
 
 #[cfg(test)]
+mod script_ref_tests {
+    use super::*;
+    use pallas::crypto::hash::Hasher;
+    use pallas::ledger::traverse::Era;
+
+    /// The three bytes of a minimal Plutus script, the same ones pallas uses
+    /// in its own reference script tests.
+    const PLUTUS_BYTES: [u8; 3] = [0x4d, 0x01, 0x00];
+
+    /// `native_script = [0, addr_keyhash]`, the pubkey clause over 28 bytes.
+    fn native_script() -> Vec<u8> {
+        let mut out = vec![0x82, 0x00, 0x58, 0x1c];
+        out.extend_from_slice(&[0xaa; 28]);
+        out
+    }
+
+    /// `script = [n, script_n]`, the reference script rule of Babbage on.
+    fn script(tag: u8, inner: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x82, tag];
+        out.extend_from_slice(inner);
+        out
+    }
+
+    /// The hash the ledger keys a script by, computed from the rule rather
+    /// than from the code under test: blake2b-224 over the language tag
+    /// followed by the script's own bytes.
+    fn ledger_hash(tag: u8, bytes: &[u8]) -> Hash<28> {
+        let mut input = vec![tag];
+        input.extend_from_slice(bytes);
+        Hasher::<224>::hash(&input)
+    }
+
+    #[test]
+    fn a_dijkstra_plutus_v4_reference_script_reports_its_language_hash_and_bytes() {
+        let cbor = script(4, &[0x43, 0x4d, 0x01, 0x00]);
+        let script_ref = MultiEraScriptRef::decode(Era::Dijkstra, &cbor).expect("must decode");
+
+        let parts = script_ref_parts(&script_ref);
+
+        assert_eq!(parts.language, ScriptLanguage::PlutusV4);
+        assert_eq!(parts.bytes, PLUTUS_BYTES.to_vec());
+        assert_eq!(parts.hash, ledger_hash(4, &PLUTUS_BYTES));
+        // The tag is what separates one language's hash from another's over
+        // the same bytes, so a hash taken without it is the wrong hash.
+        assert_ne!(parts.hash, Hasher::<224>::hash(&PLUTUS_BYTES));
+        assert_ne!(parts.hash, ledger_hash(3, &PLUTUS_BYTES));
+        // The whole tagged array is what a reference script is stored as, so
+        // it has to come back with the tag on it and not as the body alone.
+        assert_eq!(script_ref.encode(), cbor);
+    }
+
+    #[test]
+    fn a_dijkstra_native_reference_script_reports_its_language_hash_and_bytes() {
+        let inner = native_script();
+        let cbor = script(0, &inner);
+        let script_ref = MultiEraScriptRef::decode(Era::Dijkstra, &cbor).expect("must decode");
+
+        let parts = script_ref_parts(&script_ref);
+
+        assert_eq!(parts.language, ScriptLanguage::Native);
+        assert_eq!(parts.bytes, inner);
+        assert_eq!(parts.hash, ledger_hash(0, &inner));
+    }
+
+    #[test]
+    fn a_conway_native_reference_script_reports_its_language_hash_and_bytes() {
+        let inner = native_script();
+        let cbor = script(0, &inner);
+        let script_ref = MultiEraScriptRef::decode(Era::Conway, &cbor).expect("must decode");
+
+        let parts = script_ref_parts(&script_ref);
+
+        assert_eq!(parts.language, ScriptLanguage::Native);
+        assert_eq!(parts.bytes, inner);
+        assert_eq!(parts.hash, ledger_hash(0, &inner));
+        assert_eq!(script_ref_hash(&script_ref), parts.hash);
+        assert_eq!(script_ref.encode(), cbor);
+    }
+
+    #[test]
+    fn a_conway_plutus_v2_reference_script_reports_its_language_hash_and_bytes() {
+        let cbor = script(2, &[0x43, 0x4d, 0x01, 0x00]);
+        let script_ref = MultiEraScriptRef::decode(Era::Conway, &cbor).expect("must decode");
+
+        let parts = script_ref_parts(&script_ref);
+
+        assert_eq!(parts.language, ScriptLanguage::PlutusV2);
+        assert_eq!(parts.bytes, PLUTUS_BYTES.to_vec());
+        assert_eq!(parts.hash, ledger_hash(2, &PLUTUS_BYTES));
+    }
+}
+
+#[cfg(test)]
 mod dijkstra_certificate_tests {
     use super::*;
     use pallas::ledger::primitives::dijkstra::Certificate as DijkstraCert;
@@ -697,7 +751,7 @@ mod dijkstra_certificate_tests {
                 denominator: 100,
             },
             reward_account: vec![0xe0].into(),
-            pool_owners: pallas::codec::utils::Set::from(vec![CRED.parse::<Hash<28>>().unwrap()]),
+            pool_owners: vec![CRED.parse::<Hash<28>>().unwrap()].into(),
             relays: vec![],
             pool_metadata: None,
         }
