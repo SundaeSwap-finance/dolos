@@ -510,10 +510,10 @@ where
             |block| {
                 for tx in block.txs() {
                     for script in tx.native_scripts() {
-                        if script.original_hash() == script_hash {
+                        if script.hash() == script_hash {
                             return Some(ScriptData {
                                 language: ScriptLanguage::Native,
-                                script: script.raw_cbor().to_vec(),
+                                script: script.encode(),
                             });
                         }
                     }

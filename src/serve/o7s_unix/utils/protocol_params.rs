@@ -71,12 +71,23 @@ fn to_q16_ex_unit_prices(e: &pallas::ledger::primitives::ExUnitPrices) -> q16::E
     }
 }
 
+/// The cost model key the Dijkstra ledger gives PlutusV4.
+const PLUTUS_V4_COST_MODEL_KEY: u64 = 3;
+
 fn to_q16_cost_models(c: &pallas::ledger::primitives::conway::CostModels) -> q16::CostModels {
+    // The Conway cost model set names three languages and puts every further
+    // key in a wildcard map, so a PlutusV4 cost model arrives under key 3. The
+    // reply names it, so it is read out by key and then removed, because a
+    // client that reads the named field and the wildcard sees it twice.
+    let mut unknown = c.unknown.clone();
+    let plutus_v4 = unknown.remove(&PLUTUS_V4_COST_MODEL_KEY);
+
     q16::CostModels {
         plutus_v1: c.plutus_v1.clone(),
         plutus_v2: c.plutus_v2.clone(),
         plutus_v3: c.plutus_v3.clone(),
-        unknown: KeyValuePairs::from(c.unknown.clone().into_iter().collect::<Vec<_>>()),
+        plutus_v4,
+        unknown: KeyValuePairs::from(unknown.into_iter().collect::<Vec<_>>()),
     }
 }
 
@@ -106,5 +117,53 @@ fn to_q16_drep_voting_thresholds(
         pp_technical_group: to_q16_rational(&d.pp_technical_group),
         pp_gov_group: to_q16_rational(&d.pp_governance_group),
         treasury_withdrawal: to_q16_rational(&d.treasury_withdrawal),
+    }
+}
+
+#[cfg(test)]
+mod cost_model_tests {
+    use super::*;
+    use pallas::ledger::primitives::conway::CostModels;
+
+    fn cost_models_with(keys: &[u64]) -> CostModels {
+        let mut unknown = std::collections::BTreeMap::new();
+        for key in keys {
+            unknown.insert(*key, vec![*key as i64]);
+        }
+
+        CostModels {
+            plutus_v1: Some(vec![1]),
+            plutus_v2: Some(vec![2]),
+            plutus_v3: Some(vec![3]),
+            unknown,
+        }
+    }
+
+    #[test]
+    fn a_plutus_v4_cost_model_under_the_wildcard_key_is_reported_as_plutus_v4() {
+        let reply = to_q16_cost_models(&cost_models_with(&[PLUTUS_V4_COST_MODEL_KEY]));
+
+        assert_eq!(reply.plutus_v4, Some(vec![3]));
+        // Reported once. Left in the wildcard as well, a client reading both
+        // would count the same cost model twice.
+        assert!(reply.unknown.is_empty());
+    }
+
+    #[test]
+    fn a_cost_model_under_any_other_key_stays_in_the_wildcard() {
+        let reply = to_q16_cost_models(&cost_models_with(&[4, 5]));
+
+        assert_eq!(reply.plutus_v4, None);
+        assert_eq!(reply.unknown.len(), 2);
+    }
+
+    #[test]
+    fn the_three_named_cost_models_are_carried_across_unchanged() {
+        let reply = to_q16_cost_models(&cost_models_with(&[]));
+
+        assert_eq!(reply.plutus_v1, Some(vec![1]));
+        assert_eq!(reply.plutus_v2, Some(vec![2]));
+        assert_eq!(reply.plutus_v3, Some(vec![3]));
+        assert_eq!(reply.plutus_v4, None);
     }
 }
