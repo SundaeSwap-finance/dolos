@@ -19,6 +19,52 @@ Cardano nodes traditionally assume one of two roles: block producer or relay. Do
 
 Dolos connects directly to the Cardano network using Ouroboros Node-to-Node (N2N) mini-protocols (via [Pallas](https://github.com/txpipe/pallas)). It relies on honest upstream peers rather than performing full consensus validation, enabling significant resource savings.
 
+## The Leios and Dijkstra track
+
+This branch of the fork at github.com/geofflittle/dolos follows the Leios
+Musashi testnet, which runs at network magic 164. Its base is upstream commit
+ce3d042. Upstream Dolos cannot follow that testnet: its blocks are Dijkstra
+era, and a ranking block there carries no transactions of its own but certifies
+a Leios endorser block that does.
+
+What this branch adds on top of upstream. None of it is posted upstream yet.
+
+- Dijkstra era blocks decoded and applied to the ledger, with the certificates,
+  treasury donations and epoch boundary rules that era changed.
+- The Leios endorsement layer followed from the pull stage, so a certified
+  endorser block is fetched and its transactions applied under the ranking
+  block that certified it.
+- Dijkstra protocol parameters answered over the Ouroboros query service,
+  including the PlutusV4 cost model.
+- Scripts that sync, checkpoint and rewind a Musashi devnet, and one that
+  compares the follower to a node.
+
+It needs a pallas that decodes the Dijkstra era and speaks the Leios fetch mini
+protocol, which upstream pallas does not. The workspace takes pallas from the
+branch `leios-musashi` of github.com/geofflittle/pallas, by commit:
+
+```toml
+[workspace.dependencies]
+pallas = { git = "https://github.com/geofflittle/pallas", rev = "3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61", features = ["hardano", "phase2", "unstable", "network2"] }
+```
+
+Cargo reads the features from the dependency entry. A `features` key written
+inside a `[patch.crates-io]` entry is accepted and then dropped, and cargo says
+so in a warning. The `network2` feature gates the Leios fetch protocol in
+pallas, so a build that omits it cannot fetch an endorser block.
+
+Branches on this fork may be rewritten at any time. A published tag is never
+moved and never deleted, and the commit it names stays reachable. Consumers pin
+a tag or a commit, never a branch.
+
+Build it as upstream Dolos is built, with a rust toolchain matching
+`rust-toolchain.toml`:
+
+```sh
+cargo build --release
+cargo test --workspace
+```
+
 ## Why Dolos?
 
 - **Low resource footprint** — Runs with a small fraction of the memory and CPU required by a traditional Cardano node
