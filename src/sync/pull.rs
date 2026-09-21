@@ -271,13 +271,11 @@ impl Worker {
     /// `EndorserBlockBody::decode_announced`. It surfaces here as a retry rather
     /// than as a block with no transactions.
     ///
-    /// A failed fetch drops the Leios connection and builds a new one. The
-    /// networking stack surfaces a peer that has completed its handshake and
-    /// never a peer that has gone away, so a client holding a peer identity has
-    /// no way to learn that its session ended, and every later request would
-    /// wait out its own timeout against a peer that is not there. Rebuilding
-    /// costs one handshake and is the only thing here that can tell the two
-    /// apart.
+    /// A failed fetch drops the Leios connection and builds a new one, because
+    /// a session that has ended cannot serve the next request either. The
+    /// ending itself is reported, so the fetch that was waiting on it returns
+    /// at once rather than spending its remaining budget on a connection that
+    /// is gone.
     async fn follow_endorsement(
         &mut self,
         header: &MultiEraHeader<'_>,

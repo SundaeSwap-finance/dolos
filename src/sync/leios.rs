@@ -31,8 +31,8 @@ use pallas::ledger::traverse::leios::{
 };
 use pallas::ledger::traverse::MultiEraBlock;
 use pallas::network2::behavior::initiator::{
-    Config as HandshakeConfig, HandshakeBehavior, InitiatorBehavior, InitiatorCommand,
-    InitiatorEvent,
+    Config as HandshakeConfig, DisconnectReason, HandshakeBehavior, InitiatorBehavior,
+    InitiatorCommand, InitiatorEvent,
 };
 use pallas::network2::behavior::AnyMessage;
 use pallas::network2::interface::TcpInterface;
@@ -85,6 +85,27 @@ pub enum Error {
 
     #[error("the leios peer answered a request for endorser block {hash} with nothing")]
     NoReply { hash: String },
+
+    /// The peer session ended while a fetch was waiting on it.
+    ///
+    /// The reason and the elapsed time are carried rather than formatted away,
+    /// because the two reasons are reported by different code paths and a
+    /// caller counting sessions needs to tell them apart.
+    #[error(
+        "the leios peer session ended {} {waited_ms} ms into the fetch of endorser block {hash} \
+         announced at slot {slot}, and the rest of the fetch budget would have been spent \
+         waiting on a connection that is gone",
+        match reason {
+            DisconnectReason::Closed => "with no error reported",
+            DisconnectReason::Errored => "on a connection error",
+        }
+    )]
+    Disconnected {
+        slot: u64,
+        hash: String,
+        reason: DisconnectReason,
+        waited_ms: u64,
+    },
 
     #[error(transparent)]
     Endorser(#[from] pallas::ledger::traverse::leios::Error),
@@ -625,6 +646,19 @@ impl<T: LeiosTransport> LeiosClient<T> {
                         }
                     }
                 }
+                InitiatorEvent::PeerDisconnected(pid, reason) => {
+                    if self.peer.as_ref().is_some_and(|held| *held != pid) {
+                        debug!("a leios session ending for another peer");
+                        continue;
+                    }
+
+                    return Err(Error::Disconnected {
+                        slot: eb.slot,
+                        hash: eb.hash.to_string(),
+                        reason,
+                        waited_ms: started.elapsed().as_millis() as u64,
+                    });
+                }
                 other => debug!(?other, "unhandled leios event"),
             }
         }
@@ -687,6 +721,15 @@ mod tests {
         /// transaction asked for. A relay is free to do this and the client
         /// files a short reply as though it never would.
         skip_first: bool,
+        /// Report one session ending, for this peer, before anything is
+        /// served.
+        dies: Option<DisconnectReason>,
+        /// Nothing more is served once the session has ended, which is what an
+        /// ended session does.
+        dead: bool,
+        /// Report one session ending, for a peer this client never held,
+        /// before anything is served.
+        stray_death: bool,
     }
 
     impl FakeRelay {
@@ -703,6 +746,9 @@ mod tests {
                 windows: Vec::new(),
                 cap,
                 skip_first: false,
+                dies: None,
+                dead: false,
+                stray_death: false,
             }
         }
 
@@ -755,6 +801,22 @@ mod tests {
                 );
             }
 
+            if self.stray_death {
+                self.stray_death = false;
+
+                return InitiatorEvent::PeerDisconnected(
+                    "other.test:3001".parse().expect("a valid peer id"),
+                    DisconnectReason::Closed,
+                );
+            }
+
+            if let Some(reason) = self.dies.take() {
+                self.dead = true;
+                self.answers.clear();
+
+                return InitiatorEvent::PeerDisconnected(self.peer(), reason);
+            }
+
             if let Some(answer) = self.answers.pop_front() {
                 self.outstanding -= 1;
                 return answer;
@@ -770,6 +832,11 @@ mod tests {
 
     impl FakeRelay {
         fn serve(&mut self) {
+            if self.dead {
+                self.queued.clear();
+                return;
+            }
+
             while let Some(command) = self.queued.pop_front() {
                 let answer = match command {
                     InitiatorCommand::FetchEb(pid, _) => InitiatorEvent::EbFetched(
@@ -889,6 +956,53 @@ mod tests {
             vec![64, 64, 64, 64, 64, 64, 41],
             "425 transactions page in ceil(425/64) windows and no more"
         );
+    }
+
+    /// MUST FIRE: a session that ends while a fetch is waiting on it is
+    /// reported as a session that ended.
+    ///
+    /// The fetch budget is a minute and a session can end in its first second,
+    /// so a fetch that never hears the ending spends the rest of the budget
+    /// waiting on a connection that is gone, and reports a timeout, which names
+    /// the peer as slow.
+    #[tokio::test]
+    async fn a_session_that_ends_mid_fetch_is_reported_not_waited_out() {
+        for reason in [DisconnectReason::Closed, DisconnectReason::Errored] {
+            let (body, wire_txs, announced) = real_eb();
+            let point: EbId = Point::Specific(announced.slot, announced.hash.to_vec());
+
+            let mut relay = FakeRelay::new(point, body, wire_txs, usize::MAX);
+            relay.dies = Some(reason);
+
+            let mut client = client(relay, 64);
+
+            let error = client
+                .fetch(&announced)
+                .await
+                .expect_err("a fetch against an ended session returned a block");
+
+            assert!(
+                matches!(&error, Error::Disconnected { reason: got, .. } if *got == reason),
+                "{error}"
+            );
+        }
+    }
+
+    /// MUST NOT FIRE: a session ending for a peer this client never held is not
+    /// this fetch's failure, and the endorser block still comes back whole.
+    #[tokio::test]
+    async fn a_session_ending_for_another_peer_does_not_end_the_fetch() {
+        let (body, wire_txs, announced) = real_eb();
+        let point: EbId = Point::Specific(announced.slot, announced.hash.to_vec());
+
+        let mut relay = FakeRelay::new(point, body, wire_txs, usize::MAX);
+        relay.stray_death = true;
+
+        let mut client = client(relay, 64);
+
+        let txs = client.fetch(&announced).await.expect("must fetch whole");
+
+        assert_eq!(txs.len(), 425, "the whole endorser block comes back");
     }
 
     /// MUST FIRE: a relay that serves fewer transactions than were asked for is
