@@ -1,9 +1,12 @@
 //! What `SyncExt::rollback` does with a target the wal does not hold.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use dolos_core::sync::SyncExt as _;
-use dolos_core::{ChainPoint, Domain as _, DomainError, LogValue, StateStore as _, WalStore};
+use dolos_core::{
+    ChainPoint, Domain as _, DomainError, LogValue, StateStore as _, TxoRef, WalStore,
+};
 use dolos_testing::synthetic::{build_synthetic_blocks, SyntheticBlockConfig};
 use dolos_testing::toy_domain::ToyDomain;
 
@@ -76,11 +79,20 @@ fn a_rollback_to_origin_on_an_empty_wal_moves_the_cursor_to_origin() {
     );
 }
 
-/// The must-not case for origin with entries above it. Every one of them is
-/// undone and the cursor lands on origin rather than staying at the tip the
-/// rollback just discarded.
-#[test]
-fn a_rollback_to_origin_undoes_every_entry_above_it() {
+/// Every utxo reference the state holds, as the set a rollback has to leave
+/// behind.
+fn utxo_refs(domain: &ToyDomain) -> BTreeSet<TxoRef> {
+    domain
+        .state()
+        .iter_utxos()
+        .unwrap()
+        .map(|entry| entry.unwrap().0)
+        .collect()
+}
+
+/// A domain that synced from genesis and pruned nothing, so its wal still
+/// begins at the origin entry genesis wrote.
+fn domain_synced_from_genesis() -> ToyDomain {
     let (blocks, _, config) = build_synthetic_blocks(SyntheticBlockConfig::default());
     let genesis = Arc::new(dolos_cardano::include::devnet::load());
     let domain = ToyDomain::new_with_genesis_and_config(genesis, config, None, None);
@@ -89,11 +101,28 @@ fn a_rollback_to_origin_undoes_every_entry_above_it() {
         domain.roll_forward(block.clone()).unwrap();
     }
 
-    let (tip, _) = domain.wal().find_tip().unwrap().unwrap();
-    domain.wal().prune_history(0, None).unwrap();
+    domain
+}
 
-    assert!(!domain.wal().contains_point(&ChainPoint::Origin).unwrap());
-    assert!(domain.wal().contains_point(&tip).unwrap());
+/// The must-not case for origin with entries above it. Every one of them is
+/// undone and the cursor lands on origin rather than staying at the tip the
+/// rollback just discarded.
+///
+/// The state is compared against a domain that never applied a block, because
+/// the counts hold either way: each synthetic block spends one input and
+/// creates one output, so only the set says whether the undo reached them all.
+#[test]
+fn a_rollback_to_origin_on_an_unpruned_wal_undoes_every_entry_above_it() {
+    let (_, _, config) = build_synthetic_blocks(SyntheticBlockConfig::default());
+    let genesis = Arc::new(dolos_cardano::include::devnet::load());
+    let fresh = ToyDomain::new_with_genesis_and_config(genesis, config, None, None);
+    let at_origin = utxo_refs(&fresh);
+
+    let domain = domain_synced_from_genesis();
+
+    let (tip, _) = domain.wal().find_tip().unwrap().unwrap();
+
+    assert!(domain.wal().contains_point(&ChainPoint::Origin).unwrap());
     assert_ne!(domain.state().read_cursor().unwrap(), None);
 
     domain.rollback(&ChainPoint::Origin).unwrap();
@@ -103,6 +132,52 @@ fn a_rollback_to_origin_undoes_every_entry_above_it() {
         Some(ChainPoint::Origin)
     );
     assert!(!domain.wal().contains_point(&tip).unwrap());
+    assert_eq!(utxo_refs(&domain), at_origin);
+}
+
+/// The must-fire case for origin below a pruned front. The entries that wrote
+/// the ledger below the front are gone, so the walk cannot undo them and the
+/// cursor would name a position the state is nowhere near.
+#[test]
+fn a_rollback_to_origin_below_the_pruned_front_names_the_target_and_undoes_nothing() {
+    let domain = domain_synced_from_genesis();
+
+    let (tip, _) = domain.wal().find_tip().unwrap().unwrap();
+    domain.wal().prune_history(0, None).unwrap();
+
+    assert!(!domain.wal().contains_point(&ChainPoint::Origin).unwrap());
+    assert!(domain.wal().contains_point(&tip).unwrap());
+
+    let before_cursor = domain.state().read_cursor().unwrap();
+    let before_refs = utxo_refs(&domain);
+
+    let error = domain.rollback(&ChainPoint::Origin).unwrap_err();
+
+    assert!(
+        matches!(&error, DomainError::RollbackTargetNotInWal(p) if p == &ChainPoint::Origin),
+        "{error}"
+    );
+    assert_eq!(domain.state().read_cursor().unwrap(), before_cursor);
+    assert_eq!(utxo_refs(&domain), before_refs);
+    assert!(domain.wal().contains_point(&tip).unwrap());
+}
+
+/// The must-fire case for a wal seeded at a point that is not origin, which is
+/// what a store bootstrapped from a snapshot holds. Nothing below the seed was
+/// ever written to the wal, so nothing below it can be undone.
+#[test]
+fn a_rollback_to_origin_on_a_wal_seeded_above_it_names_the_target() {
+    let domain = domain_with_a_pruned_front();
+
+    let before = domain.state().read_cursor().unwrap();
+    let error = domain.rollback(&ChainPoint::Origin).unwrap_err();
+
+    assert!(
+        matches!(&error, DomainError::RollbackTargetNotInWal(p) if p == &ChainPoint::Origin),
+        "{error}"
+    );
+    assert_eq!(domain.state().read_cursor().unwrap(), before);
+    assert!(domain.wal().contains_point(&point(30)).unwrap());
 }
 
 /// The must-fire case for a target below the pruned front. Every entry the wal
