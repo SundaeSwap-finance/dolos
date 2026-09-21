@@ -7,8 +7,12 @@ The w35 bytes are kept because the three chain defects these fixtures exist to
 pin (a transaction spending an output a later transaction of the same block
 produces, a transaction carried twice, a transaction carried twice whose output
 was spent in between) happened on that chain and on no other. The chain the
-w36 build follows carries no endorser block at all, so none of these can be
-cut again from a live chain and the w35 bytes are the only record there is.
+w36 build follows was scanned for all three over slots 12 to 1221690, 55254
+ranking blocks and 5130974 transactions, and over 23 endorser payloads of which
+17 were certified, and none of the three occurred, which
+`test_data/musashi-w36/provenance.toml` records as the absent kind
+`block_needing_lenient_apply`. So none of these can be cut again from a live
+chain and the w35 bytes are the only record there is.
 
 What the ledger changed between the two, and therefore what this rewrites:
 
