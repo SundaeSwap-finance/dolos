@@ -139,6 +139,70 @@ fn a_genesis_stake_pool_does_not_create_a_deposit() {
     assert_eq!(epoch_number(&domain), 1, "the boundary was crossed");
 }
 
+/// MUST NOT FIRE: the two pots a pool deposit would move are exactly where
+/// they were. The supply assertion above sees only the sum, so it cannot tell
+/// a deposit debited from the utxo pot and credited to the obligation from no
+/// deposit at all, and that pair is what the node's own utxo pot is compared
+/// against.
+///
+/// The other pots are left out on purpose. Monetary expansion moves reserves
+/// into rewards and treasury on every boundary, so asserting those unchanged
+/// would pin the expansion and not the deposit.
+#[test]
+fn the_boundary_moves_neither_the_utxo_pot_nor_the_obligation() {
+    let domain = ToyDomain::new_with_genesis(genesis_with_a_stake_pool(), None, None);
+
+    let before = pots(&domain);
+
+    cross_the_boundary(&domain);
+
+    let after = pots(&domain);
+
+    assert_eq!(
+        after.utxos, before.utxos,
+        "the boundary debited the utxo pot by {}",
+        after.utxos as i128 - before.utxos as i128,
+    );
+
+    assert_eq!(
+        after.obligations(),
+        before.obligations(),
+        "the boundary created an obligation of {}",
+        after.obligations() as i128 - before.obligations() as i128,
+    );
+}
+
+/// MUST FIRE: one counted pool deposit is an obligation of one pool deposit
+/// and that much more supply, so the two assertions above are assertions that
+/// a genesis pool can fail and not arithmetic that is zero whatever happens.
+#[test]
+fn one_counted_pool_deposit_is_an_obligation_with_no_source() {
+    let domain = ToyDomain::new_with_genesis(genesis_with_a_stake_pool(), None, None);
+
+    let before = pots(&domain);
+
+    assert_ne!(
+        before.deposit_per_pool, 0,
+        "a chain with a free pool deposit cannot show this",
+    );
+
+    let counted = Pots {
+        pool_count: before.pool_count + 1,
+        ..before.clone()
+    };
+
+    assert_eq!(
+        counted.obligations(),
+        before.obligations() + before.deposit_per_pool,
+    );
+
+    assert_eq!(
+        counted.max_supply(),
+        before.max_supply() + before.deposit_per_pool,
+        "counting a pool that paid nothing creates that much ada",
+    );
+}
+
 /// The must-not case for the one above. Making a genesis pool free must not be
 /// done by making every pool free, so the same crossing on a genesis with no
 /// pools has to behave identically, and the flag that means "this registration
