@@ -121,7 +121,8 @@ pub trait WalStore: Clone + Send + Sync + 'static {
 /// Whether two points name the same block.
 ///
 /// Origin names no block at all, so it never matches one. Its slot reads as
-/// zero, which would otherwise make it name the block at slot zero.
+/// zero, which would otherwise make it name the block at slot zero. Origin does
+/// name the entry a wal reset writes under it, which holds no block body.
 ///
 /// A point that has no hash names every block at its slot, which is the most a
 /// caller that gave no hash can be held to. The two points are matched by
@@ -129,6 +130,7 @@ pub trait WalStore: Clone + Send + Sync + 'static {
 /// differently depending on which side has the hash.
 fn names_the_same_block(a: &ChainPoint, b: &ChainPoint) -> bool {
     match (a, b) {
+        (ChainPoint::Origin, ChainPoint::Origin) => true,
         (ChainPoint::Origin, _) | (_, ChainPoint::Origin) => false,
         (ChainPoint::Specific(_, a_hash), ChainPoint::Specific(_, b_hash)) => {
             a.slot() == b.slot() && a_hash == b_hash
@@ -164,6 +166,20 @@ mod tests {
 
     fn slots(blocks: impl Iterator<Item = (ChainPoint, RawBlock)>) -> Vec<u64> {
         blocks.map(|(point, _)| point.slot()).collect()
+    }
+
+    /// Each point as its variant and its slot.
+    ///
+    /// Origin and a block at slot zero both read as slot zero, so a slot on its
+    /// own cannot say which of the two a filter kept.
+    fn shapes(blocks: impl Iterator<Item = (ChainPoint, RawBlock)>) -> Vec<(&'static str, u64)> {
+        blocks
+            .map(|(point, _)| match point {
+                ChainPoint::Origin => ("origin", 0),
+                ChainPoint::Slot(slot) => ("slot", slot),
+                ChainPoint::Specific(slot, _) => ("specific", slot),
+            })
+            .collect()
     }
 
     #[test]
@@ -202,6 +218,20 @@ mod tests {
         let from = ChainPoint::Origin;
         let page = [block(0, 1), block(5, 2)];
 
-        assert_eq!(slots(blocks_after(Some(&from), page.into_iter())), [0, 5]);
+        assert_eq!(
+            shapes(blocks_after(Some(&from), page.into_iter())),
+            [("specific", 0), ("specific", 5)]
+        );
+    }
+
+    #[test]
+    fn a_caller_resuming_at_origin_drops_the_entry_keyed_at_origin() {
+        let from = ChainPoint::Origin;
+        let page = [(ChainPoint::Origin, Arc::new(vec![])), block(5, 2)];
+
+        assert_eq!(
+            shapes(blocks_after(Some(&from), page.into_iter())),
+            [("specific", 5)]
+        );
     }
 }
