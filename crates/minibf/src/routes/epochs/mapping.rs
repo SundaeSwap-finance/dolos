@@ -243,6 +243,55 @@ impl<'a> IntoModel<EpochParamContent> for ParametersModelBuilder<'a> {
     }
 }
 
+pub struct EpochContentModelBuilder {
+    pub state: EpochState,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub first_block_time: u64,
+    pub last_block_time: u64,
+    pub tx_count: u64,
+    pub output: cbor::U128,
+    pub active_stake: Option<u64>,
+}
+
+impl IntoModel<EpochContent> for EpochContentModelBuilder {
+    type SortKey = Epoch;
+
+    fn sort_key(&self) -> Option<Self::SortKey> {
+        Some(self.state.number)
+    }
+
+    fn into_model(self) -> Result<EpochContent, axum::http::StatusCode> {
+        let Self {
+            state,
+            start_time,
+            end_time,
+            first_block_time,
+            last_block_time,
+            tx_count,
+            output,
+            active_stake,
+        } = self;
+
+        let rolling = state.rolling.live().cloned().unwrap_or_default();
+
+        let out = EpochContent {
+            epoch: state.number as i32,
+            start_time: start_time as i32,
+            end_time: end_time as i32,
+            first_block_time: first_block_time as i32,
+            last_block_time: last_block_time as i32,
+            block_count: rolling.blocks_minted as i32,
+            tx_count: tx_count as i32,
+            output: output.to_string(),
+            fees: rolling.gathered_fees.to_string(),
+            active_stake: active_stake.map(|x| x.to_string()),
+        };
+
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod cost_model_tests {
     use super::*;
@@ -342,54 +391,5 @@ mod cost_model_tests {
 
         assert!(map_cost_models_raw(&models).is_none());
         assert!(map_cost_models_named(&models).is_none());
-    }
-}
-
-pub struct EpochContentModelBuilder {
-    pub state: EpochState,
-    pub start_time: u64,
-    pub end_time: u64,
-    pub first_block_time: u64,
-    pub last_block_time: u64,
-    pub tx_count: u64,
-    pub output: cbor::U128,
-    pub active_stake: Option<u64>,
-}
-
-impl IntoModel<EpochContent> for EpochContentModelBuilder {
-    type SortKey = Epoch;
-
-    fn sort_key(&self) -> Option<Self::SortKey> {
-        Some(self.state.number)
-    }
-
-    fn into_model(self) -> Result<EpochContent, axum::http::StatusCode> {
-        let Self {
-            state,
-            start_time,
-            end_time,
-            first_block_time,
-            last_block_time,
-            tx_count,
-            output,
-            active_stake,
-        } = self;
-
-        let rolling = state.rolling.live().cloned().unwrap_or_default();
-
-        let out = EpochContent {
-            epoch: state.number as i32,
-            start_time: start_time as i32,
-            end_time: end_time as i32,
-            first_block_time: first_block_time as i32,
-            last_block_time: last_block_time as i32,
-            block_count: rolling.blocks_minted as i32,
-            tx_count: tx_count as i32,
-            output: output.to_string(),
-            fees: rolling.gathered_fees.to_string(),
-            active_stake: active_stake.map(|x| x.to_string()),
-        };
-
-        Ok(out)
     }
 }
