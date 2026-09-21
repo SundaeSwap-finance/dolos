@@ -105,6 +105,14 @@ impl<D: Domain> SyncExt for D {
 
     #[instrument(skip_all, fields(rollback_to = %to))]
     fn rollback(&self, to: &ChainPoint) -> Result<(), DomainError> {
+        // The loop below stops at the entry for `to` and that stop is the only
+        // thing that writes the cursor, so a target the wal does not hold
+        // either undoes every entry it does hold and leaves the cursor at the
+        // tip, or undoes nothing and reports success.
+        if !self.wal().contains_point(to)? {
+            return Err(DomainError::RollbackTargetNotInWal(to.clone()));
+        }
+
         let undo_blocks = self.wal().iter_logs(Some(to.clone()), None)?;
 
         let writer = self.state().start_writer()?;
@@ -278,5 +286,7 @@ fn update_mempool<D: Domain>(domain: &D, work: &D::WorkUnit) {
 
 #[cfg(test)]
 mod tests {
-    // Tests will be added once we have the full integration in place
+    // The rollback arms live in `tests/rollback_target.rs`, because the harness
+    // they need is `dolos-testing`, which depends on this crate and so links a
+    // different build of it than a unit test does.
 }
