@@ -690,21 +690,135 @@ mod tests {
     use super::*;
     use crate::adapters::StateStoreBackend;
 
+    fn block(hex_text: &str) -> Vec<u8> {
+        hex::decode(hex_text.trim()).unwrap()
+    }
+
+    fn announce_with_txs() -> Vec<u8> {
+        block(include_str!(
+            "../../test_data/musashi-w36/ranking-announce-with-txs.block"
+        ))
+    }
+
+    fn announce_quiet() -> Vec<u8> {
+        block(include_str!(
+            "../../test_data/musashi-w36/ranking-announce-quiet.block"
+        ))
+    }
+
+    fn silent() -> Vec<u8> {
+        block(include_str!("../../test_data/dijkstra-quiet.block"))
+    }
+
     fn certify_only() -> Vec<u8> {
-        hex::decode(include_str!("../../test_data/dijkstra-certify-only.block").trim()).unwrap()
+        block(include_str!("../../test_data/dijkstra-certify-only.block"))
+    }
+
+    fn certifying() -> Vec<u8> {
+        block(include_str!("../../test_data/dijkstra-certifying.block"))
+    }
+
+    /// What one header did, as the counts a follower's cost is made of.
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct Seen {
+        announced: usize,
+        certified: usize,
+        fetches_owed: usize,
+    }
+
+    /// Walks a sequence of real ranking headers and counts what the follower
+    /// announces, certifies and owes a fetch for.
+    fn walk_counting(blocks: &[Vec<u8>]) -> (Seen, Vec<u64>) {
+        let mut tracker = CertificationTracker::default();
+        let mut payloads = PendingPayloads::default();
+        let mut outstanding = BTreeMap::new();
+        let mut seen = Seen::default();
+
+        for cbor in blocks {
+            let decoded = MultiEraBlock::decode(cbor).unwrap();
+            let header = decoded.header();
+            let slot = header.slot();
+
+            let outcome = tracker.observe(&header).unwrap();
+
+            if outcome.announced.is_some() {
+                seen.announced += 1;
+            }
+
+            if outcome.certified.is_some() {
+                seen.certified += 1;
+            }
+
+            if record_certification(&mut payloads, &mut outstanding, slot, outcome) {
+                seen.fetches_owed += 1;
+            }
+        }
+
+        assert_eq!(
+            payloads.len(),
+            seen.fetches_owed,
+            "a fetch owed and a payload expected are the same debt counted twice"
+        );
+
+        (seen, outstanding.keys().copied().collect())
+    }
+
+    /// MUST FIRE: a follower owes one fetch for the endorser block a header
+    /// certifies and none for one that a later header supersedes first, so the
+    /// fetches track the certificates and not the announcements. A follower that
+    /// fetched on the announcement would do the work of every announcement the
+    /// chain makes, and the walk exists to make that difference.
+    #[test]
+    fn a_superseded_announcement_is_never_fetched() {
+        let (seen, owed_at) = walk_counting(&[
+            announce_with_txs(),
+            announce_quiet(),
+            silent(),
+            certify_only(),
+        ]);
+
+        assert_eq!(
+            seen,
+            Seen {
+                announced: 2,
+                certified: 1,
+                fetches_owed: 1,
+            }
+        );
+        assert_eq!(owed_at.len(), 1, "one certifying slot owes a fetch");
+    }
+
+    /// MUST NOT FIRE: when every announcement is certified before the next one
+    /// is made, the follower owes a fetch for each. Without this the test above
+    /// also passes for a follower that fetches nothing at all, and for one that
+    /// fetches once however many certificates it sees.
+    #[test]
+    fn an_announcement_certified_before_the_next_one_is_fetched() {
+        let (seen, owed_at) = walk_counting(&[
+            announce_with_txs(),
+            certify_only(),
+            announce_quiet(),
+            certifying(),
+        ]);
+
+        assert_eq!(
+            seen,
+            Seen {
+                announced: 2,
+                certified: 2,
+                fetches_owed: 2,
+            }
+        );
+        assert_eq!(
+            owed_at.len(),
+            2,
+            "two certifying slots each owe their own fetch"
+        );
     }
 
     fn point_of(cbor: &[u8]) -> ChainPoint {
         let decoded = MultiEraBlock::decode(cbor).unwrap();
         ChainPoint::Specific(decoded.slot(), decoded.hash())
-    }
-
-    fn certifying() -> Vec<u8> {
-        hex::decode(include_str!("../../test_data/dijkstra-certifying.block").trim()).unwrap()
-    }
-
-    fn quiet() -> Vec<u8> {
-        hex::decode(include_str!("../../test_data/dijkstra-quiet.block").trim()).unwrap()
     }
 
     fn logged(wal: &WalAdapter, cbor: &[u8]) {
@@ -773,11 +887,11 @@ mod tests {
     #[tokio::test]
     async fn a_walk_unsettled_at_the_reset_entry_reads_the_peers_block_there() {
         let wal = WalAdapter::in_memory().unwrap();
-        let point = point_of(&quiet());
+        let point = point_of(&silent());
         let reset = ChainPoint::Specific(point.slot() - 1, point_of(&certifying()).hash().unwrap());
 
         wal.reset_to(&reset).unwrap();
-        logged(&wal, &quiet());
+        logged(&wal, &silent());
 
         let (walk, asked) = walk_from(&wal, &point, &certifying()).await;
 
