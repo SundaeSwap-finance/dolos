@@ -69,10 +69,11 @@ where
             ScriptLanguage::PlutusV1 => ScriptType::PlutusV1,
             ScriptLanguage::PlutusV2 => ScriptType::PlutusV2,
             ScriptLanguage::PlutusV3 => ScriptType::PlutusV3,
-            // The Blockfrost schema has no PlutusV4 member. Reporting a V4
-            // script under the V3 tag would be a wrong answer that reads like a
-            // right one, so this route refuses rather than misreport.
-            ScriptLanguage::PlutusV4 => return Err(StatusCode::NOT_IMPLEMENTED.into()),
+            // The Blockfrost schema has no member beyond PlutusV3. Reporting a
+            // later language under the V3 tag would be a wrong answer that
+            // reads like a right one, so this route refuses rather than
+            // misreport.
+            _ => return Err(StatusCode::NOT_IMPLEMENTED.into()),
         },
         serialised_size: match script.language {
             ScriptLanguage::Native => None,
