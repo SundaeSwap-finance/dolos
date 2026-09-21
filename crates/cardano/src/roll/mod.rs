@@ -735,7 +735,9 @@ pub(crate) fn compute_delta<D: Domain>(
 }
 
 /// Dijkstra blocks carrying a governance proposal at body key 20 and a DRep
-/// vote at body key 19. No block of the Musashi chain carries either.
+/// vote at body key 19. Every carrier of either key on the Musashi chain is
+/// Conway, thirteen of them at slots 780 to 45736, so a Dijkstra one is built
+/// here rather than harvested.
 #[cfg(test)]
 pub(crate) mod dijkstra_fixture {
     use std::sync::Arc;
