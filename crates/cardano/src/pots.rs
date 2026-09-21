@@ -798,4 +798,64 @@ mod tests {
 
     // TODO: add property based testing that ensures that the pots are
     // consistent (#1039)
+
+    /// MUST NOT FIRE: a transfer out of reserves into the treasury conserves
+    /// the supply, and the reading still names both pots with opposite signs.
+    ///
+    /// MUST FIRE: the same reading over a boundary where no pot changed names
+    /// no pot at all, so a named pot is a movement that was measured rather
+    /// than an entry the reading always carries.
+    #[test]
+    fn a_transfer_between_pots_is_reported() {
+        let initial = Pots {
+            reserves: 8_000_000_000_000_000,
+            treasury: 1_000_000_000_000_000,
+            fees: 0,
+            utxos: 35_999_000_000_000_000,
+            rewards: 1_000_000_000_000,
+            pool_count: 0,
+            account_count: 0,
+            deposit_per_pool: 0,
+            deposit_per_account: 0,
+            nominal_deposits: 0,
+            drep_deposits: 0,
+            proposal_deposits: 0,
+        };
+
+        let transfer: i128 = 649_764_674_000_000;
+
+        let ended = Pots {
+            reserves: initial.reserves - transfer as Lovelace,
+            treasury: initial.treasury + transfer as Lovelace,
+            ..initial.clone()
+        };
+
+        assert_eq!(
+            ended.max_supply(),
+            initial.max_supply(),
+            "the two pot sets hold different supplies, so this case is not a transfer",
+        );
+
+        let drift = measure_drift(42, &initial, &ended);
+
+        assert_eq!(
+            drift.total(),
+            0,
+            "the case under test conserves the supply, so no value appeared",
+        );
+
+        assert_eq!(
+            drift.moved(),
+            vec![("reserves", -transfer), ("treasury", transfer)],
+            "a transfer of {transfer} lovelace from reserves to treasury was not reported",
+        );
+
+        let unchanged = measure_drift(42, &initial, &initial);
+
+        assert!(
+            unchanged.moved().is_empty(),
+            "a boundary that moved nothing named {:?}, so naming a pot means nothing",
+            unchanged.moved(),
+        );
+    }
 }
