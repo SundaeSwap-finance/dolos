@@ -7,3 +7,9 @@ These run on the box that syncs Dolos from origin against the Musashi Leios devn
 `rewind.sh <tip-slot>` puts one of those checkpoints back, keeping the store it replaced as `data.broken.<timestamp>`, and it copies rather than moves so the same checkpoint can be used twice.
 
 `status.py` reports progress as three separately labelled slots, because the pull stage's slot, the apply stage's lower bound and the store's own tip are different numbers and reading one as another has misled a diagnosis.
+
+`compare-utxo-set.py` takes no arguments, reads the node's whole utxo set through `guarded-utxo.sh`, which kills a dump that would press the box, and asks the follower for every one of those keys over UtxoRPC in batches, and prints one `UTXO` count line, a line per missing or differing key, and exits non-zero if anything differs or if the follower never came level.
+
+`compare-params.py` takes no arguments, reads the node's protocol parameters with `cardano-cli` and the follower's over UtxoRPC, and prints one line per parameter ending IDENTICAL, DIFFERS or REPORTED, a `PARAMS` count line, and exits non-zero if anything differs.
+
+`probe/run-probe.sh` takes no arguments and talks to no node, and runs both comparisons five times over fixtures, once over a ledger that agrees and once each over a ledger with a known parameter fault, a known utxo fault and a reply that names a key without the utxo under it, checking both the exit and the line each one prints, and its expected last line is `PROBE 5 arms, 5 as expected`.

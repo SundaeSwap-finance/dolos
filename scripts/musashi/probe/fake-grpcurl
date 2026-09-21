@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Answers as the follower would, built from the same fixtures the probe node
+answers from, so the agree arm is a follower that matches the node exactly and
+the diverge arm is that same follower with two known faults in it.
+
+The diverge arm drops the pool retirement epoch bound and the PlutusV4 cost
+model from the parameters, and drops one utxo and changes one coin from the
+set. Those are the two shapes the scripts exist to catch.
+
+The hollow arm answers one key with the key alone and no utxo under it, which
+is the shape a comparison reports as agreement when it counts a reply item
+rather than a utxo.
+"""
+
+import base64
+import json
+import os
+import sys
+from fractions import Fraction
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ARM = os.environ.get("PROBE_ARM", "agree")
+TIP = {"slot": 1000, "hash": base64.b64encode(bytes.fromhex("aa" * 32)).decode()}
+
+PLAIN = [
+    ("maxTxSize", "maxTxSize"),
+    ("maxBlockBodySize", "maxBlockBodySize"),
+    ("maxBlockHeaderSize", "maxBlockHeaderSize"),
+    ("poolRetirementEpochBound", "poolRetireMaxEpoch"),
+    ("desiredNumberOfPools", "stakePoolTargetNum"),
+    ("maxValueSize", "maxValueSize"),
+    ("collateralPercentage", "collateralPercentage"),
+    ("maxCollateralInputs", "maxCollateralInputs"),
+    ("minCommitteeSize", "committeeMinSize"),
+    ("committeeTermLimit", "committeeMaxTermLength"),
+    ("governanceActionValidityPeriod", "govActionLifetime"),
+    ("drepInactivityPeriod", "dRepActivity"),
+]
+
+BIG = [
+    ("coinsPerUtxoByte", "utxoCostPerByte"),
+    ("minFeeCoefficient", "txFeePerByte"),
+    ("minFeeConstant", "txFeeFixed"),
+    ("stakeKeyDeposit", "stakeAddressDeposit"),
+    ("poolDeposit", "stakePoolDeposit"),
+    ("minPoolCost", "minPoolCost"),
+    ("governanceActionDeposit", "govActionDeposit"),
+    ("drepDeposit", "dRepDeposit"),
+]
+
+RATIOS = [
+    ("poolInfluence", "poolPledgeInfluence"),
+    ("monetaryExpansion", "monetaryExpansion"),
+    ("treasuryExpansion", "treasuryCut"),
+    ("minFeeScriptRefCostPerByte", "minFeeRefScriptCostPerByte"),
+]
+
+EX_UNITS = [
+    ("maxExecutionUnitsPerTransaction", "maxTxExecutionUnits"),
+    ("maxExecutionUnitsPerBlock", "maxBlockExecutionUnits"),
+]
+
+POOL_THRESHOLDS = [
+    "motionNoConfidence",
+    "committeeNormal",
+    "committeeNoConfidence",
+    "hardForkInitiation",
+    "ppSecurityGroup",
+]
+
+DREP_THRESHOLDS = [
+    "motionNoConfidence",
+    "committeeNormal",
+    "committeeNoConfidence",
+    "updateToConstitution",
+    "hardForkInitiation",
+    "ppNetworkGroup",
+    "ppEconomicGroup",
+    "ppTechnicalGroup",
+    "ppGovGroup",
+    "treasuryWithdrawal",
+]
+
+COST_MODELS = [
+    ("plutusV1", "PlutusV1"),
+    ("plutusV2", "PlutusV2"),
+    ("plutusV3", "PlutusV3"),
+    ("plutusV4", "PlutusV4"),
+]
+
+
+def load(name):
+    with open(os.path.join(HERE, name)) as handle:
+        return json.load(handle)
+
+
+def ratio(value):
+    frac = Fraction(str(value))
+    return {"numerator": frac.numerator, "denominator": frac.denominator}
+
+
+def thresholds(node, field, order):
+    return {"thresholds": [ratio(node[field][key]) for key in order]}
+
+
+def params():
+    node = load("node-params.json")
+    served = {}
+
+    for field, node_field in PLAIN:
+        served[field] = int(node[node_field])
+    for field, node_field in BIG:
+        served[field] = {"int": str(int(node[node_field]))}
+    for field, node_field in RATIOS:
+        served[field] = ratio(node[node_field])
+    for field, node_field in EX_UNITS:
+        served[field] = {
+            "memory": int(node[node_field]["memory"]),
+            "steps": int(node[node_field]["steps"]),
+        }
+
+    served["protocolVersion"] = {
+        "major": int(node["protocolVersion"]["major"]),
+        "minor": int(node["protocolVersion"]["minor"]),
+    }
+    served["poolVotingThresholds"] = thresholds(
+        node, "poolVotingThresholds", POOL_THRESHOLDS
+    )
+    served["drepVotingThresholds"] = thresholds(
+        node, "dRepVotingThresholds", DREP_THRESHOLDS
+    )
+    served["costModels"] = {
+        field: {"values": [int(x) for x in node["costModels"][node_field]]}
+        for field, node_field in COST_MODELS
+    }
+
+    if ARM == "diverge":
+        del served["poolRetirementEpochBound"]
+        del served["costModels"]["plutusV4"]
+
+    return {"values": {"cardano": served}, "ledgerTip": TIP}
+
+
+def utxos(request):
+    node = load("node-utxos.json")
+    keys = sorted(node)
+
+    dropped = keys[2] if ARM == "diverge" else None
+    altered = keys[3] if ARM == "diverge" else None
+    hollow = keys[2] if ARM == "hollow" else None
+
+    items = []
+    for key in request.get("keys") or []:
+        txid = base64.b64decode(key["hash"]).hex()
+        name = f"{txid}#{int(key.get('index', 0))}"
+        if name not in node or name == dropped:
+            continue
+
+        if name == hollow:
+            items.append({"txoRef": key})
+            continue
+
+        coin = int(node[name]["value"]["lovelace"])
+        if name == altered:
+            coin += 1
+
+        items.append(
+            {
+                "txoRef": key,
+                "nativeBytes": base64.b64encode(b"utxo").decode(),
+                "cardano": {"coin": {"int": str(coin)}},
+            }
+        )
+
+    return {"items": items, "ledgerTip": TIP}
+
+
+def main():
+    argv = sys.argv[1:]
+    method = argv[-1]
+
+    if method.endswith("/ReadParams"):
+        sys.stdout.write(json.dumps(params()))
+        return 0
+
+    if method.endswith("/ReadUtxos"):
+        body = argv[argv.index("-d") + 1]
+        request = json.loads(sys.stdin.read() if body == "@" else body)
+        sys.stdout.write(json.dumps(utxos(request)))
+        return 0
+
+    sys.stderr.write(f"the probe follower serves no method named {method}\n")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
