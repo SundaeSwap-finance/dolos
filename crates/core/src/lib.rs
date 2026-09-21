@@ -273,6 +273,23 @@ pub enum BrokenInvariant {
         input: TxoRef,
     },
 
+    /// An input a block spent whose body the rollback record does not hold,
+    /// under the rule that consumes every input a block names.
+    ///
+    /// The slot and block locate the rollback entry, and the transaction
+    /// locates the spend inside it, which the input alone does not.
+    #[error(
+        "undoing the block at slot {slot} {block} needs the body of {}#{}, which transaction {tx} \
+         spent and the rollback record does not hold",
+        .input.0, .input.1
+    )]
+    MissingStxiBody {
+        slot: u64,
+        block: BlockHash,
+        tx: TxHash,
+        input: TxoRef,
+    },
+
     #[error("invalid genesis config")]
     InvalidGenesisConfig,
 
@@ -508,6 +525,9 @@ pub enum ChainError {
     #[error("invalid proposal params")]
     InvalidProposalParams,
 
+    #[error("CARDANO-008: a governance proposal names {0}, which this node cannot record")]
+    UnrecordableProposalPart(String),
+
     #[error("phase-1 script rejected the transaction: {0}")]
     Phase1ValidationRejected(#[from] pallas::ledger::validate::utils::ValidationError),
 
@@ -587,10 +607,15 @@ pub trait ChainLogic: Sized + Send + Sync {
     /// Given the raw block CBOR and the resolved inputs from the WAL,
     /// returns the UTxO delta, index delta, and transaction hashes needed
     /// to reverse the block's effects.
+    ///
+    /// `lenient` is the apply rule the blocks being undone were applied under,
+    /// because the inverse of a walk that left an input unconsumed is a walk
+    /// that recovers nothing for it.
     fn compute_undo(
         block: &Cbor,
         inputs: &HashMap<TxoRef, Arc<EraCbor>>,
         point: ChainPoint,
+        lenient: bool,
     ) -> Result<UndoBlockData, ChainError>;
 
     /// Compute catch-up data from a WAL entry for recovery.
@@ -654,6 +679,18 @@ pub enum DomainError {
 
     #[error("wal is empty")]
     WalIsEmpty,
+
+    /// A rollback target the wal does not hold, either past its pruned front or
+    /// past its tip. Nothing was undone and the cursor was not moved.
+    #[error(
+        "the wal does not hold {0}, so nothing was rolled back to it and the cursor was not moved"
+    )]
+    RollbackTargetNotInWal(ChainPoint),
+
+    /// The archive ran out where the wal does not reach back to, so a crawl
+    /// that walked the archive has nowhere to continue.
+    #[error("the archive ends at {0} and the wal holds no point at or before it")]
+    ArchiveWalGap(ChainPoint),
 
     #[error("forced stop epoch reached")]
     StopEpochReached,

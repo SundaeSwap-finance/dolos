@@ -105,6 +105,15 @@ impl<D: Domain> SyncExt for D {
 
     #[instrument(skip_all, fields(rollback_to = %to))]
     fn rollback(&self, to: &ChainPoint) -> Result<(), DomainError> {
+        // Origin is the position before the first entry, so no entry stands for
+        // it and a rollback to it is defined on any wal, including the empty
+        // one a follower starts with. Every other target has to be an entry,
+        // because the walk below stops at the entry for `to` and a target the
+        // wal does not hold would undo everything it does hold.
+        if !matches!(to, ChainPoint::Origin) && !self.wal().contains_point(to)? {
+            return Err(DomainError::RollbackTargetNotInWal(to.clone()));
+        }
+
         let undo_blocks = self.wal().iter_logs(Some(to.clone()), None)?;
 
         let writer = self.state().start_writer()?;
@@ -117,8 +126,6 @@ impl<D: Domain> SyncExt for D {
 
         for (point, log) in undo_blocks.rev() {
             if point == *to {
-                // Final cursor update
-                writer.set_cursor(point.clone())?;
                 break;
             }
 
@@ -126,7 +133,12 @@ impl<D: Domain> SyncExt for D {
 
             let block = Arc::new(log.block);
 
-            let undo_data = D::Chain::compute_undo(&block, &log.inputs, point.clone())?;
+            let undo_data = D::Chain::compute_undo(
+                &block,
+                &log.inputs,
+                point.clone(),
+                self.sync_config().leios_lenient_apply,
+            )?;
 
             writer.apply_utxoset(&undo_data.utxo_delta)?;
             writer.undo_utxo_tags(&undo_data.utxo_index_delta)?;
@@ -152,6 +164,8 @@ impl<D: Domain> SyncExt for D {
 
             info!(%point, "block undone");
         }
+
+        writer.set_cursor(to.clone())?;
 
         // Persist the undone entities (`Some` upserts, `None` deletes).
         crate::state::save_entities::<Self>(&writer, &entities)?;
@@ -273,5 +287,7 @@ fn update_mempool<D: Domain>(domain: &D, work: &D::WorkUnit) {
 
 #[cfg(test)]
 mod tests {
-    // Tests will be added once we have the full integration in place
+    // The rollback arms live in `tests/rollback_target.rs`, because the harness
+    // they need is `dolos-testing`, which depends on this crate and so links a
+    // different build of it than a unit test does.
 }

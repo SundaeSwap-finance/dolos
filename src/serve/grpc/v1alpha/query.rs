@@ -68,7 +68,25 @@ fn map_live_params<C: LedgerContext>(
 
     mapped.pool_retirement_epoch_bound = bound;
 
+    // The Conway cost model type names three languages and reads the PlutusV4
+    // vector into a wildcard map, which the era mapping drops, so a client
+    // pricing a PlutusV4 script would be served no model for it.
+    if let Some(values) = plutus_v4_cost_model(pparams) {
+        mapped
+            .cost_models
+            .get_or_insert_with(Default::default)
+            .plutus_v4 = Some(u5c::cardano::CostModel { values });
+    }
+
     Ok(mapped)
+}
+
+/// The PlutusV4 cost model the parameters carry, at key 3 of the wildcard map.
+fn plutus_v4_cost_model(pparams: &dolos_cardano::PParamsSet) -> Option<Vec<i64>> {
+    pparams
+        .cost_models_unknown()?
+        .get(&dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY)
+        .cloned()
 }
 
 trait IntoSet {
@@ -1451,5 +1469,56 @@ mod live_params_tests {
             error.to_string().contains("MaximumEpoch"),
             "the refusal names no parameter: {error}"
         );
+    }
+
+    fn node_plutus_v4() -> Vec<i64> {
+        node()
+            .get("costModels")
+            .and_then(|x| x.get("PlutusV4"))
+            .and_then(|x| x.as_array())
+            .expect("the node parameters name no PlutusV4 cost model")
+            .iter()
+            .map(|x| x.as_i64().expect("a PlutusV4 cost is not a whole number"))
+            .collect()
+    }
+
+    #[test]
+    fn the_served_plutus_v4_cost_model_is_the_node_vector() {
+        let expected = node_plutus_v4();
+        assert_eq!(expected.len(), 251);
+
+        let set = live_set(Some(node_retirement_bound())).with(Val::CostModelsUnknown(
+            std::collections::BTreeMap::from([(
+                dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY,
+                expected.clone(),
+            )]),
+        ));
+
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+        let served = map_live_params(&mapper, &set).unwrap();
+        let models = served
+            .cost_models
+            .expect("the reply carries no cost models");
+
+        assert_eq!(
+            models
+                .plutus_v4
+                .expect("the reply carries no PlutusV4 model")
+                .values,
+            expected
+        );
+    }
+
+    /// The must-not case. A set that names no PlutusV4 vector has to answer
+    /// none, or every chain would read as one that priced PlutusV4.
+    #[test]
+    fn a_set_with_no_plutus_v4_model_serves_none() {
+        let set = live_set(Some(node_retirement_bound()));
+
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+        let served = map_live_params(&mapper, &set).unwrap();
+        let models = served.cost_models.unwrap_or_default();
+
+        assert!(models.plutus_v4.is_none());
     }
 }

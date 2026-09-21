@@ -2299,6 +2299,25 @@ impl IntoModel<Vec<TxContentWithdrawalsInner>> for TxModelBuilder<'_> {
     }
 }
 
+/// The key hashes a transaction requires a signature from, or the first script
+/// credential it guards itself with. The model names a witness hash and nothing
+/// else, so a script credential left out would read as no guard at all.
+fn required_signer_hashes<'a>(
+    signers: &'a pallas::ledger::traverse::MultiEraSigners<'a>,
+) -> Result<Vec<&'a Hash<28>>, &'a Hash<28>> {
+    if let Some(pallas::ledger::primitives::dijkstra::Guards::Credentials(credentials)) =
+        signers.as_dijkstra()
+    {
+        for credential in credentials.iter() {
+            if let StakeCredential::ScriptHash(script) = credential {
+                return Err(script);
+            }
+        }
+    }
+
+    Ok(signers.collect())
+}
+
 impl IntoModel<Vec<TxContentRequiredSignersInner>> for TxModelBuilder<'_> {
     type SortKey = ();
 
@@ -2306,8 +2325,16 @@ impl IntoModel<Vec<TxContentRequiredSignersInner>> for TxModelBuilder<'_> {
         let tx = self.tx()?;
         let signers = tx.required_signers();
 
-        let items = signers
-            .collect::<Vec<_>>()
+        let hashes = required_signer_hashes(&signers).map_err(|script| {
+            tracing::error!(
+                %script,
+                "a transaction guards itself with a script credential, which the required signers model cannot name"
+            );
+
+            StatusCode::NOT_IMPLEMENTED
+        })?;
+
+        let items = hashes
             .into_iter()
             .map(|hash| TxContentRequiredSignersInner {
                 witness_hash: hash.to_string(),
@@ -2998,5 +3025,193 @@ impl IntoModel<HashMap<String, serde_json::Value>> for PlutusDataWrapper {
     fn into_model(self) -> Result<HashMap<String, serde_json::Value>, StatusCode> {
         let value = self.as_value()?;
         serde_json::from_value(value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    }
+}
+
+#[cfg(test)]
+mod required_signers_tests {
+    use std::borrow::Cow;
+
+    use pallas::codec::utils::{KeepRaw, MaybeIndefArray, Nullable};
+    use pallas::ledger::primitives::dijkstra;
+    use pallas::ledger::traverse::Era;
+
+    use super::*;
+
+    fn key_hash(byte: u8) -> Hash<28> {
+        Hash::<28>::from([byte; 28])
+    }
+
+    fn credential_guards(credentials: Vec<StakeCredential>) -> dijkstra::Guards {
+        dijkstra::Guards::Credentials(dijkstra::NonEmptySet::try_from(credentials).unwrap())
+    }
+
+    fn witness_set() -> dijkstra::WitnessSet<'static> {
+        dijkstra::WitnessSet {
+            vkeywitness: None,
+            native_script: None,
+            bootstrap_witness: None,
+            plutus_v1_script: None,
+            plutus_data: None,
+            redeemer: None,
+            plutus_v2_script: None,
+            plutus_v3_script: None,
+        }
+    }
+
+    fn body(guards: Option<dijkstra::Guards>) -> dijkstra::TransactionBody<'static> {
+        dijkstra::TransactionBody {
+            inputs: dijkstra::Set::from(vec![]),
+            outputs: MaybeIndefArray::Def(vec![]),
+            fee: 170_000,
+            ttl: None,
+            certificates: None,
+            withdrawals: None,
+            auxiliary_data_hash: None,
+            validity_interval_start: None,
+            mint: None,
+            script_data_hash: None,
+            collateral: None,
+            guards,
+            network_id: None,
+            collateral_return: None,
+            total_collateral: None,
+            reference_inputs: None,
+            voting_procedures: None,
+            proposal_procedures: None,
+            treasury_value: None,
+            donation: None,
+            sub_transactions: None,
+            required_top_level_guards: None,
+            direct_deposits: None,
+            account_balance_intervals: None,
+            starting_account_balance_intervals: None,
+        }
+    }
+
+    fn sub_body(guards: Option<dijkstra::Guards>) -> dijkstra::SubTransactionBody<'static> {
+        dijkstra::SubTransactionBody {
+            inputs: dijkstra::Set::from(vec![]),
+            outputs: MaybeIndefArray::Def(vec![]),
+            ttl: None,
+            certificates: None,
+            withdrawals: None,
+            auxiliary_data_hash: None,
+            validity_interval_start: None,
+            mint: None,
+            script_data_hash: None,
+            guards,
+            network_id: None,
+            reference_inputs: None,
+            voting_procedures: None,
+            proposal_procedures: None,
+            treasury_value: None,
+            donation: None,
+            required_top_level_guards: None,
+            direct_deposits: None,
+            account_balance_intervals: None,
+        }
+    }
+
+    fn tx_cbor(guards: Option<dijkstra::Guards>) -> Vec<u8> {
+        let tx = dijkstra::BlockTransaction {
+            transaction_body: KeepRaw::from(body(guards)),
+            transaction_witness_set: KeepRaw::from(witness_set()),
+            auxiliary_data: Nullable::Null,
+            success: true,
+        };
+
+        minicbor::to_vec(tx).unwrap()
+    }
+
+    fn sub_tx(guards: Option<dijkstra::Guards>) -> dijkstra::SubTransaction<'static> {
+        dijkstra::SubTransaction {
+            sub_transaction_body: KeepRaw::from(sub_body(guards)),
+            transaction_witness_set: KeepRaw::from(witness_set()),
+            auxiliary_data: Nullable::Null,
+        }
+    }
+
+    fn served(tx: &MultiEraTx) -> Result<Vec<String>, String> {
+        let signers = tx.required_signers();
+
+        match required_signer_hashes(&signers) {
+            Ok(hashes) => Ok(hashes.into_iter().map(|hash| hash.to_string()).collect()),
+            Err(script) => Err(script.to_string()),
+        }
+    }
+
+    /// The must-not case for a top level transaction. Every key hash a
+    /// Dijkstra transaction guards itself with is a witness hash to serve.
+    #[test]
+    fn a_dijkstra_transaction_serves_every_key_credential_it_guards_itself_with() {
+        let cbor = tx_cbor(Some(credential_guards(vec![
+            StakeCredential::AddrKeyhash(key_hash(1)),
+            StakeCredential::AddrKeyhash(key_hash(2)),
+        ])));
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &cbor).unwrap();
+
+        assert_eq!(
+            served(&tx),
+            Ok(vec![key_hash(1).to_string(), key_hash(2).to_string()])
+        );
+    }
+
+    /// The must-not case for the other guard arm, a set of bare key hashes.
+    #[test]
+    fn a_dijkstra_transaction_serves_the_bare_key_hashes_it_guards_itself_with() {
+        let guards = dijkstra::Guards::AddrKeyhashes(
+            dijkstra::NonEmptySet::try_from(vec![key_hash(3)]).unwrap(),
+        );
+        let cbor = tx_cbor(Some(guards));
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &cbor).unwrap();
+
+        assert_eq!(served(&tx), Ok(vec![key_hash(3).to_string()]));
+    }
+
+    /// The must-not case that keeps the refusal apart from absence. A
+    /// transaction with no guard has nothing to serve and is not a refusal.
+    #[test]
+    fn a_dijkstra_transaction_with_no_guard_serves_an_empty_list() {
+        let cbor = tx_cbor(None);
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &cbor).unwrap();
+
+        assert_eq!(served(&tx), Ok(vec![]));
+    }
+
+    /// The must-fire case. A script credential has no witness hash to be
+    /// served as, so the answer names it rather than leaving it out.
+    #[test]
+    fn a_dijkstra_transaction_guarded_by_a_script_is_refused_and_names_the_script() {
+        let cbor = tx_cbor(Some(credential_guards(vec![
+            StakeCredential::AddrKeyhash(key_hash(1)),
+            StakeCredential::ScriptHash(key_hash(9)),
+        ])));
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &cbor).unwrap();
+
+        assert_eq!(served(&tx), Err(key_hash(9).to_string()));
+    }
+
+    /// The must-not case for a sub transaction, whose guards are read from its
+    /// own body.
+    #[test]
+    fn a_dijkstra_sub_transaction_serves_the_key_credentials_it_guards_itself_with() {
+        let sub = sub_tx(Some(credential_guards(vec![StakeCredential::AddrKeyhash(
+            key_hash(4),
+        )])));
+        let tx = MultiEraTx::DijkstraSub(Box::new(Cow::Owned(sub)));
+
+        assert_eq!(served(&tx), Ok(vec![key_hash(4).to_string()]));
+    }
+
+    /// The must-fire case for a sub transaction.
+    #[test]
+    fn a_dijkstra_sub_transaction_guarded_by_a_script_is_refused_and_names_the_script() {
+        let sub = sub_tx(Some(credential_guards(vec![StakeCredential::ScriptHash(
+            key_hash(8),
+        )])));
+        let tx = MultiEraTx::DijkstraSub(Box::new(Cow::Owned(sub)));
+
+        assert_eq!(served(&tx), Err(key_hash(8).to_string()));
     }
 }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Block, BlockHash, BlockSlot};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum ChainPoint {
     Origin,
     Slot(BlockSlot),
@@ -40,6 +40,29 @@ impl ChainPoint {
             Self::Slot(_) => false,
         }
     }
+
+    /// Whether two points can be the same block, comparing only what both of
+    /// them carry, so a slot without a hash matches the block at that slot.
+    ///
+    /// This is not equality. It holds between a hashless point and two
+    /// different blocks at one slot, which are not each other, so it cannot be
+    /// [`PartialEq`] and a caller that wants the same block twice wants `==`.
+    pub fn may_be_same_block(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Specific(l, _), Self::Slot(r)) | (Self::Slot(l), Self::Specific(r, _)) => l == r,
+            _ => self == other,
+        }
+    }
+
+    /// Orders the variants at one slot with no hash, which nothing else
+    /// distinguishes.
+    fn rank(&self) -> u8 {
+        match self {
+            Self::Origin => 0,
+            Self::Slot(_) => 1,
+            Self::Specific(_, _) => 2,
+        }
+    }
 }
 
 impl Display for ChainPoint {
@@ -48,21 +71,6 @@ impl Display for ChainPoint {
             Self::Origin => write!(f, "Origin"),
             Self::Slot(slot) => write!(f, "{slot}"),
             Self::Specific(slot, hash) => write!(f, "{slot}({hash})"),
-        }
-    }
-}
-
-impl PartialEq for ChainPoint {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Specific(l0, l1), Self::Specific(r0, r1)) => l0 == r0 && l1 == r1,
-            (Self::Slot(l0), Self::Slot(r0)) => l0 == r0,
-            (Self::Origin, Self::Origin) => true,
-            // in the particular scenario where we are more specific than the other value, it's ok
-            // to compare just slots. The inverse is not true (we're less specific than the other
-            // value that requires also comparing hashes).
-            (Self::Specific(l0, _), Self::Slot(r0)) => l0 == r0,
-            _ => false,
         }
     }
 }
@@ -82,7 +90,11 @@ impl Ord for ChainPoint {
         let l_hash = self.hash();
         let r_hash = other.hash();
 
-        l_hash.cmp(&r_hash)
+        // Origin and Slot(0) are both slot zero with no hash, and equality
+        // tells them apart, so the order has to as well.
+        l_hash
+            .cmp(&r_hash)
+            .then_with(|| self.rank().cmp(&other.rank()))
     }
 }
 
@@ -215,6 +227,67 @@ mod tests {
 
             assert_eq!(point_cmp, bytes_cmp);
         }
+    }
+
+    /// Every pair worth naming, so an arm below that reads them all is reading
+    /// the same list as the next one.
+    fn every_pair() -> Vec<(ChainPoint, ChainPoint)> {
+        let points = [
+            ChainPoint::Origin,
+            ChainPoint::Slot(0),
+            ChainPoint::Slot(7),
+            ChainPoint::Specific(0, Hash::new([1u8; 32])),
+            ChainPoint::Specific(7, Hash::new([1u8; 32])),
+            ChainPoint::Specific(7, Hash::new([2u8; 32])),
+        ];
+
+        points
+            .iter()
+            .flat_map(|l| points.iter().map(|r| (l.clone(), r.clone())))
+            .collect()
+    }
+
+    /// The must-fire case. A point that carries a hash and one that does not
+    /// have to answer the same both ways round, because a caller has no say in
+    /// which of the two it holds.
+    #[test]
+    fn equality_answers_the_same_whichever_side_holds_the_hash() {
+        for (left, right) in every_pair() {
+            assert_eq!(
+                left == right,
+                right == left,
+                "{left} against {right} answers differently each way round"
+            );
+        }
+    }
+
+    /// `Ord` claims a total order over the same relation `Eq` claims, so the
+    /// two have to agree on every pair rather than on the ones a caller
+    /// happens to try.
+    #[test]
+    fn the_order_calls_a_pair_equal_exactly_when_equality_does() {
+        for (left, right) in every_pair() {
+            assert_eq!(
+                left.cmp(&right) == std::cmp::Ordering::Equal,
+                left == right,
+                "{left} against {right}"
+            );
+        }
+    }
+
+    /// The must-not case. Making equality exact must not take away the looser
+    /// question, which is the one a caller holding a slot and no hash asks.
+    #[test]
+    fn a_slot_without_a_hash_may_be_the_block_at_that_slot() {
+        let slot = ChainPoint::Slot(7);
+        let block = ChainPoint::Specific(7, Hash::new([1u8; 32]));
+        let elsewhere = ChainPoint::Specific(8, Hash::new([1u8; 32]));
+
+        assert!(slot.may_be_same_block(&block));
+        assert!(block.may_be_same_block(&slot));
+        assert!(!slot.may_be_same_block(&elsewhere));
+        assert!(!ChainPoint::Origin.may_be_same_block(&slot));
+        assert!(block.may_be_same_block(&block));
     }
 
     #[test]
