@@ -774,6 +774,148 @@ mod tests {
         );
     }
 
+    /// A ref the block spends and does not make itself, with a body, which is
+    /// what the store answers for. A ref the block makes is left out on
+    /// purpose: the store does not hold it yet, and the whole difference
+    /// between the two rules is what each does with that.
+    fn outside_world(block: &MultiEraBlock) -> (HashMap<TxoRef, OwnedMultiEraOutput>, HashSet<TxoRef>) {
+        let sample = block
+            .txs()
+            .first()
+            .unwrap()
+            .produces()
+            .first()
+            .unwrap()
+            .1
+            .encode();
+
+        let made_here = block_outputs(block);
+        let mut bodies = HashMap::new();
+
+        for input in block.txs().iter().flat_map(MultiEraTx::consumes) {
+            let key = TxoRef(*input.hash(), input.index() as u32);
+
+            if made_here.contains(&key) {
+                continue;
+            }
+
+            let body =
+                OwnedMultiEraOutput::decode(Arc::new(EraCbor(block.era().into(), sample.clone())))
+                    .unwrap();
+
+            bodies.insert(key, body);
+        }
+
+        let present = bodies.keys().cloned().collect();
+
+        (bodies, present)
+    }
+
+    fn block_outputs(block: &MultiEraBlock) -> HashSet<TxoRef> {
+        block
+            .txs()
+            .iter()
+            .flat_map(|tx| {
+                let hash = tx.hash();
+                tx.produces()
+                    .into_iter()
+                    .map(move |(idx, _)| TxoRef(hash, idx as u32))
+            })
+            .collect()
+    }
+
+    fn sorted(refs: &HashMap<TxoRef, Arc<EraCbor>>) -> Vec<(TxoRef, EraCbor)> {
+        let mut out: Vec<(TxoRef, EraCbor)> = refs
+            .iter()
+            .map(|(key, body)| (key.clone(), body.as_ref().clone()))
+            .collect();
+
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// MUST FIRE: a block whose transactions are in wire order and forward
+    /// reference nothing gets the same delta under both rules, ref for ref and
+    /// body for body. The lenient rule is then a superset of the strict one on
+    /// the ordinary case and not a second rule that happens to agree on the
+    /// counters.
+    ///
+    /// Both counters reading zero says the lenient walk took no liberty. It
+    /// says nothing about whether the walk consumed and produced the refs the
+    /// strict rule would have, which is why the deltas themselves are compared.
+    ///
+    /// MUST NOT FIRE: this block spends some of its own outputs and some from
+    /// outside, so a walk that resolved no intra block spend would consume a
+    /// smaller set here rather than agree with the strict rule on an empty one.
+    #[test]
+    fn a_block_in_wire_order_applies_the_same_under_both_rules() {
+        let cbor = trimmed_block("dijkstra-repeat-ranking-first.block");
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        assert_eq!(block.slot(), 1861279, "fixture precondition");
+
+        let made_here = block_outputs(&block);
+        let chained = block
+            .txs()
+            .iter()
+            .flat_map(MultiEraTx::consumes)
+            .filter(|i| made_here.contains(&TxoRef(*i.hash(), i.index() as u32)))
+            .count();
+        let inputs: usize = block.txs().iter().map(|tx| tx.consumes().len()).sum();
+        let outputs: usize = block.txs().iter().map(|tx| tx.produces().len()).sum();
+
+        assert!(chained > 0, "fixture precondition: the block chains in itself");
+        assert!(
+            chained < inputs,
+            "fixture precondition: the block also spends from outside itself"
+        );
+
+        let (mut loaded, store_has) = outside_world(&block);
+        assert_eq!(
+            store_has.len(),
+            inputs - chained,
+            "the store answers for exactly what the block did not make"
+        );
+
+        // The strict rule reads one map and resolves a block's own chain out of
+        // it, so the block's own outputs go in beside the outside world. The
+        // lenient rule reads the same map and asks `store_has` which of them
+        // the store really answered for.
+        for tx in block.txs().iter() {
+            let hash = tx.hash();
+
+            for (idx, produced) in tx.produces() {
+                let body = OwnedMultiEraOutput::decode(Arc::new(produced.into())).unwrap();
+                loaded.insert(TxoRef(hash, idx as u32), body);
+            }
+        }
+
+        let strict = super::compute_apply_delta(&block, &loaded).unwrap();
+        let (lenient, stats) =
+            super::compute_apply_delta_lenient(&block, &loaded, &store_has).unwrap();
+
+        assert_eq!(
+            stats,
+            LenientApply::default(),
+            "a block in wire order gives the lenient walk nothing to skip or re-create"
+        );
+
+        // Counts first, so a run in which the block came back empty says so
+        // rather than passing on two empty deltas that agree.
+        assert_eq!(strict.consumed_utxo.len(), inputs, "strict consumed count");
+        assert_eq!(strict.produced_utxo.len(), outputs, "strict produced count");
+
+        assert_eq!(
+            sorted(&lenient.consumed_utxo),
+            sorted(&strict.consumed_utxo),
+            "the two rules consume different refs or different bodies"
+        );
+        assert_eq!(
+            sorted(&lenient.produced_utxo),
+            sorted(&strict.produced_utxo),
+            "the two rules produce different refs or different bodies"
+        );
+    }
+
     /// MUST NOT FIRE: the strict rule is untouched and still refuses an input
     /// it cannot resolve. Every network other than this one runs it, and a
     /// leniency that leaked into it would hide a real defect rather than mirror
