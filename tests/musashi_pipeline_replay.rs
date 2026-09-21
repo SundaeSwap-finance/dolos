@@ -291,7 +291,6 @@ fn replay(entry: &Fixture, cbor: &[u8], lenient: bool) -> Replayed {
                 .archive()
                 .slot_by_tx_hash(hash.as_slice())
                 .unwrap()
-                .map(|slot| slot as u64)
         })
         .collect();
 
