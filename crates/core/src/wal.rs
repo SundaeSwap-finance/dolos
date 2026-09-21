@@ -118,37 +118,18 @@ pub trait WalStore: Clone + Send + Sync + 'static {
     }
 }
 
-/// Whether two points name the same block.
-///
-/// Origin names no block at all, so it never matches one. Its slot reads as
-/// zero, which would otherwise make it name the block at slot zero. Origin does
-/// name the entry a wal reset writes under it, which holds no block body.
-///
-/// A point that has no hash names every block at its slot, which is the most a
-/// caller that gave no hash can be held to. The two points are matched by
-/// shape rather than compared with `==`, because `==` on a point answers
-/// differently depending on which side has the hash.
-fn names_the_same_block(a: &ChainPoint, b: &ChainPoint) -> bool {
-    match (a, b) {
-        (ChainPoint::Origin, ChainPoint::Origin) => true,
-        (ChainPoint::Origin, _) | (_, ChainPoint::Origin) => false,
-        (ChainPoint::Specific(_, a_hash), ChainPoint::Specific(_, b_hash)) => {
-            a.slot() == b.slot() && a_hash == b_hash
-        }
-        _ => a.slot() == b.slot(),
-    }
-}
-
 /// The blocks a caller resuming at `from` has not applied.
 ///
-/// Any block that `from` names is dropped, because the caller named it as the
-/// block it last applied.
+/// Any block `from` may be is dropped. A caller may name its last applied block
+/// by slot alone, and dropping only what it named exactly would hand it that
+/// block a second time, so the filter holds a hashless `from` to the block at
+/// its slot.
 pub fn blocks_after<'a>(
     from: Option<&'a ChainPoint>,
     blocks: impl Iterator<Item = (ChainPoint, RawBlock)> + 'a,
 ) -> impl Iterator<Item = (ChainPoint, RawBlock)> + 'a {
     blocks.filter(move |(point, _)| match from {
-        Some(from) => !names_the_same_block(from, point),
+        Some(from) => !from.may_be_same_block(point),
         None => true,
     })
 }
