@@ -524,7 +524,7 @@ fn output_datum_info(output: &MultiEraOutput<'_>) -> (Option<String>, Option<Str
 
 fn output_script_hash(output: &MultiEraOutput<'_>) -> Option<pallas::crypto::hash::Hash<28>> {
     output
-        .script_ref()
+        .multi_era_script_ref()
         .map(|script| dolos_cardano::pallas_extras::script_ref_hash(&script))
 }
 
