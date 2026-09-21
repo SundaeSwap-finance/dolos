@@ -18,6 +18,7 @@ pub fn load() -> Genesis {
         conway: serde_json::from_slice(CONWAY).unwrap(),
         byron: serde_json::from_slice(BYRON).unwrap(),
         shelley: serde_json::from_slice(SHELLEY).unwrap(),
+        dijkstra: None,
         force_protocol: None,
         shelley_hash,
     }
