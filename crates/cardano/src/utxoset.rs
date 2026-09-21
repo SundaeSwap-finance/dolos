@@ -7,19 +7,45 @@ use std::sync::Arc;
 
 use crate::owned::OwnedMultiEraOutput;
 
+/// An input the lenient walk left unconsumed, and the transaction that spent
+/// it.
+///
+/// The transaction is here because the block and the input alone do not locate
+/// one of 1803 transactions, and a ledger that differs from the network's is
+/// acted on by going and looking at the transaction that made it differ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedInput {
+    pub tx: TxHash,
+    pub input: TxoRef,
+}
+
 /// What applying a block leniently did that applying it strictly would not.
 ///
-/// Both counts are facts carried out of the walk rather than inferred from the
-/// delta afterwards, because neither can be recovered from it: an input that was
-/// left unconsumed leaves nothing behind, and an output written over an existing
-/// one is indistinguishable from a fresh one once written.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// Both are facts carried out of the walk rather than inferred from the delta
+/// afterwards, because neither can be recovered from it: an input that was left
+/// unconsumed leaves nothing behind, and an output written over an existing one
+/// is indistinguishable from a fresh one once written.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct LenientApply {
-    /// Inputs that were not in the ledger and not produced earlier in this
-    /// block, so nothing was consumed for them.
-    pub skipped_inputs: usize,
+    /// Every input that was not in the ledger and not produced earlier in this
+    /// block, so nothing was consumed for it, each against the transaction that
+    /// spent it. A count on its own says a ledger is wrong and nothing says
+    /// where, so the refs are the record and the count is read off them.
+    pub skipped: Vec<SkippedInput>,
     /// Outputs created over an entry that was already there.
     pub recreated_outputs: usize,
+}
+
+impl LenientApply {
+    pub fn skipped_inputs(&self) -> usize {
+        self.skipped.len()
+    }
+
+    /// Whether the walk took any liberty at all, which is what decides whether
+    /// anything is disclosed.
+    pub fn is_lenient(&self) -> bool {
+        !self.skipped.is_empty() || self.recreated_outputs > 0
+    }
 }
 
 /// The refs a block spends, all of them, for the lenient path.
@@ -89,7 +115,10 @@ pub fn compute_apply_delta_lenient(
             let stxi_ref = TxoRef(*consumed.hash(), consumed.index() as u32);
 
             if spent_here.contains(&stxi_ref) {
-                stats.skipped_inputs += 1;
+                stats.skipped.push(SkippedInput {
+                    tx: tx_hash,
+                    input: stxi_ref,
+                });
                 continue;
             }
 
@@ -107,7 +136,10 @@ pub fn compute_apply_delta_lenient(
                     delta.consumed_utxo.insert(stxi_ref, body);
                 }
                 None => {
-                    stats.skipped_inputs += 1;
+                    stats.skipped.push(SkippedInput {
+                        tx: tx_hash,
+                        input: stxi_ref,
+                    });
                 }
             }
         }
@@ -196,9 +228,14 @@ pub fn compute_apply_delta(
         for consumed in tx.consumes() {
             let stxi_ref = TxoRef(*consumed.hash(), consumed.index() as u32);
 
-            let stxi_body = loaded
-                .get(&stxi_ref)
-                .ok_or_else(|| BrokenInvariant::MissingUtxo(stxi_ref.clone()))?;
+            let stxi_body = loaded.get(&stxi_ref).ok_or_else(|| {
+                BrokenInvariant::UnresolvedInput {
+                    slot: block.slot(),
+                    block: block.hash(),
+                    tx: *tx_hash,
+                    input: stxi_ref.clone(),
+                }
+            })?;
 
             let stxi_body_arc = stxi_body.borrow_owner().clone();
 
@@ -632,7 +669,7 @@ mod tests {
         let stats = ledger.apply(&block);
 
         assert_eq!(
-            stats.skipped_inputs, 1,
+            stats.skipped_inputs(), 1,
             "exactly the forward reference was left unconsumed"
         );
         assert!(
@@ -688,7 +725,7 @@ mod tests {
         let first_stats = ledger.apply(&first);
 
         assert_eq!(
-            first_stats.skipped_inputs, 0,
+            first_stats.skipped_inputs(), 0,
             "the first block's own chain resolves, nothing is skipped"
         );
         assert!(
@@ -703,7 +740,7 @@ mod tests {
             "the repeat must re-create the output the first block spent"
         );
         assert!(
-            second_stats.skipped_inputs > 0,
+            second_stats.skipped_inputs() > 0,
             "the repeat's own input was already spent, so it consumed nothing"
         );
     }
@@ -757,7 +794,7 @@ mod tests {
             "nothing is re-created the first time"
         );
         assert_eq!(
-            first.skipped_inputs, 0,
+            first.skipped_inputs(), 0,
             "and every input resolves the first time"
         );
 
@@ -768,7 +805,7 @@ mod tests {
             "every output still standing is re-created the second time"
         );
         assert_eq!(
-            second.skipped_inputs,
+            second.skipped_inputs(),
             inputs - chained,
             "every input from outside the block was already spent, so none is consumed again"
         );
@@ -931,10 +968,120 @@ mod tests {
         let err = super::compute_apply_delta(&block, &context)
             .expect_err("the strict rule must refuse an input it cannot resolve");
 
-        match err {
-            BrokenInvariant::MissingUtxo(r) => assert_eq!(r, forward_ref_txoref()),
-            other => panic!("wrong refusal: {other:?}"),
+        assert!(
+            err.to_string()
+                .contains(&forward_ref_txoref().0.to_string()),
+            "the refusal must name the input it could not resolve: {err}"
+        );
+    }
+
+    /// The transaction of the forward reference fixture that spends the input
+    /// the other one produces. The stop has to name it, because the block hash
+    /// and the input alone leave an operator reading a block of 1803
+    /// transactions with nothing to look at.
+    fn forward_ref_spender(block: &MultiEraBlock) -> TxHash {
+        let target = forward_ref_txoref();
+
+        block
+            .txs()
+            .iter()
+            .find(|tx| {
+                tx.consumes()
+                    .iter()
+                    .any(|i| TxoRef(*i.hash(), i.index() as u32) == target)
+            })
+            .expect("fixture precondition: some transaction spends the forward reference")
+            .hash()
+    }
+
+    /// MUST FIRE: the stop on an input the ledger does not hold names the block
+    /// slot, the block hash, the transaction and the input, in the text that
+    /// reaches the log. `or_panic` renders the error with `error!(%x)`, so the
+    /// error's own text is the line an operator reads, and a stop that names
+    /// only the input cannot be traced back to a block or a transaction.
+    ///
+    /// MUST NOT FIRE: the same block with the same input present applies with
+    /// no error, so this is a refusal of an unresolved input and not of the
+    /// fixture.
+    #[test]
+    fn an_unresolved_input_stops_and_names_the_block_the_transaction_and_the_input() {
+        let cbor = forward_ref_block();
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        assert_eq!(block.slot(), 1861242, "fixture precondition");
+
+        let target = forward_ref_txoref();
+        let spender = forward_ref_spender(&block);
+
+        let mut context = fake_slice_for_block(&block);
+        context.remove(&target);
+
+        let err = super::compute_apply_delta(&block, &context)
+            .expect_err("an input the ledger does not hold must stop the apply");
+
+        let said = err.to_string();
+
+        for (what, expected) in [
+            ("the block slot", block.slot().to_string()),
+            ("the block hash", block.hash().to_string()),
+            ("the transaction", spender.to_string()),
+            ("the input transaction", target.0.to_string()),
+            ("the input index", format!("#{}", target.1)),
+        ] {
+            assert!(
+                said.contains(&expected),
+                "the stop does not name {what} ({expected}): {said}"
+            );
         }
+
+        // The must not fire half. Nothing was removed this time, so the same
+        // block resolves.
+        let whole = fake_slice_for_block(&block);
+        super::compute_apply_delta(&block, &whole)
+            .expect("the block applies when every input it spends is there");
+    }
+
+    /// MUST FIRE: the lenient rule says which transaction left which input
+    /// unconsumed, not only how many were left. A count says a ledger is wrong
+    /// and nothing says where, and the block, the transaction and the input are
+    /// the three an operator needs to go and look.
+    ///
+    /// MUST NOT FIRE: a block that left nothing unconsumed names nothing, so
+    /// the record is of what happened rather than of every input walked.
+    #[test]
+    fn a_left_input_is_recorded_against_the_transaction_that_spent_it() {
+        let cbor = forward_ref_block();
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+
+        let target = forward_ref_txoref();
+        let spender = forward_ref_spender(&block);
+
+        let mut ledger = FakeLedger::default();
+        ledger.seed_externals(&block);
+        ledger.present.remove(&target);
+
+        let stats = ledger.apply(&block);
+
+        assert_eq!(stats.skipped_inputs(), 1, "exactly one input was left");
+        assert_eq!(
+            stats.skipped,
+            vec![SkippedInput {
+                tx: spender,
+                input: target,
+            }],
+            "the record names the transaction that spent it and the input it spent"
+        );
+
+        let ordinary = trimmed_block("dijkstra-repeat-ranking-first.block");
+        let ordinary = MultiEraBlock::decode(&ordinary).unwrap();
+
+        let mut clean = FakeLedger::default();
+        clean.seed_externals(&ordinary);
+
+        assert_eq!(
+            clean.apply(&ordinary).skipped,
+            vec![],
+            "a block that left nothing unconsumed records nothing"
+        );
     }
 }
 

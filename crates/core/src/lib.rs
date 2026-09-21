@@ -254,6 +254,25 @@ pub enum BrokenInvariant {
     #[error("missing utxo {0:?}")]
     MissingUtxo(TxoRef),
 
+    /// An input the apply path could not resolve, with the four values it takes
+    /// to go and look at one: the block, the transaction inside it, and the
+    /// input itself.
+    ///
+    /// `or_panic` renders an error with `error!(%x)`, so this text is the line
+    /// an operator reads when a follower stops, and an input alone leaves them
+    /// with nothing to search a chain for.
+    #[error(
+        "transaction {tx} of the block at slot {slot} {block} spends {}#{}, which the ledger does \
+         not hold and no earlier transaction of that block produced",
+        .input.0, .input.1
+    )]
+    UnresolvedInput {
+        slot: u64,
+        block: BlockHash,
+        tx: TxHash,
+        input: TxoRef,
+    },
+
     #[error("invalid genesis config")]
     InvalidGenesisConfig,
 
