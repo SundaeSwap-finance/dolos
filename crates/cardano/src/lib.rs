@@ -466,6 +466,7 @@ impl dolos_core::ChainLogic for CardanoLogic {
         block: &dolos_core::Cbor,
         inputs: &std::collections::HashMap<dolos_core::TxoRef, Arc<EraCbor>>,
         _point: ChainPoint,
+        lenient: bool,
     ) -> Result<dolos_core::UndoBlockData, ChainError> {
         let block_arc = Arc::new(block.clone());
         let blockd = OwnedMultiEraBlock::decode(block_arc)?;
@@ -479,8 +480,20 @@ impl dolos_core::ChainLogic for CardanoLogic {
             })
             .collect::<Result<_, _>>()?;
 
-        let utxo_delta = crate::utxoset::compute_undo_delta(blockv, &decoded_inputs)
-            .map_err(ChainError::from)?;
+        let (utxo_delta, skipped) =
+            crate::utxoset::compute_undo_delta(blockv, &decoded_inputs, lenient)
+                .map_err(ChainError::from)?;
+
+        for left in skipped.iter() {
+            tracing::warn!(
+                slot = blockv.slot(),
+                block = %blockv.hash(),
+                tx = %left.tx,
+                input_tx = %left.input.0,
+                input_index = left.input.1,
+                "recovered nothing for an input the lenient walk left unconsumed"
+            );
+        }
 
         // The tags the block put in and took out, as it did them: the undo
         // delta names them inverted (undone = what the block produced,
