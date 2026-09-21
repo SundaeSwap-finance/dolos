@@ -151,7 +151,7 @@ impl<D: Domain> Session<D> {
 
         let points = points.into_iter().map(From::from).collect_vec();
 
-        let intersect = ChainCrawler::<D>::start(&self.domain, &points).unwrap();
+        let intersect = crate::prelude::start_crawler(&self.domain, &points)?;
 
         if let Some((crawler, point)) = intersect {
             debug!(%point, "found intersect point");

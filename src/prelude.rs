@@ -104,3 +104,82 @@ impl CancelToken for CancelTokenImpl {
         self.0.cancelled().await;
     }
 }
+
+/// The crawler for the first of `points` local history holds, or `None` when it
+/// holds none of them.
+///
+/// The failure is a value because a session serving a client has somewhere to
+/// report it, and the archive can hold blocks the log has no way to continue
+/// from.
+pub fn start_crawler<D: Domain>(
+    domain: &D,
+    points: &[ChainPoint],
+) -> Result<Option<(dolos_core::crawl::ChainCrawler<D>, ChainPoint)>, Error> {
+    dolos_core::crawl::ChainCrawler::<D>::start(domain, points).map_err(Error::server)
+}
+
+#[cfg(test)]
+mod tests {
+    use dolos_core::{ArchiveStore as _, ArchiveWriter as _, SyncExt as _};
+    use dolos_testing::blocks::make_conway_block;
+    use dolos_testing::toy_domain::ToyDomain;
+
+    use super::*;
+
+    /// The must-fire case. A crawl asked to start at the last block the archive
+    /// holds has nowhere to continue, and a session that serves a client has to
+    /// answer rather than end the process.
+    #[test]
+    fn a_start_with_nowhere_to_continue_is_returned_and_not_a_panic() {
+        let domain = ToyDomain::new(None, None);
+
+        // One block the archive holds and the wal never saw, so the crawl can
+        // start on it and the page after it is empty on both stores.
+        let writer = domain.archive().start_writer().unwrap();
+        let (point, block) = make_conway_block(100);
+        writer.apply(&point, &block).unwrap();
+        writer.commit().unwrap();
+
+        let Err(error) = start_crawler(&domain, &[point]) else {
+            panic!("the start answered with a crawler for a page nothing continues");
+        };
+
+        assert!(
+            matches!(&error, Error::ServerError(text) if text.contains("archive")),
+            "{error}"
+        );
+    }
+
+    /// The must-not case for a point local history holds, which is every
+    /// ordinary intersect.
+    #[test]
+    fn a_start_the_log_can_continue_from_answers_with_a_crawler() {
+        let domain = ToyDomain::new(None, None);
+
+        for slot in 0..=10u64 {
+            let (_, block) = make_conway_block(slot * 10);
+            domain.roll_forward(block).unwrap();
+        }
+
+        let (point, _) = make_conway_block(50);
+        let started = start_crawler(&domain, &[point.clone()]).unwrap();
+
+        assert!(matches!(started, Some((_, found)) if found == point));
+    }
+
+    /// The must-not case for a point nothing holds. No intersect is not a
+    /// failure, and a session answers it with its own refusal.
+    #[test]
+    fn a_start_at_a_point_nothing_holds_answers_with_no_crawler() {
+        let domain = ToyDomain::new(None, None);
+
+        for slot in 0..=10u64 {
+            let (_, block) = make_conway_block(slot * 10);
+            domain.roll_forward(block).unwrap();
+        }
+
+        let (point, _) = make_conway_block(9999);
+
+        assert!(start_crawler(&domain, &[point]).unwrap().is_none());
+    }
+}
