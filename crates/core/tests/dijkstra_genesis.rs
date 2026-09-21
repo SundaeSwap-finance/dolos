@@ -95,8 +95,8 @@ fn a_parameter_with_nowhere_to_go_stops_the_load() {
 }
 
 /// MUST FIRE: a parameter the file does not name is refused rather than read
-/// as a zero, because a rule the node applies and the follower reads as zero
-/// is the same undetectable divergence as one it never read at all.
+/// as a zero, because a zero is a value the follower would go on to apply as
+/// the rule.
 ///
 /// MUST NOT FIRE: the file with the parameter present loads, so the refusal is
 /// about the absence and not about the edit.
