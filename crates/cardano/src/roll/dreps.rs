@@ -3,10 +3,10 @@ use std::{collections::HashMap, sync::Arc};
 use dolos_core::{ChainError, EntityKey, Genesis, TxOrder, TxoRef};
 use pallas::ledger::{
     primitives::{
-        conway::{self, DRep, Voter},
+        conway::{DRep, Voter},
         Epoch,
     },
-    traverse::{MultiEraBlock, MultiEraCert, MultiEraTx},
+    traverse::{MultiEraBlock, MultiEraCert, MultiEraCertKind, MultiEraTx},
 };
 
 use super::WorkDeltas;
@@ -19,13 +19,13 @@ use crate::{
     DRepUnRegistration, GovDormancyReset, PParamsSet,
 };
 
-/// Read through the shared Conway view rather than matching one era, so a
-/// DRep certificate in a newly added era is not silently dropped.
+/// Read what the certificate certifies rather than matching one era's
+/// certificate type, so a DRep certificate of any era that names one is read.
 fn cert_drep(cert: &MultiEraCert) -> Option<DRep> {
-    match pallas_extras::as_conway_cert(cert)?.as_ref() {
-        conway::Certificate::RegDRepCert(cert, _, _) => Some(stake_cred_to_drep(cert)),
-        conway::Certificate::UnRegDRepCert(cert, _) => Some(stake_cred_to_drep(cert)),
-        conway::Certificate::UpdateDRepCert(cert, _) => Some(stake_cred_to_drep(cert)),
+    match cert.kind()? {
+        MultiEraCertKind::RegDRep(cred, _, _) => Some(stake_cred_to_drep(cred)),
+        MultiEraCertKind::UnRegDRep(cred, _) => Some(stake_cred_to_drep(cred)),
+        MultiEraCertKind::UpdateDRep(cred, _) => Some(stake_cred_to_drep(cred)),
         _ => None,
     }
 }
@@ -231,64 +231,57 @@ impl BlockVisitor for DRepStateVisitor {
             return Ok(());
         };
 
-        // Same shared view as `cert_drep` above, for the same reason: the era
-        // specific test here dropped every certificate of any era it did not
-        // name, and adding one is not a compile error.
-        if let Some(conway) = pallas_extras::as_conway_cert(cert) {
-            match conway.as_ref() {
-                conway::Certificate::RegDRepCert(_, deposit, anchor) => {
-                    deltas.add_for_entity(DRepRegistration::new(
+        match cert.kind() {
+            Some(MultiEraCertKind::RegDRep(_, deposit, anchor)) => {
+                let anchor = anchor.cloned();
+
+                deltas.add_for_entity(DRepRegistration::new(
+                    drep.clone(),
+                    block.slot(),
+                    *order,
+                    deposit,
+                    anchor.clone(),
+                ));
+
+                deltas.add_for_entity(DRepAnchorUpdate::new(drep.clone(), anchor));
+
+                if let Some(expiry) = self.registration_expiry() {
+                    deltas.add_for_entity(DRepExpiryUpdate::new(
                         drep.clone(),
-                        block.slot(),
-                        *order,
-                        *deposit,
-                        anchor.clone(),
-                    ));
-
-                    deltas.add_for_entity(DRepAnchorUpdate::new(drep.clone(), anchor.clone()));
-
-                    if let Some(expiry) = self.registration_expiry() {
-                        deltas.add_for_entity(DRepExpiryUpdate::new(
-                            drep.clone(),
-                            expiry,
-                            self.current_epoch,
-                            false,
-                        ));
-                    }
-
-                    // While a dormant stretch is open, a registration creates
-                    // a row the batch-start snapshot doesn't have — remember
-                    // it so a release later in the batch still reaches it
-                    // (Haskell folds over the live DRep map, which includes
-                    // it).
-                    if self.dormancy.dormant_epochs > 0 {
-                        self.dormancy
-                            .batch_registrations
-                            .push(drep_to_entity_key(&drep));
-                    }
-                }
-                conway::Certificate::UnRegDRepCert(_, _) => {
-                    deltas.add_for_entity(DRepUnRegistration::new(
-                        drep.clone(),
-                        block.slot(),
-                        *order,
+                        expiry,
+                        self.current_epoch,
+                        false,
                     ));
                 }
-                conway::Certificate::UpdateDRepCert(_, anchor) => {
-                    deltas.add_for_entity(DRepAnchorUpdate::new(drep.clone(), anchor.clone()));
 
-                    if let Some(expiry) = self.refresh_expiry() {
-                        deltas.add_for_entity(DRepExpiryUpdate::new(
-                            drep.clone(),
-                            expiry,
-                            self.current_epoch,
-                            false,
-                        ));
-                    }
+                // While a dormant stretch is open, a registration creates
+                // a row the batch-start snapshot doesn't have, so remember
+                // it so a release later in the batch still reaches it
+                // (Haskell folds over the live DRep map, which includes
+                // it).
+                if self.dormancy.dormant_epochs > 0 {
+                    self.dormancy
+                        .batch_registrations
+                        .push(drep_to_entity_key(&drep));
                 }
-                _ => (),
             }
-        };
+            Some(MultiEraCertKind::UnRegDRep(_, _)) => {
+                deltas.add_for_entity(DRepUnRegistration::new(drep.clone(), block.slot(), *order));
+            }
+            Some(MultiEraCertKind::UpdateDRep(_, anchor)) => {
+                deltas.add_for_entity(DRepAnchorUpdate::new(drep.clone(), anchor.cloned()));
+
+                if let Some(expiry) = self.refresh_expiry() {
+                    deltas.add_for_entity(DRepExpiryUpdate::new(
+                        drep.clone(),
+                        expiry,
+                        self.current_epoch,
+                        false,
+                    ));
+                }
+            }
+            _ => (),
+        }
 
         deltas.add_for_entity(DRepActivity::new(drep.clone(), block.slot()));
 
