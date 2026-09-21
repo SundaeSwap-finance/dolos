@@ -37,6 +37,30 @@ fn parse_script_hash(script_hash: &str) -> Result<Hash<28>, StatusCode> {
     ))
 }
 
+/// The Blockfrost script type for a language, or `None` for a language the
+/// schema has no member for.
+///
+/// Reporting a language under another language's tag would be a wrong answer
+/// that reads like a right one, so a caller with no member to report refuses.
+fn script_type_for_language(language: ScriptLanguage) -> Option<ScriptType> {
+    match language {
+        ScriptLanguage::Native => Some(ScriptType::Timelock),
+        ScriptLanguage::PlutusV1 => Some(ScriptType::PlutusV1),
+        ScriptLanguage::PlutusV2 => Some(ScriptType::PlutusV2),
+        ScriptLanguage::PlutusV3 => Some(ScriptType::PlutusV3),
+        _ => None,
+    }
+}
+
+/// The canonical JSON of a native script, or the status that says why there is
+/// none.
+///
+fn native_script_json(bytes: &[u8]) -> Result<String, StatusCode> {
+    let native: NativeScript =
+        minicbor::decode(bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(native.to_json_string())
+}
+
 fn parse_datum_hash(datum_hash: &str) -> Result<Hash<32>, StatusCode> {
     if datum_hash.len() != 64 {
         return Err(StatusCode::NOT_FOUND);
@@ -64,16 +88,9 @@ where
 
     Ok(Json(Script {
         script_hash,
-        r#type: match script.language {
-            ScriptLanguage::Native => ScriptType::Timelock,
-            ScriptLanguage::PlutusV1 => ScriptType::PlutusV1,
-            ScriptLanguage::PlutusV2 => ScriptType::PlutusV2,
-            ScriptLanguage::PlutusV3 => ScriptType::PlutusV3,
-            // The Blockfrost schema has no member beyond PlutusV3. Reporting a
-            // later language under the V3 tag would be a wrong answer that
-            // reads like a right one, so this route refuses rather than
-            // misreport.
-            _ => return Err(StatusCode::NOT_IMPLEMENTED.into()),
+        r#type: match script_type_for_language(script.language) {
+            Some(x) => x,
+            None => return Err(StatusCode::NOT_IMPLEMENTED.into()),
         },
         serialised_size: match script.language {
             ScriptLanguage::Native => None,
@@ -101,11 +118,7 @@ where
     // `serde_json::Value` of that depth overflows the worker stack when
     // serialized or dropped (see pallas #806).
     let json = match script.language {
-        ScriptLanguage::Native => {
-            let native: NativeScript =
-                minicbor::decode(&script.script).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            native.to_json_string()
-        }
+        ScriptLanguage::Native => native_script_json(&script.script)?,
         _ => "null".to_string(),
     };
 
@@ -241,6 +254,48 @@ mod tests {
             expected,
             "unexpected status {status} with body: {}",
             String::from_utf8_lossy(&bytes)
+        );
+    }
+
+    #[test]
+    fn every_language_the_schema_has_a_member_for_maps_to_that_member() {
+        let pairs = [
+            (ScriptLanguage::Native, ScriptType::Timelock),
+            (ScriptLanguage::PlutusV1, ScriptType::PlutusV1),
+            (ScriptLanguage::PlutusV2, ScriptType::PlutusV2),
+            (ScriptLanguage::PlutusV3, ScriptType::PlutusV3),
+        ];
+
+        for (language, expected) in pairs {
+            assert_eq!(
+                script_type_for_language(language),
+                Some(expected),
+                "{language:?} did not map to its own member"
+            );
+        }
+    }
+
+    #[test]
+    fn plutus_v4_maps_to_no_member_at_all() {
+        assert_eq!(script_type_for_language(ScriptLanguage::PlutusV4), None);
+    }
+
+    #[test]
+    fn a_native_script_of_a_shape_every_era_names_renders_its_canonical_json() {
+        let script = NativeScript::InvalidHereafter(500_000);
+        let bytes = minicbor::to_vec(&script).expect("must encode");
+
+        assert_eq!(
+            native_script_json(&bytes),
+            Ok(r#"{"slot":500000,"type":"before"}"#.to_string())
+        );
+    }
+
+    #[test]
+    fn bytes_that_are_no_native_script_report_an_internal_error() {
+        assert_eq!(
+            native_script_json(&[0xff, 0xff, 0xff]),
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
         );
     }
 

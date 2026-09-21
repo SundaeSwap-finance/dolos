@@ -46,3 +46,41 @@ pub fn header_cbor_to_chainsync(block: RawBlock) -> Result<chainsync::HeaderCont
 
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::era_to_header_variant;
+    use pallas::ledger::traverse::{probe, Era};
+
+    /// A two element array whose first element is the block wrapper tag, which
+    /// is all of a block that the era probe reads.
+    fn wrapper(tag: u8) -> Vec<u8> {
+        vec![0x82, tag, 0x00]
+    }
+
+    #[test]
+    fn dijkstra_is_block_wrapper_tag_eight_and_chainsync_header_variant_seven() {
+        assert!(matches!(
+            probe::block_era(&wrapper(8)),
+            probe::Outcome::Matched(Era::Dijkstra)
+        ));
+        assert_eq!(era_to_header_variant(Era::Dijkstra), 7);
+    }
+
+    #[test]
+    fn conway_keeps_wrapper_tag_seven_and_header_variant_six() {
+        assert!(matches!(
+            probe::block_era(&wrapper(7)),
+            probe::Outcome::Matched(Era::Conway)
+        ));
+        assert_eq!(era_to_header_variant(Era::Conway), 6);
+    }
+
+    #[test]
+    fn a_wrapper_tag_past_dijkstra_matches_no_era() {
+        assert!(matches!(
+            probe::block_era(&wrapper(9)),
+            probe::Outcome::Inconclusive
+        ));
+    }
+}
