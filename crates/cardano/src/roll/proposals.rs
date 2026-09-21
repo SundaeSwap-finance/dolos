@@ -11,6 +11,7 @@ use pallas::{
         },
     },
 };
+use tracing::warn;
 
 use super::WorkDeltas;
 use crate::{
@@ -51,21 +52,23 @@ fn parse_treasury_withdrawals(
     Ok(ProposalAction::TreasuryWithdrawal(items))
 }
 
-/// The parameter key a Dijkstra update proposes that the parameter set has no
-/// place for, if it proposes one. A key the update leaves alone and a key the
-/// update's era does not have are both absent from this answer.
-fn unrecordable_param(update: &MultiEraParamUpdate) -> Option<&'static str> {
-    macro_rules! first_proposed {
+/// The parameter keys an update proposes that the parameter set has no place
+/// for. A key the update leaves alone and a key the update's era does not have
+/// are both absent from this answer.
+fn params_with_no_field(update: &MultiEraParamUpdate) -> Vec<&'static str> {
+    let mut named = Vec::new();
+
+    macro_rules! each_proposed {
         ($($getter:ident),*) => {
             $(
                 if matches!(update.$getter(), ParamRead::Proposed(_)) {
-                    return Some(stringify!($getter));
+                    named.push(stringify!($getter));
                 }
             )*
         };
     }
 
-    first_proposed!(
+    each_proposed!(
         max_ref_script_size_per_block,
         max_ref_script_size_per_tx,
         ref_script_cost_stride,
@@ -83,7 +86,7 @@ fn unrecordable_param(update: &MultiEraParamUpdate) -> Option<&'static str> {
         max_ref_script_size_per_endorser_block
     );
 
-    None
+    named
 }
 
 /// The cost models an update proposes under the keys no field names. The era
@@ -115,10 +118,17 @@ fn wildcard_cost_models(
 }
 
 fn param_update_to_pparamset(update: &MultiEraParamUpdate) -> Result<PParamsSet, ChainError> {
-    if let Some(name) = unrecordable_param(update) {
-        return Err(ChainError::UnrecordableProposalPart(format!(
-            "protocol parameter {name}"
-        )));
+    // Anyone able to pay a deposit can name any key, so refusing here would
+    // hand every follower on the network a block it cannot apply. The keys go
+    // unrecorded and the proposal is kept, which leaves the rest of it
+    // readable and the loss named.
+    let with_no_field = params_with_no_field(update);
+
+    if !with_no_field.is_empty() {
+        warn!(
+            keys = with_no_field.join(", "),
+            "recording a parameter change without the keys the parameter set has no field for"
+        );
     }
 
     let mut set = PParamsSet::default();
@@ -544,6 +554,16 @@ mod dijkstra_governance_tests {
         dijkstra::GovAction::ParameterChange(None, Box::new(update), None)
     }
 
+    /// The keys with no field in the update a parameter change carries, read
+    /// through the same accessor `parse_gov_action` reads it through.
+    fn names_with_no_field(action: &MultiEraGovAction) -> Vec<&'static str> {
+        let MultiEraGovActionKind::ParameterChange(_, update, _) = action.kind() else {
+            panic!("the action is not a parameter change");
+        };
+
+        params_with_no_field(&update)
+    }
+
     /// Every key the Dijkstra era added, with a value of its own type and the
     /// name the refusal has to carry.
     fn dijkstra_only_keys() -> Vec<(u64, &'static str, Vec<u8>)> {
@@ -579,25 +599,82 @@ mod dijkstra_governance_tests {
         ]
     }
 
-    /// The must-fire case. The parameter set has no field for any of the keys
-    /// the Dijkstra era added, so a proposal that sets one has to refuse and
-    /// name it rather than record a set the key is missing from.
+    /// The must-fire case. Anyone able to pay a deposit can propose any of the
+    /// keys the Dijkstra era added, so every one of them has to be recorded as
+    /// a parameter change rather than end the block that carries it.
     #[test]
-    fn every_dijkstra_only_parameter_key_is_refused_by_name() {
+    fn every_dijkstra_only_parameter_key_is_recorded_as_a_parameter_change() {
+        for (key, _, value) in dijkstra_only_keys() {
+            let action = parameter_change(dijkstra_update(key, &value));
+            let action = MultiEraGovAction::from_dijkstra(&action);
+
+            let (recorded, _, purpose) = parse_gov_action(&action)
+                .unwrap_or_else(|error| panic!("key {key} was refused: {error}"));
+
+            assert_eq!(purpose, Some(GovPurpose::PParamUpdate), "key {key}");
+            assert!(
+                matches!(recorded, ProposalAction::ParamChange(_)),
+                "key {key} was recorded as {recorded:?}"
+            );
+        }
+    }
+
+    /// The must-fire case for the name. A key the parameter set has no field
+    /// for is left out of what is recorded, so the name this answer carries is
+    /// the only account of it, and the warn is built from the same answer.
+    #[test]
+    fn every_dijkstra_only_parameter_key_is_named_as_having_no_field() {
         for (key, name, value) in dijkstra_only_keys() {
             let action = parameter_change(dijkstra_update(key, &value));
             let action = MultiEraGovAction::from_dijkstra(&action);
 
-            let error = parse_gov_action(&action)
-                .err()
-                .unwrap_or_else(|| panic!("key {key} was recorded"));
-
-            assert!(
-                error.to_string().contains(name),
-                "key {key} was refused without naming {name}: {error}"
+            assert_eq!(
+                names_with_no_field(&action),
+                vec![name],
+                "key {key} was not named"
             );
         }
     }
+
+    /// The must-not case. A key the parameter set holds is recorded, so naming
+    /// it would report a loss that did not happen.
+    #[test]
+    fn a_key_the_parameter_set_holds_is_named_by_nothing() {
+        let value = minicbor::to_vec(500u64).unwrap();
+        let action = parameter_change(dijkstra_update(0, &value));
+        let action = MultiEraGovAction::from_dijkstra(&action);
+
+        assert!(names_with_no_field(&action).is_empty());
+    }
+
+    /// A proposal setting a key the set holds and a key it does not keeps the
+    /// first and names the second, because dropping both would lose a change
+    /// the set has a field for.
+    #[test]
+    fn a_key_with_no_field_does_not_take_the_rest_of_the_update_with_it() {
+        // Key 0 reading minfee_a 500 and key 43 reading leios_committee_size 500.
+        let mut bytes = vec![0xa2];
+        bytes.extend(minicbor::to_vec(0u64).unwrap());
+        bytes.extend(minicbor::to_vec(500u64).unwrap());
+        bytes.extend(minicbor::to_vec(43u64).unwrap());
+        bytes.extend(minicbor::to_vec(500u64).unwrap());
+
+        let update: dijkstra::ProtocolParamUpdate =
+            minicbor::decode(&bytes).expect("the two key update does not decode");
+
+        let action = parameter_change(update);
+        let action = MultiEraGovAction::from_dijkstra(&action);
+
+        let (recorded, _, _) = parse_gov_action(&action).unwrap();
+
+        let ProposalAction::ParamChange(set) = recorded else {
+            panic!("a parameter change was recorded as {recorded:?}");
+        };
+
+        assert_eq!(set.min_fee_a(), Some(500));
+        assert_eq!(names_with_no_field(&action), vec!["leios_committee_size"]);
+    }
+
 
     /// The must-not case. A Dijkstra update of a key every era carries has to
     /// be recorded, or a parameter change on a Dijkstra chain would stop the
