@@ -233,7 +233,7 @@ pub fn setup_tracing(config: &LoggingConfig, telemetry: &TelemetryConfig) -> mie
 }
 
 pub fn open_genesis_files(config: &GenesisConfig) -> miette::Result<Genesis> {
-    Genesis::from_file_paths(
+    let genesis = Genesis::from_file_paths(
         &config.byron_path,
         &config.shelley_path,
         &config.alonzo_path,
@@ -241,7 +241,16 @@ pub fn open_genesis_files(config: &GenesisConfig) -> miette::Result<Genesis> {
         config.force_protocol,
     )
     .into_diagnostic()
-    .context("loading genesis files")
+    .context("loading genesis files")?;
+
+    let Some(dijkstra_path) = &config.dijkstra_path else {
+        return Ok(genesis);
+    };
+
+    genesis
+        .with_dijkstra(dijkstra_path)
+        .into_diagnostic()
+        .context("loading the dijkstra genesis file")
 }
 
 #[inline]
