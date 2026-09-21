@@ -136,8 +136,7 @@ pub fn inspect_existing_data(
     ))
 }
 
-/// The only storage version this binary reads. Data in another format must be
-/// cleared and bootstrapped again.
+/// The only storage version this binary reads.
 pub const CURRENT_STORAGE_VERSION: StorageVersion = StorageVersion::V4;
 
 /// The bootstrap guide the refusal points an operator at.
@@ -148,15 +147,18 @@ pub const BOOTSTRAP_GUIDE_URL: &str = "https://docs.txpipe.io/dolos/bootstrap";
 /// The comparison is the whole compatibility policy: the version the config
 /// declares against the one the binary carries, and nothing on disk. Every
 /// store opener runs it before touching its path, so a refused configuration
-/// has had no directory created and no store opened on its behalf — which is
+/// has had no directory created and no store opened on its behalf, which is
 /// what lets `dolos init` remain the one deliberate way past it.
+///
+/// The refusal says only that, because a store written under an older
+/// declaration opens and resumes once the declaration alone is changed.
 fn check_storage_version(version: &StorageVersion) -> Result<(), Error> {
     if *version != CURRENT_STORAGE_VERSION {
-        return Err(Error::StorageError(format!(
-            "unsupported storage version `{version}`, this dolos only supports \
-             `{CURRENT_STORAGE_VERSION}`; run `dolos init` to upgrade the configuration and \
-              re-bootstrap the data — see the bootstrap guide at {BOOTSTRAP_GUIDE_URL}"
-        )));
+        return Err(Error::StorageVersionMismatch {
+            declared: version.clone(),
+            supported: CURRENT_STORAGE_VERSION,
+            guide: BOOTSTRAP_GUIDE_URL,
+        });
     }
     Ok(())
 }
@@ -1428,6 +1430,36 @@ mod tests {
                 "refusal must point at the bootstrap guide: {message}"
             );
         }
+
+        check_storage_version(&CURRENT_STORAGE_VERSION).unwrap();
+    }
+
+    /// The refusal names the two strings it compared and says no store was
+    /// read, because the same store opens under either string and an operator
+    /// who follows a bootstrap instruction throws away a store that works.
+    #[test]
+    fn the_refusal_says_what_it_compared_and_leaves_the_stores_out_of_it() {
+        let message = refusal(check_storage_version(&StorageVersion::V3));
+
+        assert!(
+            message.contains("no store was read"),
+            "refusal must say no store was read: {message}"
+        );
+        assert!(
+            message.contains("storage.version"),
+            "refusal must name the field that disagrees: {message}"
+        );
+
+        let error = check_storage_version(&StorageVersion::V3).unwrap_err();
+
+        assert!(
+            matches!(
+                &error,
+                Error::StorageVersionMismatch { declared, supported, .. }
+                    if *declared == StorageVersion::V3 && *supported == CURRENT_STORAGE_VERSION
+            ),
+            "{error}"
+        );
 
         check_storage_version(&CURRENT_STORAGE_VERSION).unwrap();
     }

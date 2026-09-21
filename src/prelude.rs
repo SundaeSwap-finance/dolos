@@ -1,5 +1,7 @@
 pub use dolos_core::*;
 
+use dolos_core::config::StorageVersion;
+
 use miette::Diagnostic;
 use std::fmt::Display;
 use thiserror::Error;
@@ -23,6 +25,25 @@ pub enum Error {
 
     #[error("storage error: {0}")]
     StorageError(String),
+
+    /// The configuration declares a storage version this binary does not read.
+    ///
+    /// Both versions are carried rather than formatted away, because the
+    /// comparison is between two configuration strings and a caller that wants
+    /// to report or repair it needs the pair.
+    #[error(
+        "the configuration declares storage version `{declared}` and this dolos reads \
+         `{supported}`. That is a comparison of two configuration strings, and no store was \
+         read. If the stores were written by a dolos that reads `{supported}`, set \
+         `storage.version` to `{supported}`. Running `dolos init` writes a fresh configuration \
+         and bootstraps again, which discards whatever the stores hold. The bootstrap guide is \
+         at {guide}"
+    )]
+    StorageVersionMismatch {
+        declared: StorageVersion,
+        supported: StorageVersion,
+        guide: &'static str,
+    },
 
     #[error("wal error: {0}")]
     WalError(#[from] WalError),
