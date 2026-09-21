@@ -1,5 +1,3 @@
-use std::ops::Deref as _;
-
 use dolos_core::BlockSlot;
 use pallas::crypto::hash::Hash;
 use pallas::ledger::addresses::{
@@ -9,105 +7,46 @@ use pallas::ledger::primitives::alonzo::MoveInstantaneousReward;
 use pallas::ledger::primitives::conway::{
     CostModels, DRep, DRepVotingThresholds, PoolVotingThresholds,
 };
-use pallas::ledger::primitives::{
-    alonzo::Certificate as AlonzoCert, conway::Certificate as ConwayCert,
-    dijkstra::Certificate as DijkstraCert, PoolMetadata, RationalNumber, Relay, StakeCredential,
-};
+use pallas::ledger::primitives::{PoolMetadata, RationalNumber, Relay, StakeCredential};
 use pallas::ledger::primitives::{Epoch, ExUnitPrices, ExUnits, Nonce, NonceVariant};
-use pallas::ledger::traverse::{MultiEraCert, MultiEraScriptRef, MultiEraTx};
+use pallas::ledger::traverse::cert::BlsKeySlot;
+use pallas::ledger::traverse::{MultiEraCert, MultiEraCertKind, MultiEraScriptRef, MultiEraTx};
 use serde::{Deserialize, Serialize};
 
 use crate::eras::ChainSummary;
 use crate::{hacks, Lovelace};
 
-/// A Dijkstra certificate expressed as the Conway certificate it means.
+/// What a pool registration wrote in the BLS key slot the Dijkstra era adds.
 ///
-/// Every Dijkstra variant has a Conway counterpart carrying the same values.
-/// Dijkstra drops Conway's two legacy stake variants and adds nothing, apart
-/// from an optional Leios key on the pool parameters. That key is the one
-/// thing this does not carry across, because no accessor in this module has a
-/// field to put it in and [`MultiEraPoolRegistration`] would have to grow one
-/// first.
-///
-/// Written with no catch-all so that a variant added to either era becomes a
-/// compile error here, rather than a certificate that disappears.
-fn dijkstra_cert_as_conway(cert: &DijkstraCert) -> ConwayCert {
-    match cert {
-        DijkstraCert::StakeDelegation(cred, pool) => {
-            ConwayCert::StakeDelegation(cred.clone(), *pool)
-        }
-        DijkstraCert::PoolRegistration {
-            operator,
-            vrf_keyhash,
-            bls_key: _,
-            pledge,
-            cost,
-            margin,
-            reward_account,
-            pool_owners,
-            relays,
-            pool_metadata,
-        } => ConwayCert::PoolRegistration {
-            operator: *operator,
-            vrf_keyhash: *vrf_keyhash,
-            pledge: *pledge,
-            cost: *cost,
-            margin: margin.clone(),
-            reward_account: reward_account.clone(),
-            // The Dijkstra era has its own set type, which records whether the
-            // bytes carried the 258 tag. Conway's set has no field for that, so
-            // the owners become a plain vector.
-            pool_owners: pool_owners.to_vec().into(),
-            relays: relays.clone(),
-            pool_metadata: pool_metadata.clone(),
-        },
-        DijkstraCert::PoolRetirement(pool, epoch) => ConwayCert::PoolRetirement(*pool, *epoch),
-        DijkstraCert::Reg(cred, coin) => ConwayCert::Reg(cred.clone(), *coin),
-        DijkstraCert::UnReg(cred, coin) => ConwayCert::UnReg(cred.clone(), *coin),
-        DijkstraCert::VoteDeleg(cred, drep) => ConwayCert::VoteDeleg(cred.clone(), drep.clone()),
-        DijkstraCert::StakeVoteDeleg(cred, pool, drep) => {
-            ConwayCert::StakeVoteDeleg(cred.clone(), *pool, drep.clone())
-        }
-        DijkstraCert::StakeRegDeleg(cred, pool, coin) => {
-            ConwayCert::StakeRegDeleg(cred.clone(), *pool, *coin)
-        }
-        DijkstraCert::VoteRegDeleg(cred, drep, coin) => {
-            ConwayCert::VoteRegDeleg(cred.clone(), drep.clone(), *coin)
-        }
-        DijkstraCert::StakeVoteRegDeleg(cred, pool, drep, coin) => {
-            ConwayCert::StakeVoteRegDeleg(cred.clone(), *pool, drep.clone(), *coin)
-        }
-        DijkstraCert::AuthCommitteeHot(cold, hot) => {
-            ConwayCert::AuthCommitteeHot(cold.clone(), hot.clone())
-        }
-        DijkstraCert::ResignCommitteeCold(cold, anchor) => {
-            ConwayCert::ResignCommitteeCold(cold.clone(), anchor.clone())
-        }
-        DijkstraCert::RegDRepCert(cred, coin, anchor) => {
-            ConwayCert::RegDRepCert(cred.clone(), *coin, anchor.clone())
-        }
-        DijkstraCert::UnRegDRepCert(cred, coin) => ConwayCert::UnRegDRepCert(cred.clone(), *coin),
-        DijkstraCert::UpdateDRepCert(cred, anchor) => {
-            ConwayCert::UpdateDRepCert(cred.clone(), anchor.clone())
-        }
-    }
+/// A consumer acts differently on each of these, so they stay apart. A
+/// registration of an era before Dijkstra has no slot to write, a Dijkstra
+/// registration may write the slot as nil, and one may write a key. One absent
+/// value for all three would report a pool that declined a key and a pool that
+/// could not have had one as the same pool.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MultiEraBlsKey {
+    NoSlot,
+    Null,
+    Key {
+        pubkey: Vec<u8>,
+        possession_proof: Vec<u8>,
+    },
+    /// A slot state this build has no name for, which is what a state added to
+    /// the era neutral view after this was written reads as.
+    Unrecognized,
 }
 
-/// The Conway view of a certificate, for every era whose certificates have a
-/// Conway shape.
-///
-/// The accessors below all read Conway-shaped certificates, and there are now
-/// two eras that produce them. Going through one place means a new era is
-/// added once rather than in eleven matches, and that missing it shows up as
-/// every certificate on the chain vanishing at once rather than one accessor
-/// quietly answering nothing.
-pub fn as_conway_cert<'a>(cert: &'a MultiEraCert) -> Option<std::borrow::Cow<'a, ConwayCert>> {
-    match cert {
-        MultiEraCert::Conway(x) => Some(std::borrow::Cow::Borrowed(x.deref().deref())),
-        MultiEraCert::Dijkstra(x) => Some(std::borrow::Cow::Owned(dijkstra_cert_as_conway(
-            x.deref().deref(),
-        ))),
-        _ => None,
+impl From<BlsKeySlot<'_>> for MultiEraBlsKey {
+    fn from(slot: BlsKeySlot<'_>) -> Self {
+        match slot {
+            BlsKeySlot::NoSlot => MultiEraBlsKey::NoSlot,
+            BlsKeySlot::Null => MultiEraBlsKey::Null,
+            BlsKeySlot::Key(key) => MultiEraBlsKey::Key {
+                pubkey: key.bls_pubkey.to_vec(),
+                possession_proof: key.bls_possession_proof.to_vec(),
+            },
+            _ => MultiEraBlsKey::Unrecognized,
+        }
     }
 }
 
@@ -122,58 +61,24 @@ pub struct MultiEraPoolRegistration {
     pub pool_owners: Vec<Hash<28>>,
     pub relays: Vec<Relay>,
     pub pool_metadata: Option<PoolMetadata>,
+    pub bls_key: MultiEraBlsKey,
 }
 
 pub fn cert_as_pool_registration(cert: &MultiEraCert) -> Option<MultiEraPoolRegistration> {
-    match cert {
-        MultiEraCert::AlonzoCompatible(cow) => match cow.deref().deref() {
-            AlonzoCert::PoolRegistration {
-                operator,
-                vrf_keyhash,
-                pledge,
-                cost,
-                margin,
-                reward_account,
-                pool_owners,
-                relays,
-                pool_metadata,
-            } => Some(MultiEraPoolRegistration {
-                operator: *operator,
-                vrf_keyhash: *vrf_keyhash,
-                pledge: *pledge,
-                cost: *cost,
-                margin: margin.clone(),
-                reward_account: reward_account.to_vec(),
-                pool_owners: pool_owners.clone(),
-                relays: relays.clone(),
-                pool_metadata: pool_metadata.clone(),
-            }),
-            _ => None,
-        },
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::PoolRegistration {
-                operator,
-                vrf_keyhash,
-                pledge,
-                cost,
-                margin,
-                reward_account,
-                pool_owners,
-                relays,
-                pool_metadata,
-            } => Some(MultiEraPoolRegistration {
-                operator: *operator,
-                vrf_keyhash: *vrf_keyhash,
-                pledge: *pledge,
-                cost: *cost,
-                margin: margin.clone(),
-                reward_account: reward_account.to_vec(),
-                pool_owners: Vec::from_iter(pool_owners.iter().cloned()),
-                relays: relays.clone(),
-                pool_metadata: pool_metadata.clone(),
-            }),
-            _ => None,
-        },
+    match cert.kind()? {
+        MultiEraCertKind::PoolRegistration(params) => Some(MultiEraPoolRegistration {
+            operator: *params.operator,
+            vrf_keyhash: *params.vrf_keyhash,
+            pledge: params.pledge,
+            cost: params.cost,
+            margin: params.margin.clone(),
+            reward_account: params.reward_account.to_vec(),
+            pool_owners: params.pool_owners.to_vec(),
+            relays: params.relays.to_vec(),
+            pool_metadata: params.pool_metadata.cloned(),
+            bls_key: params.bls_key.into(),
+        }),
+        _ => None,
     }
 }
 
@@ -184,21 +89,12 @@ pub struct MultiEraPoolRetirement {
 }
 
 pub fn cert_as_pool_retirement(cert: &MultiEraCert) -> Option<MultiEraPoolRetirement> {
-    match cert {
-        MultiEraCert::AlonzoCompatible(cow) => match cow.deref().deref() {
-            AlonzoCert::PoolRetirement(operator, epoch) => Some(MultiEraPoolRetirement {
-                operator: *operator,
-                epoch: *epoch,
-            }),
-            _ => None,
-        },
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::PoolRetirement(operator, epoch) => Some(MultiEraPoolRetirement {
-                operator: *operator,
-                epoch: *epoch,
-            }),
-            _ => None,
-        },
+    match cert.kind()? {
+        MultiEraCertKind::PoolRetirement(operator, epoch) => Some(MultiEraPoolRetirement {
+            operator: *operator,
+            epoch,
+        }),
+        _ => None,
     }
 }
 
@@ -208,25 +104,18 @@ pub struct MultiEraVoteDelegation {
 }
 
 pub fn cert_as_vote_delegation(cert: &MultiEraCert) -> Option<MultiEraVoteDelegation> {
-    match as_conway_cert(cert)?.as_ref() {
-        ConwayCert::VoteDeleg(delegator, drep) => Some(MultiEraVoteDelegation {
-            delegator: delegator.clone(),
-            drep: drep.clone(),
-        }),
-        ConwayCert::VoteRegDeleg(delegator, drep, _) => Some(MultiEraVoteDelegation {
-            delegator: delegator.clone(),
-            drep: drep.clone(),
-        }),
-        ConwayCert::StakeVoteRegDeleg(delegator, _, drep, _) => Some(MultiEraVoteDelegation {
-            delegator: delegator.clone(),
-            drep: drep.clone(),
-        }),
-        ConwayCert::StakeVoteDeleg(delegator, _, drep) => Some(MultiEraVoteDelegation {
-            delegator: delegator.clone(),
-            drep: drep.clone(),
-        }),
-        _ => None,
-    }
+    let (delegator, drep) = match cert.kind()? {
+        MultiEraCertKind::VoteDeleg(delegator, drep) => (delegator, drep),
+        MultiEraCertKind::VoteRegDeleg(delegator, drep, _) => (delegator, drep),
+        MultiEraCertKind::StakeVoteRegDeleg(delegator, _, drep, _) => (delegator, drep),
+        MultiEraCertKind::StakeVoteDeleg(delegator, _, drep) => (delegator, drep),
+        _ => return None,
+    };
+
+    Some(MultiEraVoteDelegation {
+        delegator: delegator.clone(),
+        drep: drep.clone(),
+    })
 }
 
 pub struct MultiEraDRepRegistration {
@@ -235,10 +124,10 @@ pub struct MultiEraDRepRegistration {
 }
 
 pub fn cert_as_drep_registration(cert: &MultiEraCert) -> Option<MultiEraDRepRegistration> {
-    match as_conway_cert(cert)?.as_ref() {
-        ConwayCert::RegDRepCert(cred, deposit, _) => Some(MultiEraDRepRegistration {
+    match cert.kind()? {
+        MultiEraCertKind::RegDRep(cred, deposit, _) => Some(MultiEraDRepRegistration {
             cred: cred.clone(),
-            deposit: *deposit,
+            deposit,
         }),
         _ => None,
     }
@@ -247,10 +136,10 @@ pub fn cert_as_drep_registration(cert: &MultiEraCert) -> Option<MultiEraDRepRegi
 pub type MultiEraDRepUnRegistration = MultiEraDRepRegistration;
 
 pub fn cert_as_drep_unregistration(cert: &MultiEraCert) -> Option<MultiEraDRepUnRegistration> {
-    match as_conway_cert(cert)?.as_ref() {
-        ConwayCert::UnRegDRepCert(cred, deposit) => Some(MultiEraDRepRegistration {
+    match cert.kind()? {
+        MultiEraCertKind::UnRegDRep(cred, deposit) => Some(MultiEraDRepRegistration {
             cred: cred.clone(),
-            deposit: *deposit,
+            deposit,
         }),
         _ => None,
     }
@@ -262,8 +151,8 @@ pub struct MultiEraCommitteeAuth {
 }
 
 pub fn cert_as_committee_auth(cert: &MultiEraCert) -> Option<MultiEraCommitteeAuth> {
-    match as_conway_cert(cert)?.as_ref() {
-        ConwayCert::AuthCommitteeHot(cold, hot) => Some(MultiEraCommitteeAuth {
+    match cert.kind()? {
+        MultiEraCertKind::AuthCommitteeHot(cold, hot) => Some(MultiEraCommitteeAuth {
             cold: cold.clone(),
             hot: hot.clone(),
         }),
@@ -277,10 +166,10 @@ pub struct MultiEraCommitteeResign {
 }
 
 pub fn cert_as_committee_resign(cert: &MultiEraCert) -> Option<MultiEraCommitteeResign> {
-    match as_conway_cert(cert)?.as_ref() {
-        ConwayCert::ResignCommitteeCold(cold, anchor) => Some(MultiEraCommitteeResign {
+    match cert.kind()? {
+        MultiEraCertKind::ResignCommitteeCold(cold, anchor) => Some(MultiEraCommitteeResign {
             cold: cold.clone(),
-            anchor: anchor.clone(),
+            anchor: anchor.cloned(),
         }),
         _ => None,
     }
@@ -293,76 +182,42 @@ pub struct MultiEraStakeDelegation {
 }
 
 pub fn cert_as_stake_delegation(cert: &MultiEraCert) -> Option<MultiEraStakeDelegation> {
-    match cert {
-        MultiEraCert::AlonzoCompatible(cow) => match cow.deref().deref() {
-            AlonzoCert::StakeDelegation(delegator, pool) => Some(MultiEraStakeDelegation {
-                delegator: delegator.clone(),
-                pool: *pool,
-            }),
-            _ => None,
-        },
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::StakeDelegation(delegator, pool) => Some(MultiEraStakeDelegation {
-                delegator: delegator.clone(),
-                pool: *pool,
-            }),
-            ConwayCert::StakeRegDeleg(delegator, pool, _) => Some(MultiEraStakeDelegation {
-                delegator: delegator.clone(),
-                pool: *pool,
-            }),
-            ConwayCert::StakeVoteRegDeleg(delegator, pool, _, _) => Some(MultiEraStakeDelegation {
-                delegator: delegator.clone(),
-                pool: *pool,
-            }),
-            ConwayCert::StakeVoteDeleg(delegator, pool, _) => Some(MultiEraStakeDelegation {
-                delegator: delegator.clone(),
-                pool: *pool,
-            }),
-            _ => None,
-        },
-    }
+    let (delegator, pool) = match cert.kind()? {
+        MultiEraCertKind::StakeDelegation(delegator, pool) => (delegator, pool),
+        MultiEraCertKind::StakeRegDeleg(delegator, pool, _) => (delegator, pool),
+        MultiEraCertKind::StakeVoteRegDeleg(delegator, pool, _, _) => (delegator, pool),
+        MultiEraCertKind::StakeVoteDeleg(delegator, pool, _) => (delegator, pool),
+        _ => return None,
+    };
+
+    Some(MultiEraStakeDelegation {
+        delegator: delegator.clone(),
+        pool: *pool,
+    })
 }
 
 pub fn cert_as_stake_registration(cert: &MultiEraCert) -> Option<StakeCredential> {
-    match cert {
-        MultiEraCert::AlonzoCompatible(cow) => match cow.deref().deref() {
-            AlonzoCert::StakeRegistration(credential) => Some(credential.clone()),
-            _ => None,
-        },
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::StakeRegistration(credential) => Some(credential.clone()),
-            ConwayCert::Reg(cred, _) => Some(cred.clone()),
-            ConwayCert::StakeRegDeleg(cred, _, _) => Some(cred.clone()),
-            ConwayCert::VoteRegDeleg(cred, _, _) => Some(cred.clone()),
-            ConwayCert::StakeVoteRegDeleg(cred, _, _, _) => Some(cred.clone()),
-            _ => None,
-        },
+    match cert.kind()? {
+        MultiEraCertKind::StakeRegistration(credential) => Some(credential.clone()),
+        MultiEraCertKind::Reg(credential, _) => Some(credential.clone()),
+        MultiEraCertKind::StakeRegDeleg(credential, _, _) => Some(credential.clone()),
+        MultiEraCertKind::VoteRegDeleg(credential, _, _) => Some(credential.clone()),
+        MultiEraCertKind::StakeVoteRegDeleg(credential, _, _, _) => Some(credential.clone()),
+        _ => None,
     }
 }
 
 pub fn cert_as_stake_deregistration(cert: &MultiEraCert) -> Option<StakeCredential> {
-    match cert {
-        MultiEraCert::AlonzoCompatible(cow) => match cow.deref().deref() {
-            AlonzoCert::StakeDeregistration(credential) => Some(credential.clone()),
-            _ => None,
-        },
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::StakeDeregistration(credential) => Some(credential.clone()),
-            ConwayCert::UnReg(cred, _) => Some(cred.clone()),
-            _ => None,
-        },
+    match cert.kind()? {
+        MultiEraCertKind::StakeDeregistration(credential) => Some(credential.clone()),
+        MultiEraCertKind::UnReg(credential, _) => Some(credential.clone()),
+        _ => None,
     }
 }
 
-/// Move instantaneous rewards were removed by Conway and never came back, so
-/// no Conway or Dijkstra certificate can be one and the catch-all here is the
-/// right answer rather than a dropped era.
 pub fn cert_as_mir_certificate(cert: &MultiEraCert) -> Option<MoveInstantaneousReward> {
-    match cert {
-        MultiEraCert::AlonzoCompatible(cow) => match cow.deref().deref() {
-            AlonzoCert::MoveInstantaneousRewardsCert(mir) => Some(mir.clone()),
-            _ => None,
-        },
+    match cert.kind()? {
+        MultiEraCertKind::MoveInstantaneousRewards(mir) => Some(mir.clone()),
         _ => None,
     }
 }
@@ -712,7 +567,10 @@ mod script_ref_tests {
 #[cfg(test)]
 mod dijkstra_certificate_tests {
     use super::*;
-    use pallas::ledger::primitives::dijkstra::Certificate as DijkstraCert;
+    use pallas::codec::utils::Nullable;
+    use pallas::ledger::primitives::dijkstra::{
+        BlsKey as DijkstraBlsKey, Certificate as DijkstraCert,
+    };
     use std::borrow::Cow;
 
     const POOL: &str = "747aca09f322d2dfc56243b839e2d573ab92287684e5e37d66ec0f87";
@@ -728,13 +586,14 @@ mod dijkstra_certificate_tests {
     }
 
     fn pool_registration() -> DijkstraCert {
+        pool_registration_with(Some(pallas::codec::utils::Nullable::Null))
+    }
+
+    fn pool_registration_with(bls_key: Option<Nullable<DijkstraBlsKey>>) -> DijkstraCert {
         DijkstraCert::PoolRegistration {
             operator: POOL.parse().unwrap(),
             vrf_keyhash: VRF.parse().unwrap(),
-            // The BLS key slot is what makes a Dijkstra pool registration a
-            // different shape from Conway's. Present and populated is the
-            // interesting one of its three states.
-            bls_key: Some(pallas::codec::utils::Nullable::Null),
+            bls_key,
             pledge: 1_000_000,
             cost: 340_000_000,
             margin: RationalNumber {
@@ -888,6 +747,254 @@ mod dijkstra_certificate_tests {
         assert_eq!(read.reward_account, vec![0xe0]);
         assert_eq!(read.pool_owners, vec![CRED.parse::<Hash<28>>().unwrap()]);
     }
+
+    /// The key a Dijkstra pool registration writes reaches the caller. Both
+    /// byte strings are checked, because a read that carried one of them and
+    /// defaulted the other would pass a test that only looked for a key.
+    #[test]
+    fn a_dijkstra_pool_registration_carries_the_key_it_wrote() {
+        let cert = wrap(pool_registration_with(Some(Nullable::Some(
+            DijkstraBlsKey {
+                bls_pubkey: vec![0xab; 96].into(),
+                bls_possession_proof: vec![0xcd; 48].into(),
+            },
+        ))));
+
+        let read = cert_as_pool_registration(&cert).expect("must be read");
+
+        assert_eq!(
+            read.bls_key,
+            MultiEraBlsKey::Key {
+                pubkey: vec![0xab; 96],
+                possession_proof: vec![0xcd; 48],
+            }
+        );
+    }
+
+    /// The must-not case for the key. Three states of the slot have to stay
+    /// three answers: a registration that wrote nil declined a key, one of an
+    /// era with no slot could not have written one, and only a registration
+    /// that wrote bytes has a key. Reporting any of these as another would
+    /// tell a caller something the chain does not say.
+    #[test]
+    fn the_three_states_of_the_key_slot_stay_three_answers() {
+        let nil = wrap(pool_registration_with(Some(Nullable::Null)));
+        let omitted = wrap(pool_registration_with(None));
+        let written = wrap(pool_registration_with(Some(Nullable::Some(
+            DijkstraBlsKey {
+                bls_pubkey: vec![0x01; 96].into(),
+                bls_possession_proof: vec![0x02; 48].into(),
+            },
+        ))));
+
+        let read = |cert: &MultiEraCert| cert_as_pool_registration(cert).expect("must be read").bls_key;
+
+        assert_eq!(read(&nil), MultiEraBlsKey::Null);
+        assert_eq!(read(&omitted), MultiEraBlsKey::NoSlot);
+        assert!(matches!(read(&written), MultiEraBlsKey::Key { .. }));
+    }
+
+    /// A certificate that is not a pool registration has no key slot to read,
+    /// and the accessor for pool registrations is the only place the key is
+    /// reachable from, so no other accessor can report one.
+    #[test]
+    fn a_certificate_that_is_not_a_pool_registration_has_no_key() {
+        let cert = wrap(DijkstraCert::PoolRetirement(POOL.parse().unwrap(), 42));
+
+        assert!(cert_as_pool_registration(&cert).is_none());
+    }
+}
+
+#[cfg(test)]
+mod real_pool_registration_tests {
+    use super::*;
+    use pallas::ledger::traverse::MultiEraBlock;
+
+    /// The block cut from the prototype chain at slot 86855 whose single
+    /// transaction registers a pool and fills the BLS key slot. Its provenance
+    /// entry is `pool_registration_with_bls_key`.
+    const BLOCK: &str = include_str!("../../../test_data/musashi-w36/pool-registration-bls.block");
+
+    /// The two byte strings that block's key slot holds, read off the CBOR at
+    /// offset 1022 as a 96 byte string followed by a 48 byte one.
+    const PUBKEY: &str = "b0d04d6492c59fa7aae9354078c77adc8ba04db59982fe1a842b0356ac720846ea098aa1e93972c027ae10c8b91f30e30c541a6675e2feeeb177c60f6a67159eb5751666ea5875a4983bfea53fed819958bc530cc0ad884eeaf0b85e8f3a46a5";
+    const PROOF: &str = "a9964d2780f1fb6f7ba8553a89bfc4ddf831021ec051744b13dddfea412c7bd7314d65c1f276e22c114c523645af1854";
+
+    fn registrations() -> Vec<MultiEraPoolRegistration> {
+        let cbor = hex::decode(BLOCK.trim()).expect("the fixture is hex");
+        let block = MultiEraBlock::decode(&cbor).expect("the fixture decodes");
+
+        block
+            .txs()
+            .iter()
+            .flat_map(|tx| tx.certs())
+            .filter_map(|cert| cert_as_pool_registration(&cert))
+            .collect()
+    }
+
+    /// The must-fire case against the chain rather than against a certificate
+    /// built here. A registration a node accepted carries a key, and the read
+    /// a consumer of this module gets has to carry the same bytes.
+    #[test]
+    fn the_key_a_real_pool_registration_wrote_reaches_a_consumer() {
+        let read = registrations();
+
+        assert_eq!(read.len(), 1, "the fixture holds one pool registration");
+
+        let carried = serde_json::to_value(&read[0]).expect("the read serializes");
+
+        assert_eq!(
+            carried["bls_key"]["Key"]["pubkey"],
+            serde_json::json!(hex::decode(PUBKEY).expect("the key is hex")),
+        );
+        assert_eq!(
+            carried["bls_key"]["Key"]["possession_proof"],
+            serde_json::json!(hex::decode(PROOF).expect("the proof is hex")),
+        );
+    }
+
+    /// Every other parameter of the same registration, each compared to what
+    /// the certificate itself says rather than to a value written here, so a
+    /// read that carried the key and defaulted or swapped a field does not
+    /// pass on the key alone.
+    #[test]
+    fn the_rest_of_a_real_pool_registration_reaches_a_consumer_too() {
+        let cbor = hex::decode(BLOCK.trim()).expect("the fixture is hex");
+        let block = MultiEraBlock::decode(&cbor).expect("the fixture decodes");
+
+        let mut compared = 0;
+
+        for tx in block.txs().iter() {
+            for cert in tx.certs() {
+                let Some(MultiEraCertKind::PoolRegistration(params)) = cert.kind() else {
+                    continue;
+                };
+
+                let read = cert_as_pool_registration(&cert).expect("must be read");
+
+                assert_eq!(&read.operator, params.operator);
+                assert_eq!(&read.vrf_keyhash, params.vrf_keyhash);
+                assert_eq!(read.pledge, params.pledge);
+                assert_eq!(read.cost, params.cost);
+                assert_eq!(&read.margin, params.margin);
+                assert_eq!(read.reward_account, params.reward_account.to_vec());
+                assert_eq!(read.pool_owners, params.pool_owners.to_vec());
+                assert_eq!(read.relays, params.relays.to_vec());
+                assert_eq!(read.pool_metadata.as_ref(), params.pool_metadata);
+
+                compared += 1;
+            }
+        }
+
+        assert_eq!(compared, 1, "the fixture holds one pool registration");
+    }
+}
+
+#[cfg(test)]
+mod earlier_era_certificate_tests {
+    use super::*;
+    use pallas::ledger::primitives::alonzo::Certificate as AlonzoCert;
+    use pallas::ledger::primitives::conway::Certificate as ConwayCert;
+    use std::borrow::Cow;
+
+    const POOL: &str = "747aca09f322d2dfc56243b839e2d573ab92287684e5e37d66ec0f87";
+    const VRF: &str = "d8252bd637a90ba4dbd2cf63afda20a19888b7895ede067081ce7fb7411a972b";
+    const CRED: &str = "5e81366cb6f3c0d14837614afcea669d51b8be9519eaec4a237504f8";
+
+    fn alonzo(cert: AlonzoCert) -> MultiEraCert<'static> {
+        MultiEraCert::AlonzoCompatible(Box::new(Cow::Owned(cert)))
+    }
+
+    fn conway(cert: ConwayCert) -> MultiEraCert<'static> {
+        MultiEraCert::Conway(Box::new(Cow::Owned(cert)))
+    }
+
+    fn cred() -> StakeCredential {
+        StakeCredential::AddrKeyhash(CRED.parse().unwrap())
+    }
+
+    /// A move instantaneous rewards certificate is named by the type serving
+    /// Shelley through Babbage and by no later era's, so it is the one kind
+    /// whose reader has to keep answering for an early era and for no other.
+    #[test]
+    fn a_move_instantaneous_rewards_certificate_is_read_for_the_era_that_names_it() {
+        let mir = pallas::ledger::primitives::alonzo::MoveInstantaneousReward {
+            source: pallas::ledger::primitives::alonzo::InstantaneousRewardSource::Reserves,
+            target: pallas::ledger::primitives::alonzo::InstantaneousRewardTarget::OtherAccountingPot(
+                1_000_000,
+            ),
+        };
+
+        let cert = alonzo(AlonzoCert::MoveInstantaneousRewardsCert(mir));
+
+        assert!(cert_as_mir_certificate(&cert).is_some());
+        assert!(cert_as_stake_registration(&cert).is_none());
+        assert!(cert_as_pool_registration(&cert).is_none());
+
+        let later = conway(ConwayCert::Reg(cred(), 2_000_000));
+
+        assert!(cert_as_mir_certificate(&later).is_none());
+    }
+
+    /// The two stake certificates the Conway type still names and no later era
+    /// does, read for both eras that name them.
+    #[test]
+    fn the_stake_certificates_of_an_earlier_era_are_read() {
+        assert_eq!(
+            cert_as_stake_registration(&alonzo(AlonzoCert::StakeRegistration(cred()))),
+            Some(cred())
+        );
+        assert_eq!(
+            cert_as_stake_deregistration(&alonzo(AlonzoCert::StakeDeregistration(cred()))),
+            Some(cred())
+        );
+        assert_eq!(
+            cert_as_stake_registration(&conway(ConwayCert::StakeRegistration(cred()))),
+            Some(cred())
+        );
+        assert_eq!(
+            cert_as_stake_deregistration(&conway(ConwayCert::StakeDeregistration(cred()))),
+            Some(cred())
+        );
+    }
+
+    /// A pool registration of an era with no key slot reads as having none,
+    /// and every other parameter still arrives.
+    #[test]
+    fn a_conway_pool_registration_has_no_key_slot_and_keeps_its_parameters() {
+        let cert = conway(ConwayCert::PoolRegistration {
+            operator: POOL.parse().unwrap(),
+            vrf_keyhash: VRF.parse().unwrap(),
+            pledge: 1_000_000,
+            cost: 340_000_000,
+            margin: RationalNumber {
+                numerator: 3,
+                denominator: 100,
+            },
+            reward_account: vec![0xe0].into(),
+            pool_owners: vec![CRED.parse::<Hash<28>>().unwrap()].into(),
+            relays: vec![],
+            pool_metadata: None,
+        });
+
+        let read = cert_as_pool_registration(&cert).expect("must be read");
+
+        assert_eq!(read.bls_key, MultiEraBlsKey::NoSlot);
+        assert_eq!(read.operator, POOL.parse::<Hash<28>>().unwrap());
+        assert_eq!(read.pledge, 1_000_000);
+        assert_eq!(read.pool_owners, vec![CRED.parse::<Hash<28>>().unwrap()]);
+    }
+
+    /// An era that carries no certificates at all answers no accessor, which
+    /// is the one case a reader is allowed to answer nothing for.
+    #[test]
+    fn an_era_with_no_certificates_answers_no_accessor() {
+        let cert = MultiEraCert::NotApplicable;
+
+        assert!(cert_as_pool_registration(&cert).is_none());
+        assert!(cert_as_stake_registration(&cert).is_none());
+        assert!(cert_as_mir_certificate(&cert).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -943,10 +1050,29 @@ pub(crate) mod testing {
     use crate::model::testing as root;
     use proptest::prelude::*;
 
+    /// All four states of the key slot, so a roundtrip is asserted over each
+    /// rather than over whichever one a fixed value picked.
+    pub fn any_bls_key() -> impl Strategy<Value = MultiEraBlsKey> {
+        prop_oneof![
+            Just(MultiEraBlsKey::NoSlot),
+            Just(MultiEraBlsKey::Null),
+            Just(MultiEraBlsKey::Unrecognized),
+            (
+                prop::collection::vec(any::<u8>(), 96..97),
+                prop::collection::vec(any::<u8>(), 48..49),
+            )
+                .prop_map(|(pubkey, possession_proof)| MultiEraBlsKey::Key {
+                    pubkey,
+                    possession_proof,
+                }),
+        ]
+    }
+
     prop_compose! {
         pub fn any_multi_era_pool_registration()(
             operator in root::any_hash_28(),
             params in any_pool_params(),
+            bls_key in any_bls_key(),
         ) -> MultiEraPoolRegistration {
             MultiEraPoolRegistration {
                 operator,
@@ -958,6 +1084,7 @@ pub(crate) mod testing {
                 pool_owners: params.pool_owners,
                 relays: params.relays,
                 pool_metadata: params.pool_metadata,
+                bls_key,
             }
         }
     }
