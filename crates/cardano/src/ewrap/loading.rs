@@ -3195,7 +3195,7 @@ mod ratification_tests {
     fn boundary_without_distributions_resolves_nothing() {
         let proposal = withdrawal(0x01, Some(Vote::Yes), CLOSING + 10);
 
-        let domain = seed(&[proposal.clone()]);
+        let domain = seed(std::slice::from_ref(&proposal));
 
         let mut gov = crate::load_gov::<ToyDomain>(domain.state()).unwrap();
         gov.prev_distr = None;
@@ -3303,7 +3303,7 @@ mod ratification_tests {
     fn pre_conway_updates_enact_without_a_tally() {
         let update = legacy_update(0x01, 44, CLOSING);
 
-        let domain = seed(&[update.clone()]);
+        let domain = seed(std::slice::from_ref(&update));
 
         let mut gov = crate::load_gov::<ToyDomain>(domain.state()).unwrap();
         gov.active_since = None;
