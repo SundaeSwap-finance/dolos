@@ -1325,6 +1325,33 @@ mod tests {
         assert_eq!(json["backend"], "no_op");
     }
 
+    /// MUST FIRE: the wire order apply rule is off in the default, off when the
+    /// sync section names nothing, and absent from the serialized default, so a
+    /// change that turned it on is refused here rather than in an operator's
+    /// ledger. It mirrors one prototype's behaviour, and on any other network
+    /// the same leniency computes a UTxO set the network does not hold.
+    ///
+    /// MUST NOT FIRE: a config that asks for it gets it. Without this half the
+    /// three assertions above also hold for a field that can never be true.
+    #[test]
+    fn the_wire_order_apply_rule_is_off_unless_a_config_asks_for_it() {
+        use serde_json::json;
+
+        assert!(!SyncConfig::default().leios_lenient_apply);
+
+        let absent: SyncConfig = serde_json::from_value(json!({})).unwrap();
+        assert!(!absent.leios_lenient_apply);
+
+        // Absent from the serialized default, so a config that never asked for
+        // it cannot gain it by a round trip through the file.
+        let json = serde_json::to_value(SyncConfig::default()).unwrap();
+        assert!(json.get("leios_lenient_apply").is_none(), "{json}");
+
+        let asked: SyncConfig =
+            serde_json::from_value(json!({ "leios_lenient_apply": true })).unwrap();
+        assert!(asked.leios_lenient_apply);
+    }
+
     #[test]
     fn the_archive_table_refuses_keys_it_does_not_know() {
         use serde_json::json;
