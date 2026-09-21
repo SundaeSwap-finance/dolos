@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 trait-variant.workspace = true
 itertools.workspace = true
@@ -28,5 +29,6 @@ serde_with = "3.16.0"
 
 [dev-dependencies]
 proptest = "1.7.0"
-serde_json.workspace = true
 dolos-testing = { path = "../testing" }
+dolos-cardano = { path = "../cardano", features = ["include-genesis"] }
+tempfile = "3.20.0"
