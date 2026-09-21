@@ -16,6 +16,26 @@ use utils::{
     build_stake_snapshots_response, build_utxo_by_address_response,
 };
 
+/// The era index a `GetCurrentEra` reply carries for a protocol major, or
+/// `None` for a major no era here names.
+///
+/// Naming the newest era we know for an unknown major would report the wrong
+/// era to a client that has no way of telling it is wrong, so a caller with no
+/// index refuses.
+fn era_index_for_protocol(protocol: u16) -> Option<u16> {
+    match protocol {
+        0..=1 => Some(0),  // Byron
+        2 => Some(1),      // Shelley
+        3 => Some(2),      // Allegra
+        4 => Some(3),      // Mary
+        5..=6 => Some(4),  // Alonzo
+        7..=8 => Some(5),  // Babbage
+        9..=11 => Some(6), // Conway, including the Van Rossem intra-era fork at 11
+        12 => Some(7),     // Dijkstra
+        _ => None,
+    }
+}
+
 pub struct Session<D: Domain> {
     domain: D,
     connection: localstate::Server,
@@ -241,26 +261,14 @@ impl<D: Domain> Session<D> {
                     .map_err(|e| Error::server(format!("failed to load era summary: {}", e)))?;
 
                 let edge = chain_summary.edge();
-                let era_index = match edge.protocol {
-                    0..=1 => 0,  // Byron
-                    2 => 1,      // Shelley
-                    3 => 2,      // Allegra
-                    4 => 3,      // Mary
-                    5..=6 => 4,  // Alonzo
-                    7..=8 => 5,  // Babbage
-                    9..=11 => 6, // Conway, including the Van Rossem intra-era fork at 11
-                    12 => 7,     // Dijkstra
-                    // A version with no era here cannot be answered. Naming the
-                    // newest era we know would report the wrong era to a client
-                    // that has no way of telling it is wrong.
-                    other => {
-                        return Err(Error::server(format!(
-                            "no era is known for protocol version {other}"
-                        )))
-                    }
-                };
+                let era_index = era_index_for_protocol(edge.protocol).ok_or_else(|| {
+                    Error::server(format!(
+                        "no era is known for protocol version {}",
+                        edge.protocol
+                    ))
+                })?;
 
-                AnyCbor::from_encode(era_index as u16)
+                AnyCbor::from_encode(era_index)
             }
             Ok(q16::Request::LedgerQuery(q16::LedgerQuery::BlockQuery(
                 _era,
@@ -438,4 +446,52 @@ pub async fn handle_session<D: Domain, C: CancelToken>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::era_index_for_protocol;
+
+    #[test]
+    fn protocol_major_twelve_is_the_dijkstra_era_index() {
+        assert_eq!(era_index_for_protocol(12), Some(7));
+    }
+
+    #[test]
+    fn every_major_a_released_era_uses_carries_that_era_index() {
+        let pairs = [
+            (0, 0),
+            (1, 0),
+            (2, 1),
+            (3, 2),
+            (4, 3),
+            (5, 4),
+            (6, 4),
+            (7, 5),
+            (8, 5),
+            (9, 6),
+            (10, 6),
+            (11, 6),
+            (12, 7),
+        ];
+
+        for (protocol, expected) in pairs {
+            assert_eq!(
+                era_index_for_protocol(protocol),
+                Some(expected),
+                "major {protocol} did not carry era index {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_major_no_era_names_carries_no_index_rather_than_the_newest_one() {
+        for protocol in [13u16, 14, 99, u16::MAX] {
+            assert_eq!(
+                era_index_for_protocol(protocol),
+                None,
+                "major {protocol} was answered with an era index"
+            );
+        }
+    }
 }
