@@ -34,6 +34,7 @@ pub mod builtin;
 pub mod cbor;
 pub mod config;
 pub mod crawl;
+pub mod dijkstra;
 pub mod import;
 pub mod indexes;
 pub mod mempool;
@@ -363,6 +364,8 @@ pub struct Genesis {
     pub shelley: pallas::interop::hardano::configs::shelley::GenesisFile,
     pub alonzo: pallas::interop::hardano::configs::alonzo::GenesisFile,
     pub conway: pallas::interop::hardano::configs::conway::GenesisFile,
+    /// Absent when the configuration names no Dijkstra genesis path.
+    pub dijkstra: Option<dijkstra::GenesisFile>,
     pub shelley_hash: Hash<32>,
     pub force_protocol: Option<usize>,
 }
@@ -394,9 +397,17 @@ impl Genesis {
             shelley,
             alonzo,
             conway,
+            dijkstra: None,
             force_protocol,
             shelley_hash,
         })
+    }
+
+    /// Reads the Dijkstra genesis at `path` into this one.
+    pub fn with_dijkstra(mut self, path: impl AsRef<Path>) -> Result<Self, std::io::Error> {
+        self.dijkstra = Some(dijkstra::from_file(path)?);
+
+        Ok(self)
     }
 }
 
