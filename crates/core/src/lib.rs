@@ -608,9 +608,9 @@ pub trait ChainLogic: Sized + Send + Sync {
     /// returns the UTxO delta, index delta, and transaction hashes needed
     /// to reverse the block's effects.
     ///
-    /// `lenient` is the apply rule the blocks being undone were applied under,
-    /// because the inverse of a walk that left an input unconsumed is a walk
-    /// that recovers nothing for it.
+    /// `lenient` is the rule the running process holds. Nothing records the
+    /// rule a block was applied under, so a configuration changed between the
+    /// apply and the rollback gives the undo the new one.
     fn compute_undo(
         block: &Cbor,
         inputs: &HashMap<TxoRef, Arc<EraCbor>>,
