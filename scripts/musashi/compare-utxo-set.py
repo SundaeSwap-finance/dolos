@@ -2,9 +2,13 @@
 
 The node is the reference set, because the follower cannot be asked for a set it
 has no index for. So this asks the follower for every one of the node's utxos by
-key and checks that each one is there with the same lovelace. A utxo the
-follower holds that the node does not is invisible to this comparison, and the
-summary says so rather than leaving the direction unmentioned.
+key and checks that each one is there with the same lovelace.
+
+The other direction, a utxo the follower holds and the node does not, cannot be
+found by enumeration for the same reason, but it can be checked key by key. Put
+the keys to check in a file and name it in EXTRA_KEYS, and each one the follower
+holds is put to the node as a keyed query. A run given no such file reports that
+it looked for none rather than reporting none found.
 
 The run is guarded at both ends. The node's tip is read before and after the
 dump, so the report names the window the dump belongs to, and every reply the
@@ -67,6 +71,9 @@ LEVEL_INTERVAL = int(os.environ.get("LEVEL_INTERVAL", "10"))
 # How many missing keys to print in full.
 SHOW = int(os.environ.get("SHOW", "40"))
 
+# A file of txid#index lines to check in the other direction, one per line.
+EXTRA_KEYS = os.environ.get("EXTRA_KEYS", "")
+
 
 def run(argv, stdin=None):
     done = subprocess.run(argv, input=stdin, capture_output=True, text=True)
@@ -89,6 +96,17 @@ def node_utxos(path):
 
     with open(path) as handle:
         return json.load(handle)
+
+
+def node_holds(keys):
+    """Which of these keys the node holds now, asked as one keyed query."""
+    if not keys:
+        return set()
+
+    argv = [CARDANO_CLI, "query", "utxo", "--output-json"]
+    for key in keys:
+        argv += ["--tx-in", key]
+    return set(json.loads(run(argv)))
 
 
 def key_to_request(key):
@@ -163,6 +181,29 @@ def wait_until_level(after_slot):
         waited += LEVEL_INTERVAL
 
 
+def reverse_pass(wanted):
+    """The keys the follower holds and the node does not, from the given file."""
+    if not EXTRA_KEYS:
+        print(
+            "REVERSE no key file given, so no utxo the follower holds and the "
+            "node does not was looked for"
+        )
+        return []
+
+    with open(EXTRA_KEYS) as handle:
+        asked = [line.strip() for line in handle if line.strip() and line.strip() not in wanted]
+
+    held, _ = ask_all(asked)
+    still = node_holds(sorted(held))
+    over = [key for key in sorted(held) if key not in still]
+
+    print(
+        f"REVERSE {len(asked)} keys asked, follower holds {len(held)}, the node "
+        f"holds {len(still)} of those, only on the follower {len(over)}"
+    )
+    return over
+
+
 def main():
     before_slot, before_block, _ = node_tip()
 
@@ -213,6 +254,12 @@ def main():
         print(f"RETRY  {len(missing)} still absent from the follower on the second pass")
 
     value_diffs = [key for key in sorted(held) if held[key] != wanted.get(key)]
+    over = reverse_pass(wanted)
+
+    for key in over[:SHOW]:
+        print(f"ONLYFOLLOWER {key}")
+    if len(over) > SHOW:
+        print(f"ONLYFOLLOWER {len(over) - SHOW} further keys not printed")
 
     for key in missing[:SHOW]:
         print(f"ONLYNODE {key} {wanted[key]}")
@@ -228,14 +275,14 @@ def main():
     print(
         f"UTXO   node {len(keys)}, follower {answered} on the first pass, "
         f"spent between the dumps {len(spent)}, only on node {len(missing)}, "
-        f"value diffs {len(value_diffs)}, matched slot {follower_slot}"
+        f"value diffs {len(value_diffs)}, only on follower {len(over)}, "
+        f"matched slot {follower_slot}"
     )
-    print("DIRECTION a utxo the follower holds and the node does not is not visible here  REPORTED")
 
     if not level:
         print("INCONCLUSIVE the follower never came level with the node")
         return 2
-    if missing or value_diffs:
+    if missing or value_diffs or over:
         print("DIFFERS")
         return 1
 

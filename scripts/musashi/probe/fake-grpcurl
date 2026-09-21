@@ -10,6 +10,9 @@ set. Those are the two shapes the scripts exist to catch.
 The hollow arm answers one key with the key alone and no utxo under it, which
 is the shape a comparison reports as agreement when it counts a reply item
 rather than a utxo.
+
+The extra arm holds a utxo the node does not, which is the direction no
+enumeration of the follower can reach.
 """
 
 import base64
@@ -148,6 +151,12 @@ def utxos(request):
     dropped = keys[2] if ARM == "diverge" else None
     altered = keys[3] if ARM == "diverge" else None
     hollow = keys[2] if ARM == "hollow" else None
+
+    if ARM == "extra":
+        with open(os.path.join(HERE, "extra-keys.txt")) as handle:
+            for line in handle:
+                if line.strip():
+                    node[line.strip()] = {"value": {"lovelace": 6000000}}
 
     items = []
     for key in request.get("keys") or []:
