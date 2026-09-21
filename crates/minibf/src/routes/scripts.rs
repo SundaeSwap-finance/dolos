@@ -15,6 +15,7 @@ use dolos_cardano::indexes::{AsyncCardanoQueryExt, CardanoStateIndexExt, ScriptL
 use dolos_core::Domain;
 use pallas::crypto::hash::Hash;
 use pallas::ledger::primitives::alonzo::NativeScript;
+use pallas::ledger::primitives::dijkstra::NativeScript as DijkstraNativeScript;
 use pallas::{codec::minicbor, ledger::primitives::ToCanonicalJson};
 use reqwest::StatusCode;
 
@@ -55,10 +56,19 @@ fn script_type_for_language(language: ScriptLanguage) -> Option<ScriptType> {
 /// The canonical JSON of a native script, or the status that says why there is
 /// none.
 ///
+/// Only the type serving Shelley through Conway renders canonical JSON, and it
+/// has no member for the guard requirement Dijkstra adds. Bytes the Dijkstra
+/// type reads and that one does not carry a guard requirement, so the request
+/// is refused rather than answered with a different script.
 fn native_script_json(bytes: &[u8]) -> Result<String, StatusCode> {
-    let native: NativeScript =
-        minicbor::decode(bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(native.to_json_string())
+    if let Ok(native) = minicbor::decode::<NativeScript>(bytes) {
+        return Ok(native.to_json_string());
+    }
+
+    match minicbor::decode::<DijkstraNativeScript>(bytes) {
+        Ok(_) => Err(StatusCode::NOT_IMPLEMENTED),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
 
 fn parse_datum_hash(datum_hash: &str) -> Result<Hash<32>, StatusCode> {
@@ -226,6 +236,7 @@ mod tests {
     use super::*;
     use crate::test_support::{TestApp, TestFault};
     use blockfrost_openapi::models::script_json::ScriptJson;
+    use pallas::ledger::primitives::StakeCredential;
 
     fn fixture_app() -> TestApp {
         TestApp::new()
@@ -296,6 +307,18 @@ mod tests {
         assert_eq!(
             native_script_json(&[0xff, 0xff, 0xff]),
             Err(StatusCode::INTERNAL_SERVER_ERROR)
+        );
+    }
+
+    #[test]
+    fn a_dijkstra_guard_requirement_is_refused_rather_than_reported_as_an_error() {
+        let credential = StakeCredential::AddrKeyhash(Hash::<28>::from([0x11; 28]));
+        let script = DijkstraNativeScript::ScriptRequireGuard(credential);
+        let bytes = minicbor::to_vec(&script).expect("must encode");
+
+        assert_eq!(
+            native_script_json(&bytes),
+            Err(StatusCode::NOT_IMPLEMENTED)
         );
     }
 
