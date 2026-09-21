@@ -68,7 +68,25 @@ fn map_live_params<C: LedgerContext>(
 
     mapped.pool_retirement_epoch_bound = bound;
 
+    // The Conway cost model type names three languages and reads the PlutusV4
+    // vector into a wildcard map, which the era mapping drops, so a client
+    // pricing a PlutusV4 script would be served no model for it.
+    if let Some(values) = plutus_v4_cost_model(pparams) {
+        mapped
+            .cost_models
+            .get_or_insert_with(Default::default)
+            .plutus_v4 = Some(u5c::cardano::CostModel { values });
+    }
+
     Ok(mapped)
+}
+
+/// The PlutusV4 cost model the parameters carry, at key 3 of the wildcard map.
+fn plutus_v4_cost_model(pparams: &dolos_cardano::PParamsSet) -> Option<Vec<i64>> {
+    pparams
+        .cost_models_unknown()?
+        .get(&dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY)
+        .cloned()
 }
 
 trait IntoSet {
@@ -1589,6 +1607,12 @@ mod live_params_tests {
             .with(Val::CostModelsPlutusV1(model(node, "PlutusV1")))
             .with(Val::CostModelsPlutusV2(model(node, "PlutusV2")))
             .with(Val::CostModelsPlutusV3(model(node, "PlutusV3")))
+            // The Conway cost model type names three languages, so the chain
+            // carries the PlutusV4 vector under key 3 of the wildcard map.
+            .with(Val::CostModelsUnknown(std::collections::BTreeMap::from([(
+                dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY,
+                model(node, "PlutusV4"),
+            )])))
     }
 
     fn serve(set: &PParamsSet) -> u5c::cardano::PParams {
@@ -1727,6 +1751,10 @@ mod live_params_tests {
             (
                 "cost_models.plutus_v3",
                 show_served_model(&models.plutus_v3),
+            ),
+            (
+                "cost_models.plutus_v4",
+                show_served_model(&models.plutus_v4),
             ),
             (
                 "prices.memory",
@@ -1874,6 +1902,10 @@ mod live_params_tests {
                 show_model(&model(node, "PlutusV3")),
             ),
             (
+                "cost_models.plutus_v4",
+                show_model(&model(node, "PlutusV4")),
+            ),
+            (
                 "prices.memory",
                 show_ratio(&nested_ratio(node, "executionUnitPrices", "priceMemory")),
             ),
@@ -1944,6 +1976,20 @@ mod live_params_tests {
         assert_eq!(models.plutus_v1.unwrap().values, model(&node, "PlutusV1"));
         assert_eq!(models.plutus_v2.unwrap().values, model(&node, "PlutusV2"));
         assert_eq!(models.plutus_v3.unwrap().values, model(&node, "PlutusV3"));
+        assert_eq!(models.plutus_v4.unwrap().values, model(&node, "PlutusV4"));
+    }
+
+    /// The must-not case. A set that names no PlutusV4 vector has to answer
+    /// none, or every chain would read as one that priced PlutusV4.
+    #[test]
+    fn a_set_with_no_plutus_v4_model_serves_none() {
+        let node = node();
+        let mut set = live_set(&node);
+        set.clear(dolos_cardano::model::PParamKind::CostModelsUnknown);
+
+        let models = serve(&set).cost_models.unwrap_or_default();
+
+        assert!(models.plutus_v4.is_none());
     }
 
     #[test]
@@ -1962,7 +2008,7 @@ mod live_params_tests {
     }
 
     #[test]
-    fn the_retirement_bound_is_the_only_field_the_era_mapping_leaves_behind() {
+    fn the_retirement_bound_and_the_plutus_v4_model_are_the_fields_the_era_mapping_leaves_behind() {
         let node = node();
         let set = live_set(&node);
 
@@ -1977,6 +2023,9 @@ mod live_params_tests {
             .map(|((name, _), _)| name)
             .collect();
 
-        assert_eq!(differing, vec!["pool_retirement_epoch_bound"]);
+        assert_eq!(
+            differing,
+            vec!["pool_retirement_epoch_bound", "cost_models.plutus_v4"]
+        );
     }
 }
