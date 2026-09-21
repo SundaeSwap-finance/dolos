@@ -20,6 +20,13 @@ export CARDANO_CLI GRPCURL
 export DOLOS_GRPC=probe
 export LEVEL_TIMEOUT=0
 export EXTRA_KEYS="$HERE/extra-keys.txt"
+# The dump the fake node writes is a fixture of a few hundred bytes, so the
+# guards that stop a dump large enough to fill the disk or exhaust memory have
+# nothing to stop here. Left armed they read the host filesystem and
+# /proc/meminfo, which decides the verdict from how much room and memory the
+# machine happens to have.
+export DISK_FLOOR_KB=0
+export MEM_FLOOR_KB=0
 
 chmod +x "$CARDANO_CLI" "$GRPCURL"
 
