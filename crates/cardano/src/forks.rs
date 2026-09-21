@@ -203,6 +203,31 @@ pub fn into_conway(previous: &PParamsSet, genesis: &conway::GenesisFile) -> PPar
         ))
 }
 
+/// Moves a Conway parameter set to Dijkstra.
+///
+/// Dijkstra keeps every Conway parameter with the same meaning and names a cost
+/// model for PlutusV4, which the Conway cost model type reads under a wildcard
+/// key. That model is declared by the Dijkstra genesis file and by nothing on
+/// the chain, so a configuration with no path to that file has no cost model
+/// for a language the network is already running, and this stops rather than
+/// producing a set that is missing one.
+pub fn into_dijkstra(previous: &PParamsSet, genesis: &Genesis) -> PParamsSet {
+    let Some(dijkstra) = genesis.dijkstra.as_ref() else {
+        panic!("reaching protocol version 12 needs a dijkstra genesis file and this configuration has no path to one")
+    };
+
+    let mut unknown = previous.cost_models_unknown_or_default();
+    unknown.insert(
+        crate::pallas_extras::PLUTUS_V4_COST_MODEL_KEY,
+        dijkstra.plutus_v4_cost_model.clone(),
+    );
+
+    previous
+        .clone()
+        .with(Val::ProtocolVersion((12, 0)))
+        .with(Val::CostModelsUnknown(unknown))
+}
+
 /// Increments the protocol version by 1 without changing any other fields
 pub fn intra_era_hardfork(current: &PParamsSet, target: u16) -> PParamsSet {
     current
@@ -243,15 +268,12 @@ pub fn migrate_pparams_version(
         (9, 10) => intra_era_hardfork(current, to),
         // Van Rossem: intra-era hard-fork to protocol version 11
         (10, 11) => intra_era_hardfork(current, to),
-        // Protocol version 12 transitions from Conway to Dijkstra. Dijkstra
-        // keeps the Conway parameters with the same meanings and adds the ones
-        // a Dijkstra genesis file declares, which are the Leios periods and
+        // Protocol version 12 transitions from Conway to Dijkstra. The other
+        // parameters the Dijkstra genesis declares, the Leios periods and
         // committee, the endorser block limits, and the reference script
-        // sizing and cost. None of those has a member in PParamsSet and
-        // nothing here reads one, so the transition carries the Conway set
-        // forward and moves the version on. A consumer that needs a Dijkstra
-        // parameter needs a PParamsSet that can hold it first.
-        (11, 12) => intra_era_hardfork(current, to),
+        // sizing and cost, have no member in PParamsSet and a consumer that
+        // needs one of them needs a set that can hold it first.
+        (11, 12) => into_dijkstra(current, genesis),
         (from, to) => {
             unimplemented!("don't know how to bump from version {from} to {to} (#1033)",)
         }
@@ -324,12 +346,29 @@ mod tests {
         load_genesis(&path)
     }
 
+    /// The mainnet genesis with the Musashi node's own Dijkstra file attached.
+    ///
+    /// The Dijkstra file is the one the Musashi network is governed by, copied
+    /// byte for byte, so a cost model read out of it is the one the node runs
+    /// and not one chosen for a test.
+    fn genesis_with_dijkstra() -> dolos_core::Genesis {
+        let path = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("..")
+            .join("core")
+            .join("test_data")
+            .join("musashi")
+            .join("dijkstra-genesis.json");
+
+        mainnet_genesis().with_dijkstra(path).unwrap()
+    }
+
     /// The Musashi testnet runs at protocol major 12, so the ladder has to
-    /// reach it. Dijkstra keeps every parameter Conway had and adds four, so
-    /// the step must change the version and nothing else.
+    /// reach it. Dijkstra keeps every parameter Conway had, and the one it adds
+    /// that the set can hold is the PlutusV4 cost model, so the step must
+    /// change the version, add that model, and nothing else.
     #[test]
     fn force_pparams_to_dijkstra() {
-        let genesis = mainnet_genesis();
+        let genesis = genesis_with_dijkstra();
         let initial = from_byron_genesis(&genesis.byron);
 
         let at_eleven = force_pparams_version(&initial, &genesis, 0, 11).unwrap();
@@ -337,17 +376,128 @@ mod tests {
 
         assert_eq!(at_twelve.protocol_major(), Some(12));
 
-        let expected = at_eleven.with(PParamValue::ProtocolVersion((12, 0)));
+        let mut unknown = at_eleven.cost_models_unknown_or_default();
+        unknown.insert(
+            3,
+            genesis
+                .dijkstra
+                .as_ref()
+                .unwrap()
+                .plutus_v4_cost_model
+                .clone(),
+        );
+
+        let expected = at_eleven
+            .with(PParamValue::ProtocolVersion((12, 0)))
+            .with(PParamValue::CostModelsUnknown(unknown));
+
         assert_eq!(at_twelve, expected);
     }
 
-    /// Every parameter the Musashi node's Dijkstra genesis declares, as that
-    /// file spells them.
+    /// MUST FIRE: the cost model the Dijkstra genesis declares for PlutusV4
+    /// reaches the parameter set, under the key the cost model map names for
+    /// that language.
     ///
-    /// Dolos has no member for any of them, and the test below is what says so
-    /// out loud: the day `PParamsSet` grows one and the version 12 step starts
-    /// emitting it, the assertion fails and the transition above stops being
-    /// the whole story.
+    /// The length, the first entry, the last entry and the one negative entry
+    /// are the chain's own numbers, so a set carrying some other vector under
+    /// that key fails here rather than passing on a value that is merely
+    /// present.
+    #[test]
+    fn the_dijkstra_step_carries_the_genesis_plutus_v4_cost_model() {
+        let genesis = genesis_with_dijkstra();
+        let initial = from_byron_genesis(&genesis.byron);
+
+        let at_twelve = force_pparams_version(&initial, &genesis, 0, 12).unwrap();
+        let carried = at_twelve.cost_models_unknown_or_default();
+
+        // Key 3 is what the Dijkstra cost model map names for PlutusV4.
+        let model = carried.get(&3).expect("no cost model under the PlutusV4 key");
+
+        assert_eq!(model.len(), 251);
+        assert_eq!(model[0], 100788);
+        assert_eq!(model[52], -900);
+        assert_eq!(model[250], 1);
+        assert_eq!(
+            model,
+            &genesis.dijkstra.as_ref().unwrap().plutus_v4_cost_model
+        );
+    }
+
+    /// MUST NOT FIRE: a set that stops in Conway has no cost model under the
+    /// PlutusV4 key, so a model found after the version 12 step came from that
+    /// step and was not already there.
+    #[test]
+    fn the_step_before_dijkstra_carries_no_plutus_v4_cost_model() {
+        let genesis = genesis_with_dijkstra();
+        let initial = from_byron_genesis(&genesis.byron);
+
+        let at_eleven = force_pparams_version(&initial, &genesis, 0, 11).unwrap();
+
+        assert_eq!(at_eleven.cost_models_unknown_or_default().get(&3), None);
+    }
+
+    /// MUST NOT FIRE: the Dijkstra step adds the one key and changes no other
+    /// cost model, so a step that rebuilt the map or dropped an entry fails
+    /// here.
+    #[test]
+    fn the_dijkstra_step_adds_one_cost_model_key_and_changes_no_other() {
+        let genesis = genesis_with_dijkstra();
+        let initial = from_byron_genesis(&genesis.byron);
+
+        let at_eleven = force_pparams_version(&initial, &genesis, 0, 11).unwrap();
+        let at_twelve = force_pparams_version(&initial, &genesis, 0, 12).unwrap();
+
+        let before = at_eleven.cost_models_unknown_or_default();
+        let after = at_twelve.cost_models_unknown_or_default();
+
+        let added: Vec<u64> = after
+            .keys()
+            .filter(|key| !before.contains_key(key))
+            .copied()
+            .collect();
+        assert_eq!(added, vec![3]);
+
+        for (key, model) in before.iter() {
+            assert_eq!(after.get(key), Some(model), "cost model {key} changed");
+        }
+
+        assert_eq!(
+            at_twelve.cost_models_plutus_v1(),
+            at_eleven.cost_models_plutus_v1()
+        );
+        assert_eq!(
+            at_twelve.cost_models_plutus_v2(),
+            at_eleven.cost_models_plutus_v2()
+        );
+        assert_eq!(
+            at_twelve.cost_models_plutus_v3(),
+            at_eleven.cost_models_plutus_v3()
+        );
+    }
+
+    /// MUST FIRE: a configuration with no Dijkstra genesis file stops at the
+    /// step to version 12.
+    ///
+    /// The PlutusV4 cost model is declared by that file and by nothing on the
+    /// chain, so a follower without it would validate a PlutusV4 script against
+    /// no cost model at all.
+    #[test]
+    #[should_panic(expected = "dijkstra genesis file")]
+    fn a_dijkstra_step_without_the_genesis_file_stops() {
+        let genesis = mainnet_genesis();
+        let initial = from_byron_genesis(&genesis.byron);
+
+        let _ = force_pparams_version(&initial, &genesis, 0, 12);
+    }
+
+    /// The parameters the Musashi node's Dijkstra genesis declares that no
+    /// member of `PParamsSet` can hold, as that file spells them.
+    ///
+    /// The file's sixteenth parameter, the PlutusV4 cost model, is not here
+    /// because the set does hold it, under the cost model key that names that
+    /// language. The list is what says the rest are missing out loud: the day
+    /// the set grows one and the version 12 step starts emitting it, the
+    /// assertion fails.
     const DIJKSTRA_GENESIS_PARAMETERS: &[&str] = &[
         "leiosAnnouncementPeriodLength",
         "leiosCommitteeSize",
@@ -362,7 +512,6 @@ mod tests {
         "maxRefScriptSizePerEndorserBlock",
         "maxRefScriptSizePerTx",
         "minPoolMargin",
-        "plutusV4CostModel",
         "refScriptCostMultiplier",
         "refScriptCostStride",
     ];
@@ -384,7 +533,7 @@ mod tests {
     /// matches anything.
     #[test]
     fn the_dijkstra_parameters_are_absent_from_the_transitioned_set() {
-        let genesis = mainnet_genesis();
+        let genesis = genesis_with_dijkstra();
         let initial = from_byron_genesis(&genesis.byron);
 
         let at_twelve = force_pparams_version(&initial, &genesis, 0, 12).unwrap();
@@ -414,7 +563,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "don't know how to bump")]
     fn a_version_with_no_rule_is_still_refused() {
-        let genesis = mainnet_genesis();
+        let genesis = genesis_with_dijkstra();
         let initial = from_byron_genesis(&genesis.byron);
 
         let _ = force_pparams_version(&initial, &genesis, 0, 13);

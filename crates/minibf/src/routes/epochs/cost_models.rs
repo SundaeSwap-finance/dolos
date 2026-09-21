@@ -1025,29 +1025,103 @@ const V3_NAMES: [&str; 350] = [
     "scaleValue-memory-arguments-slope",
 ];
 
-fn get_name_for_value_index(plutus_version: u64, value_index: u64) -> &'static str {
-    if plutus_version == 1 && value_index < V1_NAMES.len() as u64 {
-        V1_NAMES[value_index as usize]
-    } else if plutus_version == 2 && value_index < V2_NAMES.len() as u64 {
-        V2_NAMES[value_index as usize]
-    } else if plutus_version == 3 && value_index < V3_NAMES.len() as u64 {
-        V3_NAMES[value_index as usize]
-    } else {
-        "unknown"
+/// The operation names for a Plutus version, or none for a version this build
+/// has no table for.
+fn names_for_version(plutus_version: u64) -> Option<&'static [&'static str]> {
+    match plutus_version {
+        1 => Some(&V1_NAMES),
+        2 => Some(&V2_NAMES),
+        3 => Some(&V3_NAMES),
+        _ => None,
     }
 }
 
+/// A cost model as named operation costs, or as the raw vector when this build
+/// cannot name every entry of it.
+///
+/// Names are positional and a language appends operations, so a model longer
+/// than the table has entries with no name here. Writing those under one shared
+/// name reports a model with fewer costs than the chain carries, because a JSON
+/// object keeps one value per key. The raw vector reports every cost and is a
+/// shape a reader can tell apart from the named object.
 pub fn get_named_cost_model(plutus_version: u64, values: &[i64]) -> serde_json::Value {
+    let Some(names) = names_for_version(plutus_version).filter(|x| x.len() >= values.len()) else {
+        return serde_json::to_value(values).unwrap();
+    };
+
     let mut map = serde_json::Map::new();
 
-    for (i, value) in values.iter().enumerate() {
-        let key = get_name_for_value_index(plutus_version, i as u64);
-
+    for (value, name) in values.iter().zip(names.iter()) {
         map.insert(
-            key.to_string(),
-            serde_json::Value::Number(value.to_string().parse().unwrap()),
+            (*name).to_string(),
+            serde_json::Value::Number((*value).into()),
         );
     }
 
     serde_json::Value::Object(map)
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    /// MUST NOT FIRE: a model the table covers is named, one key per cost.
+    #[test]
+    fn a_model_the_table_covers_is_named_one_key_per_cost() {
+        let values: Vec<i64> = (0..V3_NAMES.len() as i64).collect();
+        let named = get_named_cost_model(3, &values);
+
+        let object = named.as_object().expect("a covered model is not named");
+
+        assert_eq!(object.len(), V3_NAMES.len());
+        assert_eq!(object.get(V3_NAMES[0]), Some(&serde_json::json!(0)));
+        assert_eq!(
+            object.get(V3_NAMES[V3_NAMES.len() - 1]),
+            Some(&serde_json::json!(V3_NAMES.len() as i64 - 1)),
+        );
+    }
+
+    /// MUST NOT FIRE: a model shorter than the table is named over the costs it
+    /// has, because the names are positional and the chain appends.
+    #[test]
+    fn a_model_shorter_than_the_table_is_named_over_the_costs_it_has() {
+        let named = get_named_cost_model(1, &[7, 8, 9]);
+
+        let object = named.as_object().expect("a covered model is not named");
+
+        assert_eq!(object.len(), 3);
+        assert_eq!(object.get(V1_NAMES[0]), Some(&serde_json::json!(7)));
+    }
+
+    /// MUST FIRE: a model with one cost past the end of the table reports every
+    /// cost, rather than an object that kept one entry per name.
+    #[test]
+    fn a_model_longer_than_the_table_reports_every_cost() {
+        let values: Vec<i64> = (0..V3_NAMES.len() as i64 + 1).collect();
+        let named = get_named_cost_model(3, &values);
+
+        let array = named
+            .as_array()
+            .expect("a model with an unnamed cost was reported as named operations");
+
+        assert_eq!(array.len(), values.len());
+        assert_eq!(array[values.len() - 1], serde_json::json!(values.len() - 1));
+    }
+
+    /// MUST FIRE: a version with no table reports every cost.
+    ///
+    /// PlutusV4 is that version in this build, and its model on the Musashi
+    /// chain has 251 costs.
+    #[test]
+    fn a_version_with_no_table_reports_every_cost() {
+        let values: Vec<i64> = (0..251).collect();
+        let named = get_named_cost_model(4, &values);
+
+        let array = named
+            .as_array()
+            .expect("a version with no name table was reported as named operations");
+
+        assert_eq!(array.len(), 251);
+        assert_eq!(array[250], serde_json::json!(250));
+    }
 }
