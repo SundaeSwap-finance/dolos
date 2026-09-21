@@ -246,11 +246,22 @@ pub fn compute_apply_delta(
     Ok(delta)
 }
 
+/// Computes the ledger delta of undoing a block, and the inputs it recovered
+/// nothing for.
+///
+/// `lenient` is the same rule the apply ran under. The rollback record is a
+/// superset of what the apply resolved, so an input with no body in it is an
+/// input the lenient walk left unconsumed, and recovering nothing for it is
+/// what makes the undo the inverse of that walk. The strict walk consumes every
+/// input a block names, so the same absence there is a ledger that lost a body
+/// and the rollback stops rather than undoing only part of the block.
 pub fn compute_undo_delta(
     block: &MultiEraBlock,
     context: &HashMap<TxoRef, OwnedMultiEraOutput>,
-) -> Result<UtxoSetDelta, BrokenInvariant> {
+    lenient: bool,
+) -> Result<(UtxoSetDelta, Vec<SkippedInput>), BrokenInvariant> {
     let mut delta = UtxoSetDelta::default();
+    let mut skipped = Vec::new();
 
     let txs: HashMap<_, _> = block.txs().into_iter().map(|tx| (tx.hash(), tx)).collect();
 
@@ -261,13 +272,28 @@ pub fn compute_undo_delta(
         }
     }
 
-    for (_, tx) in txs.iter() {
+    for (tx_hash, tx) in txs.iter() {
         for consumed in tx.consumes() {
             let stxi_ref = TxoRef(*consumed.hash(), consumed.index() as u32);
 
-            let stxi_body = context
-                .get(&stxi_ref)
-                .ok_or_else(|| BrokenInvariant::MissingUtxo(stxi_ref.clone()))?;
+            let stxi_body = match context.get(&stxi_ref) {
+                Some(body) => body,
+                None if lenient => {
+                    skipped.push(SkippedInput {
+                        tx: *tx_hash,
+                        input: stxi_ref,
+                    });
+                    continue;
+                }
+                None => {
+                    return Err(BrokenInvariant::MissingStxiBody {
+                        slot: block.slot(),
+                        block: block.hash(),
+                        tx: *tx_hash,
+                        input: stxi_ref,
+                    })
+                }
+            };
 
             let stxi_body_arc = stxi_body.borrow_owner().clone();
 
@@ -275,7 +301,7 @@ pub fn compute_undo_delta(
         }
     }
 
-    Ok(delta)
+    Ok((delta, skipped))
 }
 
 pub fn compute_origin_delta(genesis: &Genesis) -> UtxoSetDelta {
@@ -346,6 +372,8 @@ pub fn build_custom_utxos_delta(config: &CardanoConfig) -> Result<UtxoSetDelta, 
 
 #[cfg(test)]
 mod tests {
+    use dolos_core::builtin::memory::MemoryStateStore;
+    use dolos_core::state::{StateStore as _, StateWriter as _};
     use pallas::{
         crypto::hash::Hash,
         ledger::{addresses::Address, traverse::MultiEraTx},
@@ -495,7 +523,9 @@ mod tests {
         let context = fake_slice_for_block(&block);
 
         let apply = super::compute_apply_delta(&block, &context).unwrap();
-        let undo = super::compute_undo_delta(&block, &context).unwrap();
+        let (undo, skipped) = super::compute_undo_delta(&block, &context, false).unwrap();
+
+        assert!(skipped.is_empty());
 
         for (produced, _) in apply.produced_utxo.iter() {
             assert!(undo.undone_utxo.contains_key(produced));
@@ -504,6 +534,149 @@ mod tests {
         for (consumed, _) in apply.consumed_utxo.iter() {
             assert!(undo.recovered_stxi.contains_key(consumed));
         }
+    }
+
+    /// One input a block spends, and the transaction that spends it.
+    fn a_spent_input(block: &MultiEraBlock) -> (TxHash, TxoRef) {
+        let tx = block
+            .txs()
+            .into_iter()
+            .find(|tx| !tx.consumes().is_empty())
+            .unwrap();
+        let input = tx.consumes().first().unwrap().clone();
+
+        (tx.hash(), TxoRef(*input.hash(), input.index() as u32))
+    }
+
+    /// The must-fire case for the rule that consumes every input. A body the
+    /// rollback record does not hold is a ledger that lost one, and the four
+    /// values name which one.
+    #[test]
+    fn the_strict_undo_stops_and_names_the_block_the_transaction_and_the_input() {
+        let cbor = load_test_block("alonzo27.block");
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        let mut context = fake_slice_for_block(&block);
+
+        let (tx, input) = a_spent_input(&block);
+        context.remove(&input);
+
+        let error = super::compute_undo_delta(&block, &context, false)
+            .err()
+            .expect("the undo recovered a body it does not hold");
+
+        let text = error.to_string();
+
+        for named in [
+            block.slot().to_string(),
+            block.hash().to_string(),
+            tx.to_string(),
+            input.0.to_string(),
+            input.1.to_string(),
+        ] {
+            assert!(text.contains(&named), "{named} is not in {text}");
+        }
+    }
+
+    /// The must-fire case for the lenient rule. The walk that left the input
+    /// unconsumed is inverted by recovering nothing for it, and the input is
+    /// named rather than left out of the answer.
+    #[test]
+    fn the_lenient_undo_recovers_nothing_for_an_input_with_no_body() {
+        let cbor = load_test_block("alonzo27.block");
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        let mut context = fake_slice_for_block(&block);
+
+        let (tx, input) = a_spent_input(&block);
+        context.remove(&input);
+
+        let (delta, skipped) = super::compute_undo_delta(&block, &context, true).unwrap();
+
+        assert_eq!(
+            skipped,
+            vec![SkippedInput {
+                tx,
+                input: input.clone()
+            }]
+        );
+        assert!(!delta.recovered_stxi.contains_key(&input));
+
+        // Every other input the block spends is still recovered, so this is
+        // not a rule that quietly recovers nothing at all.
+        for other in block.txs().iter().flat_map(MultiEraTx::consumes) {
+            let other = TxoRef(*other.hash(), other.index() as u32);
+
+            if other != input {
+                assert!(delta.recovered_stxi.contains_key(&other));
+            }
+        }
+    }
+
+    /// The must-not case for the lenient rule. A record that holds every body
+    /// leaves nothing skipped, so the rule is not a blanket licence.
+    #[test]
+    fn the_lenient_undo_skips_nothing_when_every_body_is_held() {
+        let cbor = load_test_block("alonzo27.block");
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        let context = fake_slice_for_block(&block);
+
+        let (strict, _) = super::compute_undo_delta(&block, &context, false).unwrap();
+        let (lenient, skipped) = super::compute_undo_delta(&block, &context, true).unwrap();
+
+        assert!(skipped.is_empty());
+        assert_eq!(strict.recovered_stxi, lenient.recovered_stxi);
+        assert_eq!(strict.undone_utxo, lenient.undone_utxo);
+    }
+
+    /// The must-not case on the chain's own lenient block. Applying it leaves
+    /// the forward reference unconsumed and then makes it, so the ref the apply
+    /// never consumed is in the rollback record and the undo names it both as
+    /// recovered and as undone. The ledger did not hold it before the block, so
+    /// what the undo has to leave behind is nothing, which only the order a
+    /// writer puts the two in decides.
+    #[test]
+    fn the_lenient_undo_of_the_forward_reference_block_leaves_no_utxo_behind() {
+        let cbor = forward_ref_block();
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+
+        let mut ledger = FakeLedger::default();
+        ledger.seed_externals(&block);
+        ledger.present.remove(&forward_ref_txoref());
+
+        let stats = ledger.apply(&block);
+        assert_eq!(stats.skipped_inputs(), 1, "fixture precondition");
+
+        // The rollback record is what the wal keeps, which is every body the
+        // batch loaded plus the outputs the block itself made.
+        let (delta, skipped) = super::compute_undo_delta(&block, &ledger.bodies, true).unwrap();
+
+        assert!(skipped.is_empty());
+        assert!(delta.recovered_stxi.contains_key(&forward_ref_txoref()));
+        assert!(delta.undone_utxo.contains_key(&forward_ref_txoref()));
+
+        let store = MemoryStateStore::new();
+        let seed = UtxoSetDelta {
+            produced_utxo: delta.undone_utxo.clone(),
+            ..Default::default()
+        };
+
+        let writer = store.start_writer().unwrap();
+        writer.apply_utxoset(&seed).unwrap();
+        writer.commit().unwrap();
+
+        assert_eq!(
+            store.get_utxos(vec![forward_ref_txoref()]).unwrap().len(),
+            1,
+            "the state after the apply holds the output the block made"
+        );
+
+        let writer = store.start_writer().unwrap();
+        writer.apply_utxoset(&delta).unwrap();
+        writer.commit().unwrap();
+
+        assert!(store
+            .get_utxos(vec![forward_ref_txoref()])
+            .unwrap()
+            .is_empty());
     }
 
     /// The block and the transaction pair that first met this on the Musashi
