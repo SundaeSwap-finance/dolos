@@ -665,12 +665,47 @@ mod tests {
         block(include_str!("../../test_data/dijkstra-certifying.block"))
     }
 
+    fn pre_leios() -> Vec<u8> {
+        block(include_str!("../../test_data/conway.block"))
+    }
+
+    /// The two Leios fields a header carries, read straight off the bytes so a
+    /// sequence built from these fixtures rests on what they say rather than on
+    /// what their names suggest.
+    fn leios_fields(cbor: &[u8]) -> (Option<bool>, bool) {
+        let decoded = MultiEraBlock::decode(cbor).unwrap();
+        let header = decoded.header();
+
+        (
+            header.block_body_contains_leios_cert(),
+            header.eb_announcement().is_some(),
+        )
+    }
+
+    /// MUST FIRE: one fixture announces without certifying, two do both, one
+    /// certifies without announcing, one does neither, and one is of an era that
+    /// has no such fields at all. The sequences below are built from these roles,
+    /// and a fixture swapped for another would otherwise change what they count
+    /// without changing what they assert.
+    #[test]
+    fn each_fixture_carries_the_leios_fields_the_sequences_rest_on() {
+        assert_eq!(leios_fields(&announce_with_txs()), (Some(false), true));
+        assert_eq!(leios_fields(&announce_quiet()), (Some(true), true));
+        assert_eq!(leios_fields(&certify_only()), (Some(true), false));
+        assert_eq!(leios_fields(&certifying()), (Some(true), true));
+        assert_eq!(leios_fields(&silent()), (Some(false), false));
+        assert_eq!(leios_fields(&pre_leios()), (None, false));
+    }
+
     /// What one header did, as the counts a follower's cost is made of.
     #[derive(Debug, Default, PartialEq, Eq)]
     struct Seen {
         announced: usize,
         certified: usize,
         fetches_owed: usize,
+        /// Certifying slots the payload map is now holding a place for, which is
+        /// the same debt counted where the apply path reads it.
+        payloads_expected: usize,
     }
 
     /// Walks a sequence of real ranking headers and counts what the follower
@@ -701,52 +736,48 @@ mod tests {
             }
         }
 
-        assert_eq!(
-            payloads.len(),
-            seen.fetches_owed,
-            "a fetch owed and a payload expected are the same debt counted twice"
-        );
+        seen.payloads_expected = payloads.len();
 
         (seen, outstanding.keys().copied().collect())
     }
 
-    /// MUST FIRE: a follower owes one fetch for the endorser block a header
-    /// certifies and none for one that a later header supersedes first, so the
-    /// fetches track the certificates and not the announcements. A follower that
-    /// fetched on the announcement would do the work of every announcement the
-    /// chain makes, and the walk exists to make that difference.
+    /// MUST FIRE: over three announcements settled by one certificate, the
+    /// follower owes one fetch. A follower that fetched on the announcement
+    /// instead would fetch three times, and that difference is the whole of what
+    /// the certification walk buys.
+    ///
+    /// The announcing header appears twice because it is the only fixture that
+    /// announces without also certifying, and two announcements with no
+    /// certificate between them is the shape the abandonment rule is about.
     #[test]
-    fn a_superseded_announcement_is_never_fetched() {
+    fn three_announcements_settled_by_one_certificate_cost_one_fetch() {
         let (seen, owed_at) = walk_counting(&[
             announce_with_txs(),
-            announce_quiet(),
+            announce_with_txs(),
             silent(),
-            certify_only(),
+            announce_quiet(),
         ]);
 
         assert_eq!(
             seen,
             Seen {
-                announced: 2,
+                announced: 3,
                 certified: 1,
                 fetches_owed: 1,
+                payloads_expected: 1,
             }
         );
         assert_eq!(owed_at.len(), 1, "one certifying slot owes a fetch");
     }
 
-    /// MUST NOT FIRE: when every announcement is certified before the next one
-    /// is made, the follower owes a fetch for each. Without this the test above
-    /// also passes for a follower that fetches nothing at all, and for one that
-    /// fetches once however many certificates it sees.
+    /// MUST NOT FIRE: when each announcement is certified before the next one is
+    /// made, the follower owes a fetch for every one of them. Without this the
+    /// test above also holds for a follower that fetches nothing at all, and for
+    /// one that fetches once however many certificates it reads.
     #[test]
     fn an_announcement_certified_before_the_next_one_is_fetched() {
-        let (seen, owed_at) = walk_counting(&[
-            announce_with_txs(),
-            certify_only(),
-            announce_quiet(),
-            certifying(),
-        ]);
+        let (seen, owed_at) =
+            walk_counting(&[announce_with_txs(), announce_quiet(), certify_only()]);
 
         assert_eq!(
             seen,
@@ -754,6 +785,7 @@ mod tests {
                 announced: 2,
                 certified: 2,
                 fetches_owed: 2,
+                payloads_expected: 2,
             }
         );
         assert_eq!(
