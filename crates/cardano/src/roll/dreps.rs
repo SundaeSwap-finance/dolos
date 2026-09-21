@@ -143,10 +143,6 @@ impl BlockVisitor for DRepStateVisitor {
         tx: &MultiEraTx,
         _: &HashMap<TxoRef, OwnedMultiEraOutput>,
     ) -> Result<(), ChainError> {
-        let MultiEraTx::Conway(conway_tx) = tx else {
-            return Ok(());
-        };
-
         // The crawl still calls `visit_tx` for phase-2-invalid transactions
         // (fees and collateral are priced there), but nothing below is a fee:
         // votes, the dormancy release and the expiry refreshes are all CERTS
@@ -175,7 +171,7 @@ impl BlockVisitor for DRepStateVisitor {
             self.dormancy.batch_registrations = Vec::new();
         }
 
-        let Some(voting_procedures) = &conway_tx.transaction_body.voting_procedures else {
+        let Some(voting_procedures) = tx.voting_procedures() else {
             return Ok(());
         };
 

@@ -508,6 +508,9 @@ pub enum ChainError {
     #[error("invalid proposal params")]
     InvalidProposalParams,
 
+    #[error("CARDANO-008: a governance proposal names {0}, which this node cannot record")]
+    UnrecordableProposalPart(String),
+
     #[error("phase-1 script rejected the transaction: {0}")]
     Phase1ValidationRejected(#[from] pallas::ledger::validate::utils::ValidationError),
 

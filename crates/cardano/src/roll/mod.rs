@@ -282,7 +282,6 @@ impl<'a> DeltaBuilder<'a> {
         let block = block.view();
         let mut deltas = WorkDeltas::default();
 
-
         self.account_state.visit_root(
             &mut deltas,
             block,
@@ -735,6 +734,172 @@ pub(crate) fn compute_delta<D: Domain>(
     Ok(())
 }
 
+/// Dijkstra blocks carrying a governance proposal at body key 20 and a DRep
+/// vote at body key 19. No block of the Musashi chain carries either.
+#[cfg(test)]
+pub(crate) mod dijkstra_fixture {
+    use std::sync::Arc;
+
+    use pallas::codec::{
+        minicbor,
+        utils::{Bytes, KeepRaw, MaybeIndefArray, Nullable},
+    };
+    use pallas::crypto::hash::Hash;
+    use pallas::ledger::primitives::{
+        conway::{Anchor, GovActionId, Vote, Voter, VotingProcedure, VotingProcedures},
+        dijkstra, VrfCert,
+    };
+
+    use crate::OwnedMultiEraBlock;
+
+    /// The era the block wrapper names for Dijkstra.
+    const DIJKSTRA_BLOCK_WRAPPER: u16 = 8;
+
+    pub const SLOT: u64 = 1_000;
+
+    /// The reward account every proposal in these blocks pays its deposit
+    /// refund to, a stake address on the test network.
+    pub fn reward_account() -> Bytes {
+        Bytes::from(vec![0xe0; 29])
+    }
+
+    pub fn anchor() -> Anchor {
+        Anchor {
+            url: "https://example.com".to_string(),
+            content_hash: Hash::<32>::from([0x44u8; 32]),
+        }
+    }
+
+    /// The DRep key hash of the voter in [`votes`].
+    pub fn voter_hash() -> Hash<28> {
+        Hash::<28>::from([0x66u8; 28])
+    }
+
+    /// The proposal the vote in [`votes`] is cast on.
+    pub fn voted_proposal() -> GovActionId {
+        GovActionId {
+            transaction_id: Hash::<32>::from([0x55u8; 32]),
+            action_index: 0,
+        }
+    }
+
+    fn votes() -> VotingProcedures {
+        let mut votes = std::collections::BTreeMap::new();
+        votes.insert(
+            voted_proposal(),
+            VotingProcedure {
+                vote: Vote::Yes,
+                anchor: None,
+            },
+        );
+
+        let mut procedures = std::collections::BTreeMap::new();
+        procedures.insert(Voter::DRepKey(voter_hash()), votes);
+
+        procedures
+    }
+
+    /// A body carrying one proposal of the action given at key 20 and one
+    /// DRep vote at key 19. It consumes and produces nothing, so a crawl of
+    /// the block it goes in needs no resolved UTxOs.
+    pub fn body_with_governance(action: dijkstra::GovAction) -> dijkstra::TransactionBody<'static> {
+        let proposal = dijkstra::ProposalProcedure {
+            deposit: 100_000_000,
+            reward_account: reward_account(),
+            gov_action: action,
+            anchor: anchor(),
+        };
+
+        dijkstra::TransactionBody {
+            inputs: dijkstra::Set::from(vec![]),
+            outputs: MaybeIndefArray::Def(vec![]),
+            fee: 170_000,
+            ttl: None,
+            certificates: None,
+            withdrawals: None,
+            auxiliary_data_hash: None,
+            validity_interval_start: None,
+            mint: None,
+            script_data_hash: None,
+            collateral: None,
+            guards: None,
+            network_id: None,
+            collateral_return: None,
+            total_collateral: None,
+            reference_inputs: None,
+            voting_procedures: Some(votes()),
+            proposal_procedures: Some(dijkstra::NonEmptySet::try_from(vec![proposal]).unwrap()),
+            treasury_value: None,
+            donation: None,
+            sub_transactions: None,
+            required_top_level_guards: None,
+            direct_deposits: None,
+            account_balance_intervals: None,
+            starting_account_balance_intervals: None,
+        }
+    }
+
+    /// A one transaction ranking block at [`SLOT`], with the transaction's
+    /// producer verdict set to the value given.
+    pub fn block(body: dijkstra::TransactionBody<'static>, success: bool) -> OwnedMultiEraBlock {
+        let header_body = dijkstra::HeaderBody {
+            block_number: 1,
+            slot: SLOT,
+            prev_hash: Some(Hash::from([9u8; 32])),
+            issuer_vkey: Bytes::from(vec![0x10, 0x11]),
+            vrf_vkey: Bytes::from(vec![0x12, 0x13]),
+            vrf_result: VrfCert(Bytes::from(vec![0x14]), Bytes::from(vec![0x15])),
+            block_body_size: 0,
+            block_body_hash: Hash::from([0u8; 32]),
+            operational_cert: pallas::ledger::primitives::babbage::OperationalCert {
+                operational_cert_hot_vkey: Bytes::from(vec![0x16]),
+                operational_cert_sequence_number: 1,
+                operational_cert_kes_period: 0,
+                operational_cert_sigma: Bytes::from(vec![0x17]),
+            },
+            protocol_version: (12, 0),
+            block_body_contains_leios_cert: false,
+            eb_announcement: Nullable::Null,
+        };
+
+        let header = dijkstra::Header {
+            header_body,
+            body_signature: Bytes::from(vec![0x18]),
+        };
+
+        let witness_set = dijkstra::WitnessSet {
+            vkeywitness: None,
+            native_script: None,
+            bootstrap_witness: None,
+            plutus_v1_script: None,
+            plutus_data: None,
+            redeemer: None,
+            plutus_v2_script: None,
+            plutus_v3_script: None,
+        };
+
+        let tx = dijkstra::BlockTransaction {
+            transaction_body: KeepRaw::from(body),
+            transaction_witness_set: KeepRaw::from(witness_set),
+            auxiliary_data: Nullable::Null,
+            success,
+        };
+
+        let block = dijkstra::Block {
+            header: KeepRaw::from(header),
+            block_body: dijkstra::BlockBody {
+                transactions: MaybeIndefArray::Def(vec![tx]),
+                leios_certificate: Nullable::Null,
+                peras_certificate: Nullable::Null,
+            },
+        };
+
+        let raw = minicbor::to_vec((DIJKSTRA_BLOCK_WRAPPER, block)).unwrap();
+
+        OwnedMultiEraBlock::decode(Arc::new(raw)).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -870,7 +1035,10 @@ mod tests {
         let (_, raw) =
             dolos_testing::blocks::make_conway_block_with_tx(SLOT, loaded_tx_body(), None, valid);
 
-        let block = OwnedMultiEraBlock::decode(raw).unwrap();
+        crawl_block(OwnedMultiEraBlock::decode(raw).unwrap(), 10)
+    }
+
+    fn crawl_block(block: OwnedMultiEraBlock, protocol: u16) -> WorkDeltas {
         let mut work = WorkBlock::new(block);
 
         let genesis = Arc::new(crate::load_test_genesis("preview"));
@@ -879,7 +1047,7 @@ mod tests {
 
         let mut builder = DeltaBuilder::new(
             genesis,
-            10,
+            protocol,
             &pparams,
             EPOCH,
             EPOCH_START,
@@ -990,5 +1158,82 @@ mod tests {
         assert!(stats.withdrawals > 0);
         assert!(!stats.registered_pools.is_empty());
         assert_eq!(stats.tx_count, 1);
+    }
+
+    fn crawl_dijkstra_governance_block(valid: bool) -> WorkDeltas {
+        let block = dijkstra_fixture::block(
+            dijkstra_fixture::body_with_governance(
+                pallas::ledger::primitives::dijkstra::GovAction::Information,
+            ),
+            valid,
+        );
+
+        crawl_block(block, 12)
+    }
+
+    fn proposals_recorded(deltas: &WorkDeltas) -> Vec<&crate::NewProposalV2> {
+        deltas
+            .entities
+            .values()
+            .flatten()
+            .filter_map(|delta| match delta {
+                CardanoDelta::NewProposalV2(x) => Some(x.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn votes_recorded(deltas: &WorkDeltas) -> Vec<&crate::VoteCast> {
+        deltas
+            .entities
+            .values()
+            .flatten()
+            .filter_map(|delta| match delta {
+                CardanoDelta::VoteCast(x) => Some(x.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The must-fire case. Musashi is a Dijkstra chain, so the proposal and
+    /// the vote a Dijkstra transaction carries are the ones a follower of it
+    /// has to record.
+    #[test]
+    fn a_dijkstra_transaction_records_its_proposal_and_its_vote() {
+        let deltas = crawl_dijkstra_governance_block(true);
+
+        let proposals = proposals_recorded(&deltas);
+        assert_eq!(proposals.len(), 1, "the proposal was not recorded");
+        assert_eq!(proposals[0].slot, dijkstra_fixture::SLOT);
+        assert_eq!(proposals[0].deposit, Some(100_000_000));
+        assert_eq!(proposals[0].anchor, Some(dijkstra_fixture::anchor()));
+
+        let votes = votes_recorded(&deltas);
+        assert_eq!(votes.len(), 1, "the vote was not recorded");
+        assert_eq!(
+            votes[0].proposal_tx,
+            dijkstra_fixture::voted_proposal().transaction_id
+        );
+
+        // A DRep that votes has its expiry refreshed, so the vote writes a
+        // row under the voter's key.
+        let voter = crate::drep_to_entity_key(&pallas::ledger::primitives::conway::DRep::Key(
+            dijkstra_fixture::voter_hash(),
+        ));
+        assert!(
+            keys_in(&deltas, "dreps").contains(&voter),
+            "the voting DRep got no row"
+        );
+    }
+
+    /// The must-not case. A phase-2-invalid transaction runs neither GOV nor
+    /// CERTS, so neither its proposal nor its vote may be recorded.
+    #[test]
+    fn an_invalid_dijkstra_transaction_records_no_governance() {
+        let deltas = crawl_dijkstra_governance_block(false);
+
+        assert!(proposals_recorded(&deltas).is_empty());
+        assert!(votes_recorded(&deltas).is_empty());
+        assert!(keys_in(&deltas, "dreps").is_empty());
     }
 }

@@ -4,11 +4,11 @@ use dolos_core::{ChainError, Genesis, TxoRef};
 use pallas::{
     codec::utils::Bytes,
     ledger::{
-        primitives::{
-            conway::{GovAction, GovActionId, ProtocolParamUpdate},
-            Epoch, ExUnitPrices, RationalNumber,
+        primitives::{conway::GovActionId, Epoch, ExUnitPrices, RationalNumber},
+        traverse::{
+            governance::ParamRead, MultiEraBlock, MultiEraGovAction, MultiEraGovActionKind,
+            MultiEraParamUpdate, MultiEraProposal, MultiEraTx, MultiEraUpdate,
         },
-        traverse::{MultiEraBlock, MultiEraTx, MultiEraUpdate},
     },
 };
 
@@ -18,9 +18,9 @@ use crate::{
     PParamValue, PParamsSet, ProposalAction, VoteCast,
 };
 
-macro_rules! map_conway_pparam {
+macro_rules! map_shared_pparam {
     ($update:expr, $getter:ident, $set:expr, $variant:ident) => {
-        let value = $update.$getter.clone();
+        let value = $update.$getter();
         if let Some(value) = value {
             let value = value.try_into().expect("pparam value doesn't fit");
             $set.set(PParamValue::$variant(value));
@@ -28,31 +28,102 @@ macro_rules! map_conway_pparam {
     };
 }
 
-macro_rules! check_conway_pparams {
+macro_rules! check_shared_pparams {
     ($update:expr, $set:expr, $($getter:ident => $variant:ident),*) => {
         $(
-            map_conway_pparam!($update, $getter, $set, $variant);
+            map_shared_pparam!($update, $getter, $set, $variant);
         )*
     };
 }
 
-fn parse_treasury_withdrawals(withdrawals: &BTreeMap<Bytes, u64>) -> ProposalAction {
+fn parse_treasury_withdrawals(
+    withdrawals: &BTreeMap<Bytes, u64>,
+) -> Result<ProposalAction, ChainError> {
     let mut items = vec![];
 
     for (credential, amount) in withdrawals {
         let credential = pallas_extras::parse_reward_account(credential)
-            .expect("reward account should be valid");
+            .ok_or(ChainError::InvalidProposalParams)?;
         let amount = *amount;
         items.push((credential, amount));
     }
 
-    ProposalAction::TreasuryWithdrawal(items)
+    Ok(ProposalAction::TreasuryWithdrawal(items))
 }
 
-fn conway_to_pparamset(update: &ProtocolParamUpdate) -> PParamsSet {
+/// The parameter key a Dijkstra update proposes that the parameter set has no
+/// place for, if it proposes one. A key the update leaves alone and a key the
+/// update's era does not have are both absent from this answer.
+fn unrecordable_param(update: &MultiEraParamUpdate) -> Option<&'static str> {
+    macro_rules! first_proposed {
+        ($($getter:ident),*) => {
+            $(
+                if matches!(update.$getter(), ParamRead::Proposed(_)) {
+                    return Some(stringify!($getter));
+                }
+            )*
+        };
+    }
+
+    first_proposed!(
+        max_ref_script_size_per_block,
+        max_ref_script_size_per_tx,
+        ref_script_cost_stride,
+        ref_script_cost_multiplier,
+        max_pledge_leverage,
+        min_pool_margin,
+        leios_announcement_period_length,
+        leios_vote_period_length,
+        leios_diffusion_period_length,
+        leios_committee_size,
+        leios_quorum_stake_threshold,
+        max_endorser_block_references_size,
+        max_endorser_block_txs_size,
+        max_endorser_block_execution_units,
+        max_ref_script_size_per_endorser_block
+    );
+
+    None
+}
+
+/// The cost models an update proposes under the keys no field names. The era
+/// neutral cost model type names four languages and leaves the wildcard keys
+/// out, and Conway reads a PlutusV4 model into the wildcard, so each era's own
+/// type is asked for it.
+fn wildcard_cost_models(
+    update: &MultiEraParamUpdate,
+) -> Result<BTreeMap<u64, Vec<i64>>, ChainError> {
+    if let Some(conway) = update.as_conway() {
+        return Ok(conway
+            .cost_models_for_script_languages
+            .as_ref()
+            .map(|models| models.unknown.clone())
+            .unwrap_or_default());
+    }
+
+    if let Some(dijkstra) = update.as_dijkstra() {
+        return Ok(dijkstra
+            .cost_models_for_script_languages
+            .as_ref()
+            .map(|models| models.unknown.clone())
+            .unwrap_or_default());
+    }
+
+    Err(ChainError::UnrecordableProposalPart(
+        "cost models of an era this node does not read".to_string(),
+    ))
+}
+
+fn param_update_to_pparamset(update: &MultiEraParamUpdate) -> Result<PParamsSet, ChainError> {
+    if let Some(name) = unrecordable_param(update) {
+        return Err(ChainError::UnrecordableProposalPart(format!(
+            "protocol parameter {name}"
+        )));
+    }
+
     let mut set = PParamsSet::default();
 
-    check_conway_pparams! {
+    check_shared_pparams! {
         update,
         set,
 
@@ -87,7 +158,7 @@ fn conway_to_pparamset(update: &ProtocolParamUpdate) -> PParamsSet {
     // TODO: these are special cases where we don't have automatic type mappings. We
     // should fix this at the Pallas level.
 
-    if let Some(updated) = update.max_tx_ex_units {
+    if let Some(updated) = update.max_tx_ex_units() {
         let value = PParamValue::MaxTxExUnits(pallas::ledger::primitives::ExUnits {
             mem: updated.mem,
             steps: updated.steps,
@@ -96,7 +167,7 @@ fn conway_to_pparamset(update: &ProtocolParamUpdate) -> PParamsSet {
         set.set(value);
     }
 
-    if let Some(updated) = update.max_block_ex_units {
+    if let Some(updated) = update.max_block_ex_units() {
         let value = PParamValue::MaxBlockExUnits(pallas::ledger::primitives::ExUnits {
             mem: updated.mem,
             steps: updated.steps,
@@ -105,7 +176,7 @@ fn conway_to_pparamset(update: &ProtocolParamUpdate) -> PParamsSet {
         set.set(value);
     }
 
-    if let Some(updated) = update.minfee_refscript_cost_per_byte.as_ref() {
+    if let Some(updated) = update.minfee_refscript_cost_per_byte() {
         let value = PParamValue::MinFeeRefScriptCostPerByte(RationalNumber {
             numerator: updated.numerator,
             denominator: updated.denominator,
@@ -114,7 +185,7 @@ fn conway_to_pparamset(update: &ProtocolParamUpdate) -> PParamsSet {
         set.set(value);
     }
 
-    if let Some(updated) = update.execution_costs.as_ref() {
+    if let Some(updated) = update.execution_costs() {
         let value = PParamValue::ExecutionCosts(ExUnitPrices {
             mem_price: updated.mem_price.clone(),
             step_price: updated.step_price.clone(),
@@ -123,29 +194,33 @@ fn conway_to_pparamset(update: &ProtocolParamUpdate) -> PParamsSet {
         set.set(value);
     }
 
-    if let Some(updated) = update.cost_models_for_script_languages.as_ref() {
-        if let Some(v1) = updated.plutus_v1.as_ref() {
-            let value = PParamValue::CostModelsPlutusV1(v1.clone());
-            set.set(value);
+    if let Some(updated) = update.cost_models_for_script_languages() {
+        if let Some(v1) = updated.plutus_v1 {
+            set.set(PParamValue::CostModelsPlutusV1(v1));
         }
 
-        if let Some(v2) = updated.plutus_v2.as_ref() {
-            let value = PParamValue::CostModelsPlutusV2(v2.clone());
-            set.set(value);
+        if let Some(v2) = updated.plutus_v2 {
+            set.set(PParamValue::CostModelsPlutusV2(v2));
         }
 
-        if let Some(v3) = updated.plutus_v3.as_ref() {
-            let value = PParamValue::CostModelsPlutusV3(v3.clone());
-            set.set(value);
+        if let Some(v3) = updated.plutus_v3 {
+            set.set(PParamValue::CostModelsPlutusV3(v3));
         }
 
-        if !updated.unknown.is_empty() {
-            let value = PParamValue::CostModelsUnknown(updated.unknown.clone());
-            set.set(value);
+        let mut wildcard = wildcard_cost_models(update)?;
+
+        // The parameter set has no field for a PlutusV4 model and holds it
+        // under key 3 of the wildcard map, where Conway's own type carries it.
+        if let Some(v4) = updated.plutus_v4 {
+            wildcard.insert(pallas_extras::PLUTUS_V4_COST_MODEL_KEY, v4);
+        }
+
+        if !wildcard.is_empty() {
+            set.set(PParamValue::CostModelsUnknown(wildcard));
         }
     }
 
-    set
+    Ok(set)
 }
 
 macro_rules! map_pre_conway_pparam {
@@ -248,54 +323,57 @@ fn pre_conway_to_pparamset(update: &MultiEraUpdate) -> PParamsSet {
     set
 }
 
-/// Maps a Conway governance action to its dolos representation plus the
+/// Maps a governance action of any era to its dolos representation and the
 /// lineage data the action declares: the parent (previous governance action
 /// id of the same purpose) and the purpose tree it belongs to.
 /// TreasuryWithdrawals and Info have no lineage.
 fn parse_gov_action(
-    action: &GovAction,
-) -> (ProposalAction, Option<GovActionId>, Option<GovPurpose>) {
-    match action {
-        GovAction::ParameterChange(parent, update, _) => (
-            ProposalAction::ParamChange(conway_to_pparamset(update)),
-            parent.clone(),
+    action: &MultiEraGovAction,
+) -> Result<(ProposalAction, Option<GovActionId>, Option<GovPurpose>), ChainError> {
+    let parent = action.id();
+
+    let (action, purpose) = match action.kind() {
+        MultiEraGovActionKind::ParameterChange(_, update, _) => (
+            ProposalAction::ParamChange(param_update_to_pparamset(&update)?),
             Some(GovPurpose::PParamUpdate),
         ),
-        GovAction::HardForkInitiation(parent, version) => (
+        MultiEraGovActionKind::HardForkInitiation(_, version) => (
             ProposalAction::HardFork(*version),
-            parent.clone(),
             Some(GovPurpose::HardFork),
         ),
-        GovAction::TreasuryWithdrawals(withdrawals, _) => {
-            (parse_treasury_withdrawals(withdrawals), None, None)
+        MultiEraGovActionKind::TreasuryWithdrawals(withdrawals, _) => {
+            (parse_treasury_withdrawals(withdrawals)?, None)
         }
-        GovAction::NoConfidence(parent) => (
-            ProposalAction::NoConfidence,
-            parent.clone(),
-            Some(GovPurpose::Committee),
-        ),
-        GovAction::UpdateCommittee(parent, to_remove, to_add, threshold) => (
+        MultiEraGovActionKind::NoConfidence(_) => {
+            (ProposalAction::NoConfidence, Some(GovPurpose::Committee))
+        }
+        MultiEraGovActionKind::UpdateCommittee(_, to_remove, to_add, threshold) => (
             ProposalAction::UpdateCommittee {
-                to_remove: to_remove.iter().cloned().collect(),
+                to_remove: to_remove.to_vec(),
                 to_add: to_add
                     .iter()
                     .map(|(cred, epoch)| (cred.clone(), *epoch))
                     .collect(),
                 threshold: threshold.clone(),
             },
-            parent.clone(),
             Some(GovPurpose::Committee),
         ),
-        GovAction::NewConstitution(parent, constitution) => (
+        MultiEraGovActionKind::NewConstitution(_, constitution) => (
             ProposalAction::NewConstitution {
                 anchor: constitution.anchor.clone(),
                 guardrail_script: constitution.guardrail_script,
             },
-            parent.clone(),
             Some(GovPurpose::Constitution),
         ),
-        GovAction::Information => (ProposalAction::Info, None, None),
-    }
+        MultiEraGovActionKind::Information => (ProposalAction::Info, None),
+        _ => {
+            return Err(ChainError::UnrecordableProposalPart(
+                "a governance action of a kind this node does not read".to_string(),
+            ))
+        }
+    };
+
+    Ok((action, parent, purpose))
 }
 
 #[derive(Clone, Default)]
@@ -333,17 +411,13 @@ impl BlockVisitor for ProposalVisitor {
         tx: &MultiEraTx,
         _: &HashMap<TxoRef, OwnedMultiEraOutput>,
     ) -> Result<(), ChainError> {
-        let MultiEraTx::Conway(conway_tx) = tx else {
-            return Ok(());
-        };
-
         // Phase-2-invalid transactions contribute nothing to governance
         // state: CERTS / GOV only run for valid transactions.
         if !tx.is_valid() {
             return Ok(());
         }
 
-        let Some(voting_procedures) = &conway_tx.transaction_body.voting_procedures else {
+        let Some(voting_procedures) = tx.voting_procedures() else {
             return Ok(());
         };
 
@@ -396,16 +470,12 @@ impl BlockVisitor for ProposalVisitor {
         deltas: &mut WorkDeltas,
         block: &MultiEraBlock,
         tx: &MultiEraTx,
-        proposal: &pallas::ledger::traverse::MultiEraProposal,
+        proposal: &MultiEraProposal,
         idx: usize,
     ) -> Result<(), ChainError> {
-        let Some(proposal) = proposal.as_conway() else {
-            return Ok(());
-        };
+        let (action, parent, purpose) = parse_gov_action(&proposal.gov_action())?;
 
-        let (action, parent, purpose) = parse_gov_action(&proposal.gov_action);
-
-        let reward_account = pallas_extras::parse_reward_account(&proposal.reward_account)
+        let reward_account = pallas_extras::parse_reward_account(proposal.reward_account())
             .ok_or(ChainError::InvalidProposalParams)?;
 
         deltas.add_for_entity(NewProposalV2::new(
@@ -413,7 +483,7 @@ impl BlockVisitor for ProposalVisitor {
             tx.hash(),
             idx as u32,
             action,
-            Some(proposal.deposit),
+            Some(proposal.deposit()),
             Some(reward_account),
             self.validity_period,
             self.current_epoch.expect("value set in root"),
@@ -421,7 +491,7 @@ impl BlockVisitor for ProposalVisitor {
             self.protocol.expect("value set in root"),
             parent,
             purpose,
-            Some(proposal.anchor.clone()),
+            Some(proposal.anchor().clone()),
         ));
 
         Ok(())
@@ -437,5 +507,166 @@ impl BlockVisitor for ProposalVisitor {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod dijkstra_governance_tests {
+    use pallas::codec::{minicbor, utils::Nullable};
+    use pallas::ledger::primitives::{dijkstra, ExUnits};
+
+    use super::*;
+
+    /// A Dijkstra update proposing the key given, decoded from a one entry
+    /// CBOR map because the type has no Default.
+    fn dijkstra_update(key: u64, value: &[u8]) -> dijkstra::ProtocolParamUpdate {
+        let mut bytes = vec![0xa1];
+        bytes.extend(minicbor::to_vec(key).unwrap());
+        bytes.extend_from_slice(value);
+
+        minicbor::decode(&bytes).expect("the one key update does not decode")
+    }
+
+    /// A Conway update proposing the key given, decoded from a one entry
+    /// CBOR map.
+    fn conway_update(
+        key: u64,
+        value: &[u8],
+    ) -> pallas::ledger::primitives::conway::ProtocolParamUpdate {
+        let mut bytes = vec![0xa1];
+        bytes.extend(minicbor::to_vec(key).unwrap());
+        bytes.extend_from_slice(value);
+
+        minicbor::decode(&bytes).expect("the one key update does not decode")
+    }
+
+    fn parameter_change(update: dijkstra::ProtocolParamUpdate) -> dijkstra::GovAction {
+        dijkstra::GovAction::ParameterChange(None, Box::new(update), None)
+    }
+
+    /// Every key the Dijkstra era added, with a value of its own type and the
+    /// name the refusal has to carry.
+    fn dijkstra_only_keys() -> Vec<(u64, &'static str, Vec<u8>)> {
+        let count = minicbor::to_vec(500u64).unwrap();
+        let ratio = minicbor::to_vec(RationalNumber {
+            numerator: 1,
+            denominator: 2,
+        })
+        .unwrap();
+        let nullable_ratio = minicbor::to_vec(Nullable::Some(RationalNumber {
+            numerator: 1,
+            denominator: 2,
+        }))
+        .unwrap();
+        let units = minicbor::to_vec(ExUnits { mem: 10, steps: 10 }).unwrap();
+
+        vec![
+            (34, "max_ref_script_size_per_block", count.clone()),
+            (35, "max_ref_script_size_per_tx", count.clone()),
+            (36, "ref_script_cost_stride", count.clone()),
+            (37, "ref_script_cost_multiplier", ratio.clone()),
+            (38, "max_pledge_leverage", nullable_ratio),
+            (39, "min_pool_margin", ratio.clone()),
+            (40, "leios_announcement_period_length", count.clone()),
+            (41, "leios_vote_period_length", count.clone()),
+            (42, "leios_diffusion_period_length", count.clone()),
+            (43, "leios_committee_size", count.clone()),
+            (44, "leios_quorum_stake_threshold", ratio),
+            (45, "max_endorser_block_references_size", count.clone()),
+            (46, "max_endorser_block_txs_size", count.clone()),
+            (47, "max_endorser_block_execution_units", units),
+            (48, "max_ref_script_size_per_endorser_block", count),
+        ]
+    }
+
+    /// The must-fire case. The parameter set has no field for any of the keys
+    /// the Dijkstra era added, so a proposal that sets one has to refuse and
+    /// name it rather than record a set the key is missing from.
+    #[test]
+    fn every_dijkstra_only_parameter_key_is_refused_by_name() {
+        for (key, name, value) in dijkstra_only_keys() {
+            let action = parameter_change(dijkstra_update(key, &value));
+            let action = MultiEraGovAction::from_dijkstra(&action);
+
+            let error = parse_gov_action(&action)
+                .err()
+                .unwrap_or_else(|| panic!("key {key} was recorded"));
+
+            assert!(
+                error.to_string().contains(name),
+                "key {key} was refused without naming {name}: {error}"
+            );
+        }
+    }
+
+    /// The must-not case. A Dijkstra update of a key every era carries has to
+    /// be recorded, or a parameter change on a Dijkstra chain would stop the
+    /// node instead of reaching the proposal.
+    #[test]
+    fn a_dijkstra_update_of_a_shared_parameter_is_recorded() {
+        let value = minicbor::to_vec(500u64).unwrap();
+        let action = parameter_change(dijkstra_update(0, &value));
+        let action = MultiEraGovAction::from_dijkstra(&action);
+
+        let (recorded, parent, purpose) = parse_gov_action(&action).unwrap();
+
+        assert_eq!(parent, None);
+        assert_eq!(purpose, Some(GovPurpose::PParamUpdate));
+
+        let ProposalAction::ParamChange(set) = recorded else {
+            panic!("a parameter change was recorded as {recorded:?}");
+        };
+
+        assert_eq!(set.min_fee_a(), Some(500));
+    }
+
+    /// The parameter set holds a PlutusV4 model under key 3 of the wildcard
+    /// map, which is where Conway's own cost model type carries it.
+    #[test]
+    fn a_dijkstra_plutus_v4_cost_model_is_recorded_under_the_wildcard_key() {
+        // Key 18 reading a cost model map of key 3 to the vector [1, 2].
+        let value = hex::decode("a103820102").unwrap();
+        let action = parameter_change(dijkstra_update(18, &value));
+        let action = MultiEraGovAction::from_dijkstra(&action);
+
+        let (recorded, _, _) = parse_gov_action(&action).unwrap();
+
+        let ProposalAction::ParamChange(set) = recorded else {
+            panic!("a parameter change was recorded as {recorded:?}");
+        };
+
+        assert_eq!(
+            set.cost_models_unknown(),
+            Some(BTreeMap::from([(
+                pallas_extras::PLUTUS_V4_COST_MODEL_KEY,
+                vec![1, 2]
+            )]))
+        );
+    }
+
+    /// The must-not case for the wildcard map. Reading a Conway update through
+    /// the era neutral cost model type, which names four languages and no
+    /// wildcard key, must not drop the keys that type has no field for.
+    #[test]
+    fn a_conway_cost_model_under_a_wildcard_key_is_kept() {
+        // Key 18 reading a cost model map of key 5 to the vector [1, 2].
+        let value = hex::decode("a105820102").unwrap();
+        let action = pallas::ledger::primitives::conway::GovAction::ParameterChange(
+            None,
+            Box::new(conway_update(18, &value)),
+            None,
+        );
+        let action = MultiEraGovAction::from_conway(&action);
+
+        let (recorded, _, _) = parse_gov_action(&action).unwrap();
+
+        let ProposalAction::ParamChange(set) = recorded else {
+            panic!("a parameter change was recorded as {recorded:?}");
+        };
+
+        assert_eq!(
+            set.cost_models_unknown(),
+            Some(BTreeMap::from([(5, vec![1, 2])]))
+        );
     }
 }
