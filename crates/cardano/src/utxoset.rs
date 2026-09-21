@@ -794,6 +794,140 @@ mod tests {
             other => panic!("wrong refusal: {other:?}"),
         }
     }
+
+    fn musashi_block(name: &str) -> Vec<u8> {
+        let path = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("../../test_data/musashi-w36")
+            .join(name);
+
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        hex::decode(text.trim()).unwrap_or_else(|e| panic!("{path:?}: {e}"))
+    }
+
+    /// MUST FIRE: a sub transaction of a Dijkstra batch is applied like any
+    /// other transaction. Its outputs are created under the hash of its own
+    /// body, which is the key the node answers a utxo query with, and the input
+    /// it names is consumed.
+    ///
+    /// The three outputs named here are three of the four the node held and a
+    /// synced Dolos did not. The fourth arrives only in an endorser block and
+    /// no ranking block can produce it.
+    ///
+    /// MUST NOT FIRE: the batch's own transaction keeps its output, and the
+    /// block creates one more output than it has transactions on the wire by
+    /// exactly what the sub transactions make, so a sub transaction adds
+    /// entries and replaces none.
+    #[test]
+    fn a_sub_transaction_is_applied_under_the_hash_of_its_own_body() {
+        let cases: [(&str, u64, usize, usize, (&str, u32), &str, &[(&str, u32)]); 2] = [
+            (
+                "ranking-sub-transaction.block",
+                854292,
+                247,
+                247,
+                (
+                    "d2fa6568066113f78eefdc89025b419a8e68db15eef70e9a8cbea3b4ed87d8b6",
+                    0,
+                ),
+                "bd1b7336a5a62005a2576658e64990fab684a641139095afc16865c371e637b4",
+                &[(
+                    "ca42eb1227f150670a8a8c7c82468ff10dd726b2aa08ac209a8b8b5530fb28c7",
+                    0,
+                )],
+            ),
+            (
+                "ranking-sub-transaction-two-outputs.block",
+                1032954,
+                435,
+                436,
+                (
+                    "8d96682d9347ab0dd53bd3397ba3afd6b3296f826efb4be1955c7ca7e21bdfe4",
+                    1,
+                ),
+                "d04727b7a026cf5b310c0e86a2920c6d23067c0062ac783d7f4f90905a2293bb",
+                &[
+                    (
+                        "31dae9d64e767c94be97acdeac9fb60ff5322a96ead4dabd187d880e03220dc1",
+                        0,
+                    ),
+                    (
+                        "31dae9d64e767c94be97acdeac9fb60ff5322a96ead4dabd187d880e03220dc1",
+                        1,
+                    ),
+                ],
+            ),
+        ];
+
+        let txoref = |(hash, index): &(&str, u32)| TxoRef(Hash::from_str(hash).unwrap(), *index);
+
+        for (name, slot, emitted, produced, spent, parent, made) in cases {
+            let cbor = musashi_block(name);
+            let block = MultiEraBlock::decode(&cbor).unwrap();
+
+            let mut ledger = FakeLedger::default();
+            ledger.seed_externals(&block);
+
+            let (delta, stats) =
+                super::compute_apply_delta_lenient(&block, &ledger.bodies, &ledger.present)
+                    .unwrap();
+
+            let absent: Vec<String> = made
+                .iter()
+                .map(txoref)
+                .filter(|key| !delta.produced_utxo.contains_key(key))
+                .map(|key| format!("{}#{}", key.0, key.1))
+                .collect();
+
+            assert_eq!(
+                (
+                    block.slot(),
+                    block.tx_count(),
+                    delta.produced_utxo.len(),
+                    absent,
+                    delta.consumed_utxo.contains_key(&txoref(&spent)),
+                    delta.produced_utxo.contains_key(&txoref(&(parent, 0))),
+                    stats.recreated_outputs,
+                ),
+                (slot, emitted, produced, vec![], true, true, 0),
+                "{name}: the sub transaction's outputs are created under the hash of its own \
+                 body, the input it names is consumed, and the batch's own output stands"
+            );
+        }
+    }
+
+    /// MUST NOT FIRE: a Dijkstra ranking block whose transactions carry no sub
+    /// transaction creates one output per transaction on its wire and nothing
+    /// under any other key, so the sub transaction rule invents nothing where
+    /// there is no batch.
+    #[test]
+    fn a_block_with_no_sub_transaction_creates_only_its_own_outputs() {
+        let cbor = musashi_block("ranking-announce-with-txs.block");
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+
+        let carried: usize = block
+            .txs()
+            .iter()
+            .map(|tx| tx.sub_transactions().len())
+            .sum();
+        let outputs: usize = block.txs().iter().map(|tx| tx.produces().len()).sum();
+
+        let mut ledger = FakeLedger::default();
+        ledger.seed_externals(&block);
+
+        let (delta, _) =
+            super::compute_apply_delta_lenient(&block, &ledger.bodies, &ledger.present).unwrap();
+
+        assert_eq!(
+            (
+                carried,
+                block.tx_count(),
+                outputs,
+                delta.produced_utxo.len()
+            ),
+            (0, 436, 436, 436),
+            "a block carrying no sub transaction creates one output per transaction on its wire"
+        );
+    }
 }
 
 /// What the w35 to w36 fixture rewrite decided, pinned.

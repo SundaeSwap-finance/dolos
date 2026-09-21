@@ -37,6 +37,8 @@ const KINDS: &[&str] = &[
     "epoch_boundary_first_block_of_epoch_56",
     "era_header_variant_6",
     "era_header_variant_7",
+    "ranking_block_with_sub_transaction",
+    "ranking_block_with_sub_transaction_of_two_outputs",
     "endorser_block_large",
     "endorser_block_small",
     "endorser_block_repeat_first",
@@ -227,7 +229,7 @@ fn every_ranking_block_is_the_block_its_entry_names() {
         checked += 1;
     }
 
-    assert_eq!(checked, 7, "the number of ranking block fixtures changed");
+    assert_eq!(checked, 9, "the number of ranking block fixtures changed");
 }
 
 #[test]
@@ -358,6 +360,30 @@ fn each_fixture_shows_the_shape_it_was_cut_for() {
         old.slot < new.slot,
         "the era variant pair is recorded out of order"
     );
+
+    let one_output = k["ranking_block_with_sub_transaction"];
+    let two_outputs = k["ranking_block_with_sub_transaction_of_two_outputs"];
+    for (f, subs, outputs) in [(one_output, 1usize, 1usize), (two_outputs, 1, 2)] {
+        let raw = read_bytes(&f.files[0]);
+        let block = MultiEraBlock::decode(&raw).expect("the sub transaction block decodes");
+        let txs = block.txs();
+        let emitted: Vec<_> = txs
+            .iter()
+            .filter(|tx| tx.as_dijkstra_sub().is_some())
+            .collect();
+        let carried: usize = txs.iter().map(|tx| tx.sub_transactions().len()).sum();
+
+        assert_eq!(
+            (
+                carried,
+                emitted.len(),
+                emitted.iter().map(|tx| tx.produces().len()).sum::<usize>(),
+            ),
+            (subs, subs, outputs),
+            "{} does not carry the sub transaction shape it was cut for",
+            f.name
+        );
+    }
 
     let large = k["endorser_block_large"];
     let small = k["endorser_block_small"];
