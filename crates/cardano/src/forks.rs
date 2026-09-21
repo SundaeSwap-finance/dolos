@@ -244,12 +244,13 @@ pub fn migrate_pparams_version(
         // Van Rossem: intra-era hard-fork to protocol version 11
         (10, 11) => intra_era_hardfork(current, to),
         // Protocol version 12 transitions from Conway to Dijkstra. Dijkstra
-        // keeps all 31 Conway parameters with the same meanings and adds four
-        // reference script sizing and cost parameters, sourced from a Dijkstra
-        // genesis file. Those four have no member in PParamsSet and nothing
-        // here reads a reference script cost, so the transition carries the
-        // Conway set forward and moves the version on. A consumer that needs
-        // the Dijkstra additions needs a PParamsSet that can hold them first.
+        // keeps the Conway parameters with the same meanings and adds the ones
+        // a Dijkstra genesis file declares, which are the Leios periods and
+        // committee, the endorser block limits, and the reference script
+        // sizing and cost. None of those has a member in PParamsSet and
+        // nothing here reads one, so the transition carries the Conway set
+        // forward and moves the version on. A consumer that needs a Dijkstra
+        // parameter needs a PParamsSet that can hold it first.
         (11, 12) => intra_era_hardfork(current, to),
         (from, to) => {
             unimplemented!("don't know how to bump from version {from} to {to} (#1033)",)
@@ -338,6 +339,72 @@ mod tests {
 
         let expected = at_eleven.with(PParamValue::ProtocolVersion((12, 0)));
         assert_eq!(at_twelve, expected);
+    }
+
+    /// Every parameter the Musashi node's Dijkstra genesis declares, as that
+    /// file spells them.
+    ///
+    /// Dolos has no member for any of them, and the test below is what says so
+    /// out loud: the day `PParamsSet` grows one and the version 12 step starts
+    /// emitting it, the assertion fails and the transition above stops being
+    /// the whole story.
+    const DIJKSTRA_GENESIS_PARAMETERS: &[&str] = &[
+        "leiosAnnouncementPeriodLength",
+        "leiosCommitteeSize",
+        "leiosDiffusionPeriodLength",
+        "leiosQuorumStakeThreshold",
+        "leiosVotePeriodLength",
+        "maxEndorserBlockExecutionUnits",
+        "maxEndorserBlockReferencesSize",
+        "maxEndorserBlockTxsSize",
+        "maxPledgeLeverage",
+        "maxRefScriptSizePerBlock",
+        "maxRefScriptSizePerEndorserBlock",
+        "maxRefScriptSizePerTx",
+        "minPoolMargin",
+        "plutusV4CostModel",
+        "refScriptCostMultiplier",
+        "refScriptCostStride",
+    ];
+
+    /// Case and separators removed, so a parameter is compared by its name and
+    /// not by the spelling two files chose for it.
+    fn flatten(name: &str) -> String {
+        name.chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    }
+
+    /// MUST NOT FIRE: the set the version 12 step produces carries no Dijkstra
+    /// parameter, because nothing can hold one yet.
+    ///
+    /// MUST FIRE: the same comparison finds a parameter the set does carry, so
+    /// an absence here is a measured absence and not a comparison that never
+    /// matches anything.
+    #[test]
+    fn the_dijkstra_parameters_are_absent_from_the_transitioned_set() {
+        let genesis = mainnet_genesis();
+        let initial = from_byron_genesis(&genesis.byron);
+
+        let at_twelve = force_pparams_version(&initial, &genesis, 0, 12).unwrap();
+
+        let carried: Vec<String> = at_twelve
+            .iter()
+            .map(|value| flatten(&format!("{:?}", value.kind())))
+            .collect();
+
+        for name in DIJKSTRA_GENESIS_PARAMETERS {
+            assert!(
+                !carried.contains(&flatten(name)),
+                "{name} reached the version 12 set, so the transition now has to source it",
+            );
+        }
+
+        assert!(
+            carried.contains(&flatten("protocolVersion")),
+            "the comparison matches nothing at all, so the absences above mean nothing",
+        );
     }
 
     /// The must-not case for the one above. Adding a rule for 12 must not turn
