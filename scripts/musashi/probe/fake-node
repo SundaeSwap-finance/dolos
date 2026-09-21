@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Answers the three node queries the comparison scripts make, from the fixtures
+beside this file, so both scripts can be driven over a ledger whose divergence
+is known in advance.
+"""
+
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def load(name):
+    with open(os.path.join(HERE, name)) as handle:
+        return json.load(handle)
+
+
+def emit(value, argv):
+    text = json.dumps(value)
+    if "--out-file" in argv:
+        with open(argv[argv.index("--out-file") + 1], "w") as out:
+            out.write(text)
+        return
+    sys.stdout.write(text)
+
+
+def main():
+    argv = sys.argv[1:]
+
+    if argv[:2] == ["query", "tip"]:
+        emit({"slot": 1000, "block": 42, "hash": "aa" * 32, "epoch": 3}, argv)
+        return 0
+
+    if argv[:2] == ["query", "utxo"]:
+        emit(load("node-utxos.json"), argv)
+        return 0
+
+    if argv[:2] == ["query", "protocol-parameters"]:
+        emit(load("node-params.json"), argv)
+        return 0
+
+    sys.stderr.write(f"the probe node was asked something it does not answer: {argv}\n")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
