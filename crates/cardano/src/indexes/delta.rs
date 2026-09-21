@@ -111,7 +111,7 @@ impl CardanoIndexDeltaBuilder {
         }
 
         // Reference script tag
-        if let Some(script_ref) = output.script_ref() {
+        if let Some(script_ref) = output.multi_era_script_ref() {
             tags.push(Tag::new(
                 utxo::SCRIPT_REF,
                 pallas_extras::script_ref_hash(&script_ref).to_vec(),
@@ -321,13 +321,13 @@ impl CardanoIndexDeltaBuilder {
                     self.add_datum(&datum);
                 }
 
-                if let Some(script_ref) = output.script_ref() {
+                if let Some(script_ref) = output.multi_era_script_ref() {
                     let parts = pallas_extras::script_ref_parts(&script_ref);
                     self.add_script_hash(parts.hash.to_vec());
                 }
             }
 
-            for script in tx.native_scripts() {
+            for script in tx.multi_era_native_scripts() {
                 self.add_script_hash(script.hash().to_vec());
             }
             for script in tx.plutus_v1_scripts() {

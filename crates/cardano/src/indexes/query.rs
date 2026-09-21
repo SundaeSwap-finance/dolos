@@ -509,7 +509,7 @@ where
             end_slot,
             |block| {
                 for tx in block.txs() {
-                    for script in tx.native_scripts() {
+                    for script in tx.multi_era_native_scripts() {
                         if script.hash() == script_hash {
                             return Some(ScriptData {
                                 language: ScriptLanguage::Native,
@@ -546,7 +546,7 @@ where
                     }
 
                     for (_, output) in tx.produces() {
-                        if let Some(script_ref) = output.script_ref() {
+                        if let Some(script_ref) = output.multi_era_script_ref() {
                             let parts = crate::pallas_extras::script_ref_parts(&script_ref);
                             if parts.hash == script_hash {
                                 return Some(ScriptData {

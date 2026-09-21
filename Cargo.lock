@@ -3717,7 +3717,7 @@ dependencies = [
 [[package]]
 name = "pallas"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "pallas-addresses 1.4.0",
  "pallas-codec 1.4.0",
@@ -3752,7 +3752,7 @@ dependencies = [
 [[package]]
 name = "pallas-addresses"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "base58",
  "bech32 0.11.1",
@@ -3779,7 +3779,7 @@ dependencies = [
 [[package]]
 name = "pallas-codec"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "hex",
  "minicbor 0.26.4",
@@ -3806,7 +3806,7 @@ dependencies = [
 [[package]]
 name = "pallas-configs"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "base64 0.22.1",
  "num-rational",
@@ -3835,7 +3835,7 @@ dependencies = [
 [[package]]
 name = "pallas-crypto"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "cryptoxide 0.4.4",
  "hex",
@@ -3848,7 +3848,7 @@ dependencies = [
 [[package]]
 name = "pallas-hardano"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "binary-layout",
  "hex",
@@ -3886,7 +3886,7 @@ dependencies = [
 [[package]]
 name = "pallas-network"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "byteorder",
  "hex",
@@ -3903,7 +3903,7 @@ dependencies = [
 [[package]]
 name = "pallas-network2"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "byteorder",
  "chrono",
@@ -3935,7 +3935,7 @@ dependencies = [
 [[package]]
 name = "pallas-primitives"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "hex",
  "pallas-codec 1.4.0",
@@ -3964,7 +3964,7 @@ dependencies = [
 [[package]]
 name = "pallas-traverse"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "hex",
  "itertools 0.14.0",
@@ -3997,7 +3997,7 @@ dependencies = [
 [[package]]
 name = "pallas-txbuilder"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "hex",
  "pallas-addresses 1.4.0",
@@ -4028,7 +4028,7 @@ dependencies = [
 [[package]]
 name = "pallas-utxorpc"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "pallas-codec 1.4.0",
  "pallas-crypto 1.4.0",
@@ -4061,7 +4061,7 @@ dependencies = [
 [[package]]
 name = "pallas-validate"
 version = "1.4.0"
-source = "git+https://github.com/geofflittle/pallas?rev=3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61#3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+source = "git+https://github.com/geofflittle/pallas?rev=23d14a18ba7da2a089934a0b5c52bd701d50a4e8#23d14a18ba7da2a089934a0b5c52bd701d50a4e8"
 dependencies = [
  "amaru-uplc",
  "chrono",
