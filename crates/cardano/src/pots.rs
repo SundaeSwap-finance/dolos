@@ -157,33 +157,28 @@ pub fn supply_holds_or_lenient(new_pots: &Pots, expected_max_supply: Lovelace) -
     lenient_apply() || new_pots.is_consistent(expected_max_supply)
 }
 
-/// Measures the drift between the pots an epoch started with and the pots it
-/// ended with, or `None` when the supply is conserved.
+/// Measures how far each pot moved between the pots an epoch started with and
+/// the pots it ended with.
 ///
-/// `None` is the only answer that means "consistent". It is returned from a
-/// comparison of the two totals rather than from any check that could pass by
-/// not running, so a caller that gets `None` has been told the sums are equal.
-pub fn measure_drift(epoch: u64, initial: &Pots, ended: &Pots) -> Option<PotsDrift> {
-    let expected = initial.max_supply();
-    let actual = ended.max_supply();
-
-    if actual == expected {
-        return None;
-    }
-
+/// Every boundary gets a report. A boundary that conserves the supply has
+/// still moved pots, and answering nothing for it would say the boundary was
+/// still when it was only balanced, which is the one distinction a caller
+/// investigating created ada needs. `total` says whether value appeared and
+/// `moved` says out of which pot.
+pub fn measure_drift(epoch: u64, initial: &Pots, ended: &Pots) -> PotsDrift {
     let d = |after: Lovelace, before: Lovelace| after as i128 - before as i128;
 
-    Some(PotsDrift {
+    PotsDrift {
         epoch,
-        expected_max_supply: expected,
-        actual_max_supply: actual,
+        expected_max_supply: initial.max_supply(),
+        actual_max_supply: ended.max_supply(),
         reserves: d(ended.reserves, initial.reserves),
         treasury: d(ended.treasury, initial.treasury),
         utxos: d(ended.utxos, initial.utxos),
         rewards: d(ended.rewards, initial.rewards),
         fees: d(ended.fees, initial.fees),
         obligations: d(ended.obligations(), initial.obligations()),
-    })
+    }
 }
 
 #[derive(Debug, Clone, Encode, Decode, Serialize, Deserialize, Default, PartialEq, Eq)]
