@@ -105,12 +105,21 @@ impl<D: Domain> SyncExt for D {
 
     #[instrument(skip_all, fields(rollback_to = %to))]
     fn rollback(&self, to: &ChainPoint) -> Result<(), DomainError> {
-        // Origin is the position before the first entry, so no entry stands for
-        // it and a rollback to it is defined on any wal, including the empty
-        // one a follower starts with. Every other target has to be an entry,
-        // because the walk below stops at the entry for `to` and a target the
-        // wal does not hold would undo everything it does hold.
-        if !matches!(to, ChainPoint::Origin) && !self.wal().contains_point(to)? {
+        // The walk below undoes the entries the wal holds and stops at the one
+        // for `to`, so the target has to be a position the wal can reach back
+        // to. Genesis writes an entry at origin and a wal that still begins
+        // there, or holds nothing at all, can reach it. A wal that begins
+        // anywhere else holds no entry for what the state below its first
+        // entry recorded, and the walk would leave that state applied under a
+        // cursor that says origin.
+        let reachable = match to {
+            ChainPoint::Origin => {
+                matches!(self.wal().find_start()?, None | Some((ChainPoint::Origin, _)))
+            }
+            _ => self.wal().contains_point(to)?,
+        };
+
+        if !reachable {
             return Err(DomainError::RollbackTargetNotInWal(to.clone()));
         }
 
