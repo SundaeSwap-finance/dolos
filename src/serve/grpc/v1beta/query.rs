@@ -1609,10 +1609,12 @@ mod live_params_tests {
             .with(Val::CostModelsPlutusV3(model(node, "PlutusV3")))
             // The Conway cost model type names three languages, so the chain
             // carries the PlutusV4 vector under key 3 of the wildcard map.
-            .with(Val::CostModelsUnknown(std::collections::BTreeMap::from([(
-                dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY,
-                model(node, "PlutusV4"),
-            )])))
+            .with(Val::CostModelsUnknown(std::collections::BTreeMap::from([
+                (
+                    dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY,
+                    model(node, "PlutusV4"),
+                ),
+            ])))
     }
 
     fn serve(set: &PParamsSet) -> u5c::cardano::PParams {
