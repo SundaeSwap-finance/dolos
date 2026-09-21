@@ -83,12 +83,28 @@ mkdir -p "$CKPT" || die "cannot create $CKPT"
 if ! mkdir "$LOCK" 2>/dev/null; then
   die "$LOCK exists, another run is in progress"
 fi
+# Set while the follower is down for a copy. A refusal between the stop and the
+# start reaches the handler below rather than the start, so without this the
+# follower stays down with nothing left running to notice.
+STOPPED_FOR_COPY=0
+
+# The copy under way, which no later run can finish because it is named by this
+# run's process id.
+cleanup() {
+  if [ "$STOPPED_FOR_COPY" = 1 ]; then
+    docker start "$CONTAINER" >/dev/null 2>&1 || say "$CONTAINER could not be started again"
+    STOPPED_FOR_COPY=0
+  fi
+  rm -rf "$CKPT/incoming.$$"
+  rmdir "$LOCK" 2>/dev/null || true
+}
+
 # The signal handlers exit. A handler that only released the lock would let a
 # signalled run carry on holding no lock, which is how one stale run of this
 # script kept copying after it had been told to stop.
-trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
-trap 'rmdir "$LOCK" 2>/dev/null || true; exit 130' INT
-trap 'rmdir "$LOCK" 2>/dev/null || true; exit 143' TERM
+trap 'cleanup' EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 # Sum of every regular file's size and the count of them. Two directories that
 # agree on both held the same files, which is what makes a copy complete rather
@@ -154,6 +170,7 @@ take_checkpoint() {
   stopped_at=$(date +%s)
   if running; then
     docker stop -t "$STOP_TIMEOUT" "$CONTAINER" >/dev/null
+    STOPPED_FOR_COPY=1
     is_running=$(docker inspect -f '{{.State.Running}}' "$CONTAINER")
     [ "$is_running" = false ] || die "$CONTAINER is still running after docker stop"
   fi
@@ -175,6 +192,7 @@ EOF
   since=$(date -u '+%Y-%m-%dT%H:%M:%S')
   docker start "$CONTAINER" >/dev/null
   running || die "$CONTAINER did not start again"
+  STOPPED_FOR_COPY=0
   stop_seconds=$(($(date +%s) - stopped_at))
 
   tip=$(copy_tip "checkpoints/incoming.$$") || tip=""
