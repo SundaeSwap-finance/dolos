@@ -249,12 +249,14 @@ pub fn compute_apply_delta(
 /// Computes the ledger delta of undoing a block, and the inputs it recovered
 /// nothing for.
 ///
-/// `lenient` is the same rule the apply ran under. The rollback record is a
-/// superset of what the apply resolved, so an input with no body in it is an
-/// input the lenient walk left unconsumed, and recovering nothing for it is
-/// what makes the undo the inverse of that walk. The strict walk consumes every
-/// input a block names, so the same absence there is a ledger that lost a body
-/// and the rollback stops rather than undoing only part of the block.
+/// `lenient` is the rule the running process holds, not one recorded with the
+/// block, so an undo answers to the configuration in force when the rollback
+/// runs. Under it the rollback record is a superset of what a lenient apply
+/// resolved, so an input with no body in it is one that walk left unconsumed,
+/// and recovering nothing for it is what makes the undo the inverse of it. The
+/// strict walk consumes every input a block names, so the same absence there is
+/// a ledger that lost a body and the rollback stops rather than undoing only
+/// part of the block.
 pub fn compute_undo_delta(
     block: &MultiEraBlock,
     context: &HashMap<TxoRef, OwnedMultiEraOutput>,
