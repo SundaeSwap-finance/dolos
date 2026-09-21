@@ -141,8 +141,8 @@ fn names_the_same_block(a: &ChainPoint, b: &ChainPoint) -> bool {
 
 /// The blocks a caller resuming at `from` has not applied.
 ///
-/// A wal block iteration opened at a point starts with that point, and the
-/// caller named that point as the block it last applied, so it is dropped.
+/// Any block that `from` names is dropped, because the caller named it as the
+/// block it last applied.
 pub fn blocks_after<'a>(
     from: Option<&'a ChainPoint>,
     blocks: impl Iterator<Item = (ChainPoint, RawBlock)> + 'a,

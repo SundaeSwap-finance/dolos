@@ -1072,6 +1072,9 @@ mod treasury_donation_tests {
         assert_eq!(tx_treasury_donation(&tx), Some(1_000_000));
     }
 
+    /// The must-not case for a sub transaction. One without the key has to come
+    /// back as none, or every sub transaction of a block would read as a
+    /// donation.
     #[test]
     fn a_sub_transaction_without_a_donation_reports_none() {
         let bytes = hex::decode(DIJKSTRA_SUB_WITHOUT_DONATION).unwrap();
