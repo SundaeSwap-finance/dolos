@@ -6,7 +6,9 @@ use dolos_core::config::{PeerConfig, SyncConfig, SyncLimit};
 use dolos_core::ChainPoint;
 use gasket::framework::*;
 use itertools::Itertools;
-use pallas::ledger::traverse::leios::{AnnouncedEndorserBlock, CertificationTracker};
+use pallas::ledger::traverse::leios::{
+    AnnouncedEndorserBlock, CertificationTracker, HeaderOutcome,
+};
 use pallas::ledger::traverse::MultiEraHeader;
 use pallas::network::facades::PeerClient;
 use pallas::network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
@@ -62,6 +64,40 @@ fn to_traverse(header: &HeaderContent) -> Result<MultiEraHeader<'_>, WorkerError
     };
 
     out.or_panic()
+}
+
+/// Records what a header's outcome makes the follower owe, and answers whether
+/// a fetch is now owed.
+///
+/// One fetch is owed for each endorser block a header certifies and none for
+/// one a header only announces, so an announcement that a later header
+/// supersedes before any certificate names it costs nothing at all.
+///
+/// The debt is recorded before anything is fetched. The walk has already
+/// consumed the announcement by this point and will never offer it again, so a
+/// fetch that failed and was forgotten here is an endorser block no later pass
+/// can know was missing.
+fn record_certification(
+    payloads: &mut PendingPayloads,
+    outstanding: &mut BTreeMap<u64, AnnouncedEndorserBlock>,
+    certifying_slot: u64,
+    outcome: HeaderOutcome,
+) -> bool {
+    let Some(eb) = outcome.certified else {
+        return false;
+    };
+
+    debug!(
+        certifying_slot,
+        eb = %eb.hash,
+        size = eb.size,
+        "a ranking block certifies an endorser block"
+    );
+
+    payloads.expect(certifying_slot);
+    outstanding.insert(certifying_slot, eb);
+
+    true
 }
 
 // ============================================================================
@@ -265,23 +301,16 @@ impl Worker {
             WorkerError::Panic
         })?;
 
-        let Some(eb) = outcome.certified else {
-            return Ok(());
-        };
-
-        debug!(
-            certifying_slot = header.slot(),
-            eb = %eb.hash,
-            size = eb.size,
-            "a ranking block certifies an endorser block"
+        let owed = record_certification(
+            &mut self.payloads,
+            &mut self.outstanding,
+            header.slot(),
+            outcome,
         );
 
-        // The debt is recorded before anything is fetched. The walk has already
-        // consumed the announcement by this point and will never offer it again,
-        // so a fetch that fails and is forgotten here is an endorser block no
-        // later pass can know was missing.
-        self.payloads.expect(header.slot());
-        self.outstanding.insert(header.slot(), eb);
+        if !owed {
+            return Ok(());
+        }
 
         self.fetch_outstanding(stage).await
     }
