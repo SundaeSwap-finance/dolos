@@ -1,6 +1,6 @@
 pub mod storage;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use dolos_cardano::CardanoLogic;
@@ -17,14 +17,15 @@ pub use storage::{ArchiveStoreBackend, MempoolBackend, StateStoreBackend, WalSto
 pub type WalAdapter = WalStoreBackend<dolos_cardano::CardanoDelta>;
 
 pub struct TipSubscription {
-    replay: Vec<(ChainPoint, RawBlock)>,
+    replay: VecDeque<(ChainPoint, RawBlock)>,
     receiver: tokio::sync::broadcast::Receiver<TipEvent>,
 }
 
 impl dolos_core::TipSubscription for TipSubscription {
     async fn next_tip(&mut self) -> TipEvent {
-        if !self.replay.is_empty() {
-            let (point, block) = self.replay.pop().unwrap();
+        // Oldest first, because a subscriber applies what it is handed and a
+        // block cannot be applied before the one it builds on.
+        if let Some((point, block)) = self.replay.pop_front() {
             return TipEvent::Apply(point, block);
         }
 
@@ -124,7 +125,15 @@ impl Domain for DomainAdapter {
         // We then collect any gap between the from point and the current tip. This
         // assumes that no event will be sent between the creation of the receiver and
         // the collection of the replay.
-        let replay = self.wal().iter_blocks(from, None)?.collect::<Vec<_>>();
+        //
+        // The from point is the last point the caller applied, so the gap
+        // starts after it. Handing it back applies its transactions a second
+        // time.
+        let replay = self
+            .wal()
+            .iter_blocks(from.clone(), None)?
+            .filter(|(point, _)| from.as_ref() != Some(point))
+            .collect::<VecDeque<_>>();
 
         Ok(TipSubscription { replay, receiver })
     }
