@@ -1093,6 +1093,19 @@ mod tests {
         hex::decode(text.trim()).unwrap_or_else(|e| panic!("{path:?}: {e}"))
     }
 
+    /// A fixture name, its slot, the transactions the block emits, the outputs
+    /// the delta produces, the input the sub transaction spends, the parent's
+    /// hash and the outputs the sub transaction makes.
+    type SubTransactionCase = (
+        &'static str,
+        u64,
+        usize,
+        usize,
+        (&'static str, u32),
+        &'static str,
+        &'static [(&'static str, u32)],
+    );
+
     /// MUST FIRE: a sub transaction of a Dijkstra batch is applied like any
     /// other transaction. Its outputs are created under the hash of its own
     /// body, which is the key the node answers a utxo query with, and the input
@@ -1108,7 +1121,7 @@ mod tests {
     /// entries and replaces none.
     #[test]
     fn a_sub_transaction_is_applied_under_the_hash_of_its_own_body() {
-        let cases: [(&str, u64, usize, usize, (&str, u32), &str, &[(&str, u32)]); 2] = [
+        let cases: [SubTransactionCase; 2] = [
             (
                 "ranking-sub-transaction.block",
                 854292,
