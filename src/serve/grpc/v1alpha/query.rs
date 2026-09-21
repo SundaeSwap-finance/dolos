@@ -1496,10 +1496,15 @@ mod live_params_tests {
 
         let mapper = interop::Mapper::new(ToyDomain::new(None, None));
         let served = map_live_params(&mapper, &set).unwrap();
-        let models = served.cost_models.expect("the reply carries no cost models");
+        let models = served
+            .cost_models
+            .expect("the reply carries no cost models");
 
         assert_eq!(
-            models.plutus_v4.expect("the reply carries no PlutusV4 model").values,
+            models
+                .plutus_v4
+                .expect("the reply carries no PlutusV4 model")
+                .values,
             expected
         );
     }
