@@ -58,7 +58,15 @@ fn map_live_params<C: LedgerContext>(
     mapper: &interop::Mapper<C>,
     pparams: &dolos_cardano::PParamsSet,
 ) -> Result<u5c::cardano::PParams, ChainError> {
-    let mapped = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(pparams));
+    // The era mapping sets no retirement epoch bound, so the reply would carry a
+    // zero that a client cannot tell from a bound of zero epochs.
+    let bound = pparams
+        .maximum_epoch()
+        .ok_or_else(|| ChainError::PParamsNotFound("MaximumEpoch".to_string()))?;
+
+    let mut mapped = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(pparams));
+
+    mapped.pool_retirement_epoch_bound = bound;
 
     Ok(mapped)
 }

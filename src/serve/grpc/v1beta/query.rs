@@ -58,7 +58,15 @@ fn map_live_params<C: LedgerContext>(
     mapper: &interop::Mapper<C>,
     pparams: &dolos_cardano::PParamsSet,
 ) -> Result<u5c::cardano::PParams, ChainError> {
-    let mapped = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(pparams));
+    // The era mapping sets no retirement epoch bound, so the reply would carry a
+    // zero that a client cannot tell from a bound of zero epochs.
+    let bound = pparams
+        .maximum_epoch()
+        .ok_or_else(|| ChainError::PParamsNotFound("MaximumEpoch".to_string()))?;
+
+    let mut mapped = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(pparams));
+
+    mapped.pool_retirement_epoch_bound = bound;
 
     Ok(mapped)
 }
@@ -1390,9 +1398,8 @@ mod live_params_tests {
     use dolos_cardano::utils::float_to_rational;
     use dolos_cardano::PParamsSet;
     use dolos_testing::toy_domain::ToyDomain;
-    use pallas::ledger::primitives::conway::{
-        DRepVotingThresholds, ExUnitPrices, ExUnits, PoolVotingThresholds, RationalNumber,
-    };
+    use pallas::ledger::primitives::conway::{DRepVotingThresholds, PoolVotingThresholds};
+    use pallas::ledger::primitives::{ExUnitPrices, ExUnits, RationalNumber};
     use serde_json::Value;
 
     use super::*;
@@ -1561,12 +1568,18 @@ mod live_params_tests {
                 ),
             }))
             .with(Val::MinCommitteeSize(whole(node, "committeeMinSize")))
-            .with(Val::CommitteeTermLimit(whole(node, "committeeMaxTermLength")))
+            .with(Val::CommitteeTermLimit(whole(
+                node,
+                "committeeMaxTermLength",
+            )))
             .with(Val::GovernanceActionValidityPeriod(whole(
                 node,
                 "govActionLifetime",
             )))
-            .with(Val::GovernanceActionDeposit(whole(node, "govActionDeposit")))
+            .with(Val::GovernanceActionDeposit(whole(
+                node,
+                "govActionDeposit",
+            )))
             .with(Val::DrepDeposit(whole(node, "dRepDeposit")))
             .with(Val::DrepInactivityPeriod(whole(node, "dRepActivity")))
             .with(Val::MinFeeRefScriptCostPerByte(ratio(
@@ -1670,7 +1683,10 @@ mod live_params_tests {
             ("min_fee_constant", show_served_number(&p.min_fee_constant)),
             ("max_block_body_size", p.max_block_body_size.to_string()),
             ("max_block_header_size", p.max_block_header_size.to_string()),
-            ("stake_key_deposit", show_served_number(&p.stake_key_deposit)),
+            (
+                "stake_key_deposit",
+                show_served_number(&p.stake_key_deposit),
+            ),
             ("pool_deposit", show_served_number(&p.pool_deposit)),
             (
                 "pool_retirement_epoch_bound",
@@ -1700,9 +1716,18 @@ mod live_params_tests {
             ("max_value_size", p.max_value_size.to_string()),
             ("collateral_percentage", p.collateral_percentage.to_string()),
             ("max_collateral_inputs", p.max_collateral_inputs.to_string()),
-            ("cost_models.plutus_v1", show_served_model(&models.plutus_v1)),
-            ("cost_models.plutus_v2", show_served_model(&models.plutus_v2)),
-            ("cost_models.plutus_v3", show_served_model(&models.plutus_v3)),
+            (
+                "cost_models.plutus_v1",
+                show_served_model(&models.plutus_v1),
+            ),
+            (
+                "cost_models.plutus_v2",
+                show_served_model(&models.plutus_v2),
+            ),
+            (
+                "cost_models.plutus_v3",
+                show_served_model(&models.plutus_v3),
+            ),
             (
                 "prices.memory",
                 show_served_ratio(&p.prices.as_ref().and_then(|x| x.memory.clone())),
@@ -1775,19 +1800,49 @@ mod live_params_tests {
         .map(|k| nested_ratio(node, "dRepVotingThresholds", k));
 
         vec![
-            ("coins_per_utxo_byte", whole(node, "utxoCostPerByte").to_string()),
+            (
+                "coins_per_utxo_byte",
+                whole(node, "utxoCostPerByte").to_string(),
+            ),
             ("max_tx_size", whole(node, "maxTxSize").to_string()),
-            ("min_fee_coefficient", whole(node, "txFeePerByte").to_string()),
+            (
+                "min_fee_coefficient",
+                whole(node, "txFeePerByte").to_string(),
+            ),
             ("min_fee_constant", whole(node, "txFeeFixed").to_string()),
-            ("max_block_body_size", whole(node, "maxBlockBodySize").to_string()),
-            ("max_block_header_size", whole(node, "maxBlockHeaderSize").to_string()),
-            ("stake_key_deposit", whole(node, "stakeAddressDeposit").to_string()),
+            (
+                "max_block_body_size",
+                whole(node, "maxBlockBodySize").to_string(),
+            ),
+            (
+                "max_block_header_size",
+                whole(node, "maxBlockHeaderSize").to_string(),
+            ),
+            (
+                "stake_key_deposit",
+                whole(node, "stakeAddressDeposit").to_string(),
+            ),
             ("pool_deposit", whole(node, "stakePoolDeposit").to_string()),
-            ("pool_retirement_epoch_bound", whole(node, "poolRetireMaxEpoch").to_string()),
-            ("desired_number_of_pools", whole(node, "stakePoolTargetNum").to_string()),
-            ("pool_influence", show_ratio(&ratio(node, "poolPledgeInfluence"))),
-            ("monetary_expansion", show_ratio(&ratio(node, "monetaryExpansion"))),
-            ("treasury_expansion", show_ratio(&ratio(node, "treasuryCut"))),
+            (
+                "pool_retirement_epoch_bound",
+                whole(node, "poolRetireMaxEpoch").to_string(),
+            ),
+            (
+                "desired_number_of_pools",
+                whole(node, "stakePoolTargetNum").to_string(),
+            ),
+            (
+                "pool_influence",
+                show_ratio(&ratio(node, "poolPledgeInfluence")),
+            ),
+            (
+                "monetary_expansion",
+                show_ratio(&ratio(node, "monetaryExpansion")),
+            ),
+            (
+                "treasury_expansion",
+                show_ratio(&ratio(node, "treasuryCut")),
+            ),
             ("min_pool_cost", whole(node, "minPoolCost").to_string()),
             (
                 "protocol_version",
@@ -1798,11 +1853,26 @@ mod live_params_tests {
                 ),
             ),
             ("max_value_size", whole(node, "maxValueSize").to_string()),
-            ("collateral_percentage", whole(node, "collateralPercentage").to_string()),
-            ("max_collateral_inputs", whole(node, "maxCollateralInputs").to_string()),
-            ("cost_models.plutus_v1", show_model(&model(node, "PlutusV1"))),
-            ("cost_models.plutus_v2", show_model(&model(node, "PlutusV2"))),
-            ("cost_models.plutus_v3", show_model(&model(node, "PlutusV3"))),
+            (
+                "collateral_percentage",
+                whole(node, "collateralPercentage").to_string(),
+            ),
+            (
+                "max_collateral_inputs",
+                whole(node, "maxCollateralInputs").to_string(),
+            ),
+            (
+                "cost_models.plutus_v1",
+                show_model(&model(node, "PlutusV1")),
+            ),
+            (
+                "cost_models.plutus_v2",
+                show_model(&model(node, "PlutusV2")),
+            ),
+            (
+                "cost_models.plutus_v3",
+                show_model(&model(node, "PlutusV3")),
+            ),
             (
                 "prices.memory",
                 show_ratio(&nested_ratio(node, "executionUnitPrices", "priceMemory")),
@@ -1825,12 +1895,27 @@ mod live_params_tests {
             ),
             ("pool_voting_thresholds", show_thresholds(&pool)),
             ("drep_voting_thresholds", show_thresholds(&drep)),
-            ("min_committee_size", whole(node, "committeeMinSize").to_string()),
-            ("committee_term_limit", whole(node, "committeeMaxTermLength").to_string()),
-            ("governance_action_validity_period", whole(node, "govActionLifetime").to_string()),
-            ("governance_action_deposit", whole(node, "govActionDeposit").to_string()),
+            (
+                "min_committee_size",
+                whole(node, "committeeMinSize").to_string(),
+            ),
+            (
+                "committee_term_limit",
+                whole(node, "committeeMaxTermLength").to_string(),
+            ),
+            (
+                "governance_action_validity_period",
+                whole(node, "govActionLifetime").to_string(),
+            ),
+            (
+                "governance_action_deposit",
+                whole(node, "govActionDeposit").to_string(),
+            ),
             ("drep_deposit", whole(node, "dRepDeposit").to_string()),
-            ("drep_inactivity_period", whole(node, "dRepActivity").to_string()),
+            (
+                "drep_inactivity_period",
+                whole(node, "dRepActivity").to_string(),
+            ),
         ]
     }
 
