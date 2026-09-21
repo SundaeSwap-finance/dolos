@@ -6,7 +6,7 @@
 #
 # Usage: run-probe.sh
 #
-# Expected verdict line: PROBE 5 arms, 5 as expected
+# Expected verdict line: PROBE 6 arms, 6 as expected
 #
 # Reads nothing outside this directory and talks to no node.
 set -u
@@ -19,6 +19,7 @@ GRPCURL="$HERE/fake-grpcurl"
 export CARDANO_CLI GRPCURL
 export DOLOS_GRPC=probe
 export LEVEL_TIMEOUT=0
+export EXTRA_KEYS="$HERE/extra-keys.txt"
 
 chmod +x "$CARDANO_CLI" "$GRPCURL"
 
@@ -53,12 +54,14 @@ arm() {
 }
 
 HOLLOW_KEY=3333333333333333333333333333333333333333333333333333333333333333#0
+EXTRA_KEY=6666666666666666666666666666666666666666666666666666666666666666#0
 
 arm agree compare-params.py 0 "PARAMS 33 compared, 0 differing"
 arm diverge compare-params.py 1 "DIFFERS poolRetirementEpochBound costModels.plutusV4"
-arm agree compare-utxo-set.py 0 "only on node 0, value diffs 0"
+arm agree compare-utxo-set.py 0 "only on node 0, value diffs 0, only on follower 0"
 arm diverge compare-utxo-set.py 1 "only on node 1, value diffs 1"
 arm hollow compare-utxo-set.py 1 "ONLYNODE $HOLLOW_KEY 3000000"
+arm extra compare-utxo-set.py 1 "ONLYFOLLOWER $EXTRA_KEY"
 
 echo "PROBE $expected arms, $met as expected"
 [ "$expected" -eq "$met" ] || exit 1
