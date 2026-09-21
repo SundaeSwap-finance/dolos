@@ -1,0 +1,234 @@
+
+[[fixture]]
+name = "ranking-announce-with-txs"
+kind = "ranking_block_announcing_with_transactions"
+files = ["ranking-announce-with-txs.block"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 1202730
+block_hash = "2019145196aad7c71fb53ba34f5b02317f221628bbdfe7952cd69c8eefd709bb"
+transactions = 436
+bytes = 88542
+located_by = "header index rows where the announcement field is set and the block-fetch scan of slots 1200053 to 1220903 counted more than zero transactions"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "ranking-announce-quiet"
+kind = "ranking_block_announcing_without_transactions"
+files = ["ranking-announce-quiet.block"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 1202752
+block_hash = "265073f3c66667f1c377a6c998c09970a46ffa29ca20d90838ed7e92bf4d034e"
+transactions = 0
+bytes = 971
+located_by = "header index rows where the announcement field is set and the same scan counted zero transactions"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "pool-registration-bls"
+kind = "pool_registration_with_bls_key"
+files = ["pool-registration-bls.block"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 86855
+block_hash = "adb23531ebb61891912e6a4bdabcbaaa053223d2de342eedbaa9b6af4fb526f3"
+transactions = 1
+bytes = 1689
+located_by = "block-fetch scan of slots 85505 to 87492, certificate walk naming a pool registration whose bls key slot holds a key"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "epoch-boundary-before"
+kind = "epoch_boundary_last_block_of_epoch_55"
+files = ["epoch-boundary-before.block"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 1209593
+block_hash = "733c9df1af1c5adcac234add123a89924f8aea05bd2def0c1e782f30f1409bee"
+transactions = 0
+bytes = 862
+located_by = "last indexed block with slot below 1209600, which is epoch 56 times the shelley genesis epochLength of 21600"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "epoch-boundary-after"
+kind = "epoch_boundary_first_block_of_epoch_56"
+files = ["epoch-boundary-after.block"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 1209609
+block_hash = "c9cf5b7cfcdae0edb4ccc8fb0a1ed7c26b0d53839f6caa78ee590a00ed46bf8d"
+transactions = 0
+bytes = 862
+located_by = "first indexed block with slot at or above 1209600"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "era-variant-before"
+kind = "era_header_variant_6"
+files = ["era-variant-before.block"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 86373
+block_hash = "802112126cc600a6afc5193a0150aafd9f6563bec28207df7e6c20cc62e95f8e"
+transactions = 0
+bytes = 862
+located_by = "last indexed header carrying chain-sync era variant 6, found by walking the index for a variant change"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "era-variant-after"
+kind = "era_header_variant_7"
+files = ["era-variant-after.block"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 86463
+block_hash = "d0c2a26a0192baf397b75cd38137987d82036c269089362842888279f3e19daf"
+transactions = 0
+bytes = 862
+located_by = "first indexed header carrying chain-sync era variant 7, the same variant change"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "endorser-large"
+kind = "endorser_block_large"
+files = ["endorser-large.ebbody", "endorser-large.ebtxs"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 1219676
+endorser_hash = "788c8b2861079cdd7664eae8810779ff0c1f6b45714401b94407417973373bd4"
+transactions = 464
+bytes = 16707
+located_by = "announced sizes in the header index between 11100 and 22200 bytes, which at 36 bytes per body entry is 300 to 600 transactions"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "endorser-small"
+kind = "endorser_block_small"
+files = ["endorser-small.ebbody", "endorser-small.ebtxs"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 1213880
+endorser_hash = "136f8556744dfc6306cfd28546e5723d743b1319d0c40b6d6dc5fb7dd6a68d15"
+transactions = 26
+bytes = 938
+located_by = "smallest announced size in the header index above slot 1190000, one 64 transaction window"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "endorser-repeat-first"
+kind = "endorser_block_repeat_first"
+files = ["endorser-repeat-first.ebbody", "endorser-repeat-first.ebtxs"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 1205632
+endorser_hash = "9fcc403d66ac3740ddaf8e7bf0b16ada7494d9296e04ec9ace57d9a4ed661151"
+transactions = 74
+bytes = 2666
+located_by = "pairwise comparison of the wire transactions of 23 fetched endorser payloads, this pair shares 15 of them"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+[[fixture]]
+name = "endorser-repeat-second"
+kind = "endorser_block_repeat_second"
+files = ["endorser-repeat-second.ebbody", "endorser-repeat-second.ebtxs"]
+chain_tag = "prototype-2026w36"
+network_magic = 164
+slot = 1205667
+endorser_hash = "3460aa064878b8a901297913a96fcfd3244b4c7f7b9f2a5ddd4f389100679c4d"
+transactions = 26
+bytes = 938
+located_by = "the second of that pair, 15 of its 26 transactions are also in endorser-repeat-first"
+harvested_at = "2026-09-21T03:22:45Z"
+relay = "172.17.0.2:3001 (the musashi-node container on the box, node to node)"
+tool_rev = "pallas feat/leios-testnet-fixture-writer on 3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+tip_slot = 1221690
+tip_hash = "ee0c1dca1d018af692f7f9a9e12f323a1e576ca89d179bf60b7ec53ff3364261"
+
+# Kinds that were searched for and not found. Each entry names the predicate and
+# the number of blocks it was evaluated over, so the verdict is a measurement
+# rather than a fixture nobody got round to cutting.
+
+[[absent]]
+kind = "ranking_block_pair_repeating_a_transaction"
+predicate = "a transaction hash carried by one ranking block and carried again by a later one, counted together with the intra block forward reference and the repeat within a single block"
+scanned = "slots 12 to 1221690, every ranking block from block 0 to the tip at harvest"
+blocks_examined = 55254
+transactions_examined = 5130974
+found = 0
+verdict = "the chain carries no repeated transaction between ranking blocks, and no forward reference and no repeat inside a block either"
+measured_at = "2026-09-21T02:58:11Z"
+chain_tag = "prototype-2026w36"
+
+[[absent]]
+kind = "block_needing_lenient_apply"
+predicate = "the three shapes a lenient apply recovers from, an input spending an output the same block creates later, a transaction carried twice, and a transaction carried twice whose output was spent in between"
+scanned = "slots 12 to 1221690 for ranking blocks, and 23 endorser payloads fetched between slots 1190000 and 1221690 of which 17 were certified, including 8 consecutive"
+blocks_examined = 55254
+transactions_examined = 5130974
+found = 0
+verdict = "no block and no certified endorser payload on this chain needs a lenient apply, so a strict apply would reject nothing"
+measured_at = "2026-09-21T03:11:40Z"
+chain_tag = "prototype-2026w36"
+
+[[absent]]
+kind = "protocol_version_12_transition_block"
+predicate = "a header whose protocol version major differs from the major of the header before it"
+scanned = "slots 12 to 1221690, every header the chain served, indexed over chain sync"
+blocks_examined = 55240
+found = 0
+verdict = "the chain starts at major 12, block 0 at slot 12 already reads 12.0, so there is no transition block to cut. The minor rises to 67 in 283 non contiguous runs, which makes it a per producer field and not a chain wide change. The era change this chain does have is the chain sync header variant 6 to 7 at block 4255 slot 86463, harvested as the era_header_variant pair rather than as this kind"
+measured_at = "2026-09-21T01:44:52Z"
+chain_tag = "prototype-2026w36"
