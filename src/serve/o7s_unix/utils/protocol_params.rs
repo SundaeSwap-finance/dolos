@@ -1,5 +1,6 @@
 use crate::prelude::*;
 use dolos_cardano::load_effective_pparams;
+use dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY;
 use pallas::codec::utils::{AnyUInt, KeyValuePairs};
 use pallas::network::miniprotocols::localstate::queries_v16 as q16;
 
@@ -70,9 +71,6 @@ fn to_q16_ex_unit_prices(e: &pallas::ledger::primitives::ExUnitPrices) -> q16::E
         step_price: to_q16_rational(&e.step_price),
     }
 }
-
-/// The cost model key the Dijkstra ledger gives PlutusV4.
-const PLUTUS_V4_COST_MODEL_KEY: u64 = 3;
 
 fn to_q16_cost_models(c: &pallas::ledger::primitives::conway::CostModels) -> q16::CostModels {
     // The Conway cost model set names three languages and puts every further
@@ -155,6 +153,46 @@ mod cost_model_tests {
 
         assert_eq!(reply.plutus_v4, None);
         assert_eq!(reply.unknown.len(), 2);
+    }
+
+    /// MUST NOT FIRE: a client that reads the four named fields and the
+    /// wildcard map together counts every cost model the chain carries, once
+    /// each.
+    ///
+    /// A per field assertion says nothing about the total, so a reply that
+    /// reports the PlutusV4 model correctly and drops one of the others on the
+    /// way satisfies every field and still loses a cost model.
+    #[test]
+    fn every_cost_model_is_reported_exactly_once_across_the_named_fields_and_the_wildcard() {
+        let models = cost_models_with(&[PLUTUS_V4_COST_MODEL_KEY, 4, 5]);
+        let reply = to_q16_cost_models(&models);
+
+        let present = [
+            models.plutus_v1.is_some(),
+            models.plutus_v2.is_some(),
+            models.plutus_v3.is_some(),
+        ]
+        .iter()
+        .filter(|x| **x)
+        .count()
+            + models.unknown.len();
+
+        let reported = [
+            reply.plutus_v1.is_some(),
+            reply.plutus_v2.is_some(),
+            reply.plutus_v3.is_some(),
+            reply.plutus_v4.is_some(),
+        ]
+        .iter()
+        .filter(|x| **x)
+        .count()
+            + reply.unknown.len();
+
+        assert_eq!(present, 6);
+        assert_eq!(reported, present);
+
+        let wildcard_keys: Vec<u64> = reply.unknown.iter().map(|(k, _)| *k).collect();
+        assert_eq!(wildcard_keys, vec![4, 5]);
     }
 
     #[test]
