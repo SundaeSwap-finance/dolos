@@ -496,9 +496,15 @@ where
 
         let mapper = self.mapper.clone();
 
-        let stream = stream
-            .flat_map(move |log| roll_to_watch_response(&mapper, &log, &inner_req))
-            .map(Ok);
+        let stream = stream.flat_map(move |log| match log {
+            Ok(log) => roll_to_watch_response(&mapper, &log, &inner_req)
+                .map(Ok)
+                .left_stream(),
+            Err(error) => futures_util::stream::once(async move {
+                Err(Status::internal(format!("chain stream failed: {error}")))
+            })
+            .right_stream(),
+        });
 
         Ok(Response::new(Box::pin(stream)))
     }
