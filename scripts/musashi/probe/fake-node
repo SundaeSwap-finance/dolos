@@ -33,7 +33,11 @@ def main():
         return 0
 
     if argv[:2] == ["query", "utxo"]:
-        emit(load("node-utxos.json"), argv)
+        utxos = load("node-utxos.json")
+        if "--tx-in" in argv:
+            wanted = [argv[i + 1] for i, x in enumerate(argv) if x == "--tx-in"]
+            utxos = {k: v for k, v in utxos.items() if k in wanted}
+        emit(utxos, argv)
         return 0
 
     if argv[:2] == ["query", "protocol-parameters"]:
