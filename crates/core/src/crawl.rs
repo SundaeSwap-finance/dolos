@@ -4,7 +4,6 @@ use crate::{
     ArchiveStore as _, ChainPoint, Domain, DomainError, RawBlock, TipEvent, TipSubscription,
     WalStore,
 };
-use tracing::warn;
 
 pub enum Batch<D: Domain> {
     Tip(ChainPoint, D::TipSubscription),
@@ -48,11 +47,10 @@ impl<D: Domain> Batch<D> {
         // if the archive page is empty, this means we reached the end of the archive
         // store and we need to transition to the wal.
         if page.is_empty() {
-            let intersect = domain.wal().find_intersect(&[last_point])?;
+            let intersect = domain.wal().find_intersect(&[last_point.clone()])?;
 
             let Some((point, _)) = intersect else {
-                warn!("no overlap between archive and wal");
-                panic!("no overlap between archive and wal");
+                return Err(DomainError::ArchiveWalGap(last_point));
             };
 
             return Self::from_wal(point, domain);
@@ -150,16 +148,21 @@ impl<D: Domain> ChainCrawler<D> {
         Ok(())
     }
 
-    pub fn next_block(&mut self) -> Option<(ChainPoint, RawBlock)> {
+    /// The next block, `None` once the crawl has caught up with the tip.
+    ///
+    /// The error is returned rather than ending the crawl, because a caller
+    /// that reads the end of a stream cannot tell a chain it has caught up
+    /// with from a page it failed to load.
+    pub fn next_block(&mut self) -> Result<Option<(ChainPoint, RawBlock)>, DomainError> {
         if self.batch.is_drained() {
-            self.load_next_batch().ok()?;
+            self.load_next_batch()?;
         }
 
         if self.batch.is_tip() {
-            return None;
+            return Ok(None);
         }
 
-        self.batch.pop()
+        Ok(self.batch.pop())
     }
 
     pub async fn next_tip(&mut self) -> TipEvent {
@@ -176,10 +179,10 @@ impl<D: Domain> ChainCrawler<D> {
 }
 
 impl<D: Domain> Iterator for ChainCrawler<D> {
-    type Item = (ChainPoint, RawBlock);
+    type Item = Result<(ChainPoint, RawBlock), DomainError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_block()
+        self.next_block().transpose()
     }
 }
 
