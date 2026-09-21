@@ -471,6 +471,7 @@ pub fn tx_treasury_donation(tx: &MultiEraTx) -> Option<Lovelace> {
         // stops the node rather than answering, and a chain past the Dijkstra
         // hard fork puts every one of its transactions through here.
         MultiEraTx::Dijkstra(x) => x.transaction_body.donation.map(|x| x.into()),
+        MultiEraTx::DijkstraSub(x) => x.sub_transaction_body.donation.map(|x| x.into()),
         MultiEraTx::AlonzoCompatible(..) => None,
         MultiEraTx::Babbage(..) => None,
         MultiEraTx::Byron(..) => None,
@@ -1046,6 +1047,39 @@ mod treasury_donation_tests {
     fn a_dijkstra_transaction_without_a_donation_reports_none() {
         let tx = dijkstra_tx(DIJKSTRA_TX_WITHOUT_DONATION);
         assert!(matches!(tx, MultiEraTx::Dijkstra(..)));
+        assert_eq!(tx_treasury_donation(&tx), None);
+    }
+
+    /// A sub transaction, `[body, witness_set, auxiliary_data / nil]`, whose
+    /// body holds one input, no outputs, and a donation of one ada at key 22.
+    const DIJKSTRA_SUB_WITH_DONATION: &str = "83a30081825820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000180161a000f4240a0f6";
+
+    /// The same sub transaction with body key 22 absent.
+    const DIJKSTRA_SUB_WITHOUT_DONATION: &str =
+        "83a20081825820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000180a0f6";
+
+    /// `MultiEraBlock::txs` returns every sub transaction of a block next to
+    /// the transaction that carries it, and the epoch visitor asks each one for
+    /// its donation, so a block with a sub transaction reaches this function.
+    #[test]
+    fn a_sub_transaction_donation_is_read() {
+        let bytes = hex::decode(DIJKSTRA_SUB_WITH_DONATION).unwrap();
+        let sub: pallas::ledger::primitives::dijkstra::SubTransaction =
+            pallas::codec::minicbor::decode(&bytes).unwrap();
+        let tx = MultiEraTx::from_dijkstra_sub(&sub);
+
+        assert!(matches!(tx, MultiEraTx::DijkstraSub(..)));
+        assert_eq!(tx_treasury_donation(&tx), Some(1_000_000));
+    }
+
+    #[test]
+    fn a_sub_transaction_without_a_donation_reports_none() {
+        let bytes = hex::decode(DIJKSTRA_SUB_WITHOUT_DONATION).unwrap();
+        let sub: pallas::ledger::primitives::dijkstra::SubTransaction =
+            pallas::codec::minicbor::decode(&bytes).unwrap();
+        let tx = MultiEraTx::from_dijkstra_sub(&sub);
+
+        assert!(matches!(tx, MultiEraTx::DijkstraSub(..)));
         assert_eq!(tx_treasury_donation(&tx), None);
     }
 }
