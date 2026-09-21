@@ -14,7 +14,7 @@ use pallas::{
         },
     },
 };
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, instrument, warn};
 
 use crate::{
     load_effective_pparams, load_gov, owned::OwnedMultiEraOutput, roll::proposals::ProposalVisitor,
