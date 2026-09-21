@@ -94,6 +94,40 @@ fn a_parameter_with_nowhere_to_go_stops_the_load() {
     );
 }
 
+/// MUST FIRE: a parameter the file does not name is refused rather than read
+/// as a zero, because a rule the node applies and the follower reads as zero
+/// is the same undetectable divergence as one it never read at all.
+///
+/// MUST NOT FIRE: the file with the parameter present loads, so the refusal is
+/// about the absence and not about the edit.
+#[test]
+fn a_parameter_the_file_omits_stops_the_load() {
+    let original = std::fs::read_to_string(musashi_dijkstra_path()).unwrap();
+
+    assert!(
+        dijkstra::from_file(musashi_dijkstra_path()).is_ok(),
+        "the file this case edits loads as it stands",
+    );
+
+    let narrowed = original.replace("  \"leiosCommitteeSize\": 900,\n", "");
+
+    assert_ne!(
+        narrowed, original,
+        "the parameter was not removed, so this case is not an omission",
+    );
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("dijkstra-genesis.json");
+    std::fs::write(&path, narrowed).unwrap();
+
+    let error = dijkstra::from_file(&path).expect_err("an omitted parameter was accepted");
+
+    assert!(
+        error.to_string().contains("leiosCommitteeSize"),
+        "the error does not name the parameter it missed: {error}",
+    );
+}
+
 /// MUST FIRE: a genesis loaded without a Dijkstra path carries no Dijkstra
 /// parameters, and one loaded with the path carries them, so the field is
 /// additive and a caller can tell the two apart.
