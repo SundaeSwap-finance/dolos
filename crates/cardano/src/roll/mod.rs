@@ -14,7 +14,7 @@ use pallas::{
         },
     },
 };
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::{
     load_effective_pparams, load_gov, owned::OwnedMultiEraOutput, roll::proposals::ProposalVisitor,
@@ -666,14 +666,31 @@ pub(crate) fn compute_delta<D: Domain>(
                 &batch.store_utxos,
             )?;
 
-            if stats.skipped_inputs > 0 || stats.recreated_outputs > 0 {
-                info!(
+            // A block applied this way leaves a UTxO set the ledger rules do
+            // not give, so the disclosure is a warning and not an entry. Each
+            // left input is named against its own transaction, because the
+            // block and a count leave nobody able to say which transaction to
+            // go and look at.
+            if stats.is_lenient() {
+                warn!(
                     slot = blockd.slot(),
+                    block = %blockd.hash(),
                     txs = blockd.tx_count(),
-                    skipped_inputs = stats.skipped_inputs,
+                    skipped_inputs = stats.skipped_inputs(),
                     recreated_outputs = stats.recreated_outputs,
-                    "applied a block the way the node does"
+                    "applied a block the way the node does, so this utxo set is not the one the rules give"
                 );
+
+                for left in stats.skipped.iter() {
+                    warn!(
+                        slot = blockd.slot(),
+                        block = %blockd.hash(),
+                        tx = %left.tx,
+                        input_tx = %left.input.0,
+                        input_index = left.input.1,
+                        "left an input unconsumed because nothing held it"
+                    );
+                }
             }
 
             Some(delta)
