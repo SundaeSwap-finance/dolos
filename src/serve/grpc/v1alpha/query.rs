@@ -301,25 +301,43 @@ fn map_cost_models(
             values: genesis.conway.plutus_v3_cost_model.clone(),
         });
 
+    // The PlutusV4 model is declared by the Dijkstra genesis file, which a
+    // configuration for an earlier network has no path for.
+    let plutus_v4 = genesis
+        .dijkstra
+        .as_ref()
+        .filter(|x| !x.plutus_v4_cost_model.is_empty())
+        .map(|x| u5c::cardano::CostModel {
+            values: x.plutus_v4_cost_model.clone(),
+        });
+
     let cost_models = u5c::cardano::CostModels {
         plutus_v1: plutus_v1.clone(),
         plutus_v2: plutus_v2.clone(),
         plutus_v3: plutus_v3.clone(),
-        plutus_v4: None,
+        plutus_v4: plutus_v4.clone(),
     };
 
     let cost_model_map = u5c::cardano::CostModelMap {
         plutus_v1,
         plutus_v2,
         plutus_v3,
-        plutus_v4: None,
+        plutus_v4,
     };
 
     (
-        Some(cost_models)
-            .filter(|x| x.plutus_v1.is_some() || x.plutus_v2.is_some() || x.plutus_v3.is_some()),
-        Some(cost_model_map)
-            .filter(|x| x.plutus_v1.is_some() || x.plutus_v2.is_some() || x.plutus_v3.is_some()),
+        Some(cost_models).filter(|x| {
+            x.plutus_v1.is_some()
+                || x.plutus_v2.is_some()
+                || x.plutus_v3.is_some()
+                || x.plutus_v4.is_some()
+        }),
+        Some(cost_model_map).filter(|x| {
+            x.plutus_v1.is_some()
+                || x.plutus_v2.is_some()
+                || x.plutus_v3.is_some()
+                || x.plutus_v4.is_some()
+        }),
     )
 }
 
@@ -1144,6 +1162,55 @@ mod tests {
             expected_constitution_hash.as_slice()
         );
         assert_ne!(anchor.content_hash.as_ref(), constitution.hash.as_ref());
+    }
+
+    /// The Musashi node's own Dijkstra genesis, copied byte for byte, so a cost
+    /// model read out of it is the one the chain is governed by.
+    fn musashi_dijkstra() -> dolos_core::dijkstra::GenesisFile {
+        let path = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("crates")
+            .join("core")
+            .join("test_data")
+            .join("musashi")
+            .join("dijkstra-genesis.json");
+
+        dolos_core::dijkstra::from_file(path).unwrap()
+    }
+
+    /// MUST FIRE: the PlutusV4 cost model a Dijkstra genesis declares is
+    /// reported, in the cost model message and in the map.
+    ///
+    /// The length and the one negative cost are the chain's own numbers, so a
+    /// reply carrying some other vector fails here.
+    #[test]
+    fn a_dijkstra_genesis_reports_its_plutus_v4_cost_model() {
+        let mut genesis = dolos_cardano::include::preview::load();
+        genesis.dijkstra = Some(musashi_dijkstra());
+
+        let (models, map) = map_cost_models(&genesis);
+
+        let models = models.expect("no cost models");
+        let map = map.expect("no cost model map");
+
+        assert_eq!(models.plutus_v4.as_ref().map(|x| x.values.len()), Some(251));
+        assert_eq!(map.plutus_v4.as_ref().map(|x| x.values.len()), Some(251));
+        assert_eq!(models.plutus_v4.as_ref().unwrap().values[52], -900);
+        assert_eq!(models.plutus_v3, map.plutus_v3);
+    }
+
+    /// MUST NOT FIRE: a genesis with no Dijkstra file reports no PlutusV4 cost
+    /// model, and still reports the models it does have.
+    #[test]
+    fn a_genesis_without_the_dijkstra_file_reports_no_plutus_v4_cost_model() {
+        let genesis = dolos_cardano::include::preview::load();
+
+        let (models, map) = map_cost_models(&genesis);
+
+        let models = models.expect("no cost models");
+
+        assert_eq!(models.plutus_v4, None);
+        assert!(models.plutus_v3.is_some());
+        assert_eq!(map.expect("no cost model map").plutus_v4, None);
     }
 
     #[tokio::test]
