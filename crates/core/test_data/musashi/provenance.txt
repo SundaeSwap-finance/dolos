@@ -1,0 +1,11 @@
+dijkstra-genesis.json
+
+source        the Musashi Leios testnet node, /opt/musashi/config/dijkstra-genesis.json
+copied        2026-09-21, byte for byte, no edit
+file mtime    2026-09-18 01:01:17 UTC, 3028 bytes
+sha256        e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be
+
+This is the file the chain is governed by, so a parameter read out of it is
+the value the node is running and not a value chosen for a test. Recopy it
+from the same path and compare the sha256 to tell whether the network has
+been respun under it.
