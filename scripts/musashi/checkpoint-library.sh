@@ -44,11 +44,10 @@ IMAGE=${IMAGE:-dolos-build:1}
 FLOOR_KB=${FLOOR_KB:-5242880}
 POLL=${POLL:-1}
 MARGIN=${MARGIN:-0}
-# Three times the fastest replay this chain was measured at, 1763 slots per
-# second over the empty stretch below the first endorser announcement, times
-# one poll. Two of the targets are one epoch apart, 21600 slots, so a safety
-# wider than that would answer the second target with a copy taken for the
-# first.
+# Three times what one poll covers at the chain's fastest replay, 1763 slots
+# per second on the empty stretch under the first endorser announcement. Two
+# targets one epoch apart are 21600 slots apart, so a safety wider than that
+# answers the second target with a copy taken for the first.
 RESTART_SAFETY=${RESTART_SAFETY:-6000}
 
 DATA=$RUN/data
@@ -230,13 +229,11 @@ for target in "$@"; do
   fi
 
   # A follower this close to the target is checkpointed where it stands,
-  # whether it is running or not, because its rate has not been measured yet
-  # and the watch below cannot measure one without first sleeping. Replay of
-  # the write ahead log covers thousands of slots per second on the empty
-  # stretch below the first endorser announcement, so one sleep is enough to
-  # land past the target. That is not a hypothetical: target 371614 was lost
-  # that way on the first run of this script, from a follower that was already
-  # running, 1229 slots below the target, moving 1763 slots per second.
+  # running or not, because the watch below cannot learn a rate without first
+  # sleeping through one poll. Write ahead log replay covers thousands of slots
+  # per second on the empty stretch under the first endorser announcement, so
+  # one poll can carry a follower from under the target to past it, and a
+  # target passed cannot be checkpointed because a store does not rewind.
   if [ $((target - slot)) -lt "$RESTART_SAFETY" ]; then
     say "target $target, $CONTAINER at slot $slot, $((target - slot)) below it and under the safety of $RESTART_SAFETY, checkpointing where it stands"
     take_checkpoint "$target" || say "target $target did not produce a checkpoint"
