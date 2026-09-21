@@ -258,6 +258,7 @@ fn the_new_pool_flag_separates_a_certificate_from_a_genesis_pool() {
         pool_owners: vec![],
         relays: vec![],
         pool_metadata: None,
+        bls_key: dolos_cardano::pallas_extras::MultiEraBlsKey::NoSlot,
     };
 
     let mut delta = dolos_cardano::PoolRegistration::new(cert, 0, 0, 500_000_000);
