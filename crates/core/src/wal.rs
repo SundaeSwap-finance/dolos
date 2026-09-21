@@ -120,12 +120,16 @@ pub trait WalStore: Clone + Send + Sync + 'static {
 
 /// Whether two points name the same block.
 ///
+/// Origin names no block at all, so it never matches one. Its slot reads as
+/// zero, which would otherwise make it name the block at slot zero.
+///
 /// A point that has no hash names every block at its slot, which is the most a
 /// caller that gave no hash can be held to. The two points are matched by
 /// shape rather than compared with `==`, because `==` on a point answers
 /// differently depending on which side has the hash.
 fn names_the_same_block(a: &ChainPoint, b: &ChainPoint) -> bool {
     match (a, b) {
+        (ChainPoint::Origin, _) | (_, ChainPoint::Origin) => false,
         (ChainPoint::Specific(_, a_hash), ChainPoint::Specific(_, b_hash)) => {
             a.slot() == b.slot() && a_hash == b_hash
         }
@@ -191,5 +195,13 @@ mod tests {
         let page = [block(5, 1), block(6, 2)];
 
         assert_eq!(slots(blocks_after(None, page.into_iter())), [5, 6]);
+    }
+
+    #[test]
+    fn a_caller_resuming_at_origin_keeps_the_block_at_slot_zero() {
+        let from = ChainPoint::Origin;
+        let page = [block(0, 1), block(5, 2)];
+
+        assert_eq!(slots(blocks_after(Some(&from), page.into_iter())), [0, 5]);
     }
 }
