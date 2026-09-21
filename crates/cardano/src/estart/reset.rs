@@ -126,9 +126,11 @@ pub(crate) fn report_drift(
     ended: &Pots,
     dump: impl FnOnce(),
 ) {
-    let Some(drift) = crate::pots::measure_drift(epoch, initial, ended) else {
+    let drift = crate::pots::measure_drift(epoch, initial, ended);
+
+    if drift.total() == 0 {
         return;
-    };
+    }
 
     if !lenient {
         dump();
@@ -251,15 +253,14 @@ mod drift_tests {
     /// MUST FIRE: the drift is measured, signed, and attributed to the pots
     /// that moved.
     ///
-    /// MUST NOT FIRE: pots that sum to the supply they started with report no
-    /// drift at all. A measurement that returned a value for a consistent
-    /// boundary would put a number in the log on every epoch of every chain and
-    /// mean nothing by it.
+    /// MUST NOT FIRE: pots that did not move at all report a zero in every
+    /// field and name no pot, so a report is not something every boundary
+    /// produces a number for.
     #[test]
     fn the_drift_is_measured_and_attributed() {
         let (initial, ended) = boundary();
 
-        let drift = measure_drift(42, &initial, &ended).expect("this boundary drifted");
+        let drift = measure_drift(42, &initial, &ended);
 
         assert_eq!(drift.epoch, 42);
         assert_eq!(drift.expected_max_supply, 45_000_000_000_000_000);
@@ -275,10 +276,90 @@ mod drift_tests {
         assert_eq!(drift.utxos, 4_523_476_094_896);
         assert_eq!(drift.reserves, -8_589_873_007_062);
 
+        let still = measure_drift(42, &initial, &initial);
+        assert_eq!(still.total(), 0);
         assert!(
-            measure_drift(42, &initial, &initial).is_none(),
-            "a boundary that conserves supply reports no drift"
+            still.moved().is_empty(),
+            "pots that did not move named a pot anyway"
         );
+    }
+
+    /// MUST FIRE: a transfer is reported as a transfer. The utxo pot gained
+    /// exactly what the reserves lost, so the supply is untouched and two pots
+    /// moved, and a report that carried only the sum would say nothing
+    /// happened.
+    ///
+    /// MUST NOT FIRE: the pots that did not take part are zero, so this is an
+    /// attribution and not a report that lights up whenever anything moves.
+    #[test]
+    fn a_transfer_between_pots_reports_a_zero_total_and_names_both() {
+        let (initial, _) = boundary();
+
+        let moved_amount = 1_000_000_000u64;
+
+        let ended = Pots {
+            reserves: initial.reserves - moved_amount,
+            utxos: initial.utxos + moved_amount,
+            ..initial.clone()
+        };
+
+        let drift = measure_drift(42, &initial, &ended);
+
+        assert_eq!(drift.total(), 0, "a transfer created no supply");
+        assert_eq!(drift.utxos, moved_amount as i128);
+        assert_eq!(drift.reserves, -(moved_amount as i128));
+        assert_eq!(drift.treasury, 0);
+        assert_eq!(drift.rewards, 0);
+        assert_eq!(drift.fees, 0);
+        assert_eq!(drift.obligations, 0);
+
+        let moved = drift.moved();
+        assert_eq!(moved.len(), 2, "the two pots that moved are both named");
+    }
+
+    /// MUST FIRE: value that came from nowhere is reported with a non zero
+    /// total naming the pot it appeared in, which is the case a total on its
+    /// own cannot tell apart from the transfer above.
+    #[test]
+    fn a_pot_that_gained_from_nowhere_is_named_with_a_non_zero_total() {
+        let (initial, _) = boundary();
+
+        let created = 1_000_000_000u64;
+
+        let ended = Pots {
+            utxos: initial.utxos + created,
+            ..initial.clone()
+        };
+
+        let drift = measure_drift(42, &initial, &ended);
+
+        assert_eq!(drift.total(), created as i128);
+        assert_eq!(
+            drift.moved(),
+            vec![("utxos", created as i128)],
+            "the utxo pot is the only one named"
+        );
+    }
+
+    /// MUST NOT FIRE: a transfer is an ordinary epoch, so the reporting path
+    /// neither dumps nor asserts on one. Making the measurement total must not
+    /// turn every boundary into a warning.
+    #[test]
+    fn a_transfer_is_not_reported_as_drift_under_either_setting() {
+        let (initial, _) = boundary();
+
+        let ended = Pots {
+            reserves: initial.reserves - 1_000_000_000,
+            utxos: initial.utxos + 1_000_000_000,
+            ..initial.clone()
+        };
+
+        report_drift(true, 42, &initial, &ended, || {
+            panic!("a transfer is not a drift")
+        });
+        report_drift(false, 42, &initial, &ended, || {
+            panic!("a transfer is not a drift")
+        });
     }
 
     /// MUST NOT FIRE: under the lenient rule a drifted boundary is reported and
