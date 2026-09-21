@@ -680,6 +680,13 @@ pub enum DomainError {
     #[error("wal is empty")]
     WalIsEmpty,
 
+    /// A rollback target the wal does not hold, either past its pruned front or
+    /// past its tip. Nothing was undone and the cursor was not moved.
+    #[error(
+        "the wal does not hold {0}, so nothing was rolled back to it and the cursor was not moved"
+    )]
+    RollbackTargetNotInWal(ChainPoint),
+
     #[error("forced stop epoch reached")]
     StopEpochReached,
 }
