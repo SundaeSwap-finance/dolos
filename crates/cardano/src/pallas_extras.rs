@@ -356,6 +356,13 @@ pub fn default_ex_unit_prices() -> ExUnitPrices {
     }
 }
 
+/// The cost model map key that names PlutusV4.
+///
+/// The Conway cost model type names keys 0 to 2 and reads every further key
+/// into its wildcard map, so a PlutusV4 model is found here by key rather than
+/// by field.
+pub const PLUTUS_V4_COST_MODEL_KEY: u64 = 3;
+
 pub fn default_cost_models() -> CostModels {
     CostModels {
         plutus_v1: None,

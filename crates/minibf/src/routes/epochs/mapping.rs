@@ -7,20 +7,30 @@ use crate::{
 use blockfrost_openapi::models::{
     epoch_content::EpochContent, epoch_param_content::EpochParamContent,
 };
-use dolos_cardano::{model::EpochState, PParamsSet};
+use dolos_cardano::{model::EpochState, pallas_extras::PLUTUS_V4_COST_MODEL_KEY, PParamsSet};
 use dolos_core::{cbor, Genesis};
 use pallas::ledger::primitives::{conway::CostModels, Epoch};
 
-fn cost_models_to_key_value(cost_models: &CostModels) -> Vec<(&'static str, &[i64])> {
+/// Every cost model the parameters carry, each with the Plutus version whose
+/// operation names it is read with.
+///
+/// The Conway cost model type names three languages and reads every further key
+/// into a wildcard map, so the PlutusV4 model is taken from that map by key.
+fn cost_models_to_key_value(cost_models: &CostModels) -> Vec<(&'static str, u64, &[i64])> {
     let maybe = vec![
-        ("PlutusV1", cost_models.plutus_v1.as_ref()),
-        ("PlutusV2", cost_models.plutus_v2.as_ref()),
-        ("PlutusV3", cost_models.plutus_v3.as_ref()),
+        ("PlutusV1", 1, cost_models.plutus_v1.as_ref()),
+        ("PlutusV2", 2, cost_models.plutus_v2.as_ref()),
+        ("PlutusV3", 3, cost_models.plutus_v3.as_ref()),
+        (
+            "PlutusV4",
+            4,
+            cost_models.unknown.get(&PLUTUS_V4_COST_MODEL_KEY),
+        ),
     ];
 
     maybe
         .into_iter()
-        .filter_map(|(k, v)| v.map(|v| (k, v.as_slice())))
+        .filter_map(|(k, version, v)| v.map(|v| (k, version, v.as_slice())))
         .collect()
 }
 
@@ -38,7 +48,7 @@ pub(crate) fn map_cost_models_raw(
         Some(Some(
             as_vec
                 .into_iter()
-                .map(|(k, v)| (k.to_string(), serde_json::to_value(v).unwrap()))
+                .map(|(k, _, v)| (k.to_string(), serde_json::to_value(v).unwrap()))
                 .collect(),
         ))
     }
@@ -52,20 +62,7 @@ fn map_cost_models_named(cost_models: &CostModels) -> Option<HashMap<String, ser
         Some(
             as_vec
                 .into_iter()
-                .map(|(k, v)| {
-                    (
-                        k.to_string(),
-                        get_named_cost_model(
-                            match k {
-                                "PlutusV1" => 1,
-                                "PlutusV2" => 2,
-                                "PlutusV3" => 3,
-                                _ => unreachable!(),
-                            },
-                            v,
-                        ),
-                    )
-                })
+                .map(|(k, version, v)| (k.to_string(), get_named_cost_model(version, v)))
                 .collect(),
         )
     }
@@ -243,6 +240,108 @@ impl<'a> IntoModel<EpochParamContent> for ParametersModelBuilder<'a> {
         );
 
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod cost_model_tests {
+    use super::*;
+
+    fn cost_models_with(wildcard: &[u64]) -> CostModels {
+        let mut unknown = std::collections::BTreeMap::new();
+        for key in wildcard {
+            unknown.insert(*key, vec![*key as i64; 251]);
+        }
+
+        CostModels {
+            plutus_v1: Some(vec![1; 332]),
+            plutus_v2: Some(vec![2; 332]),
+            plutus_v3: Some(vec![3; 350]),
+            unknown,
+        }
+    }
+
+    /// MUST NOT FIRE: a cost model under a wildcard key that names no language
+    /// is reported under no language name.
+    #[test]
+    fn a_cost_model_under_another_wildcard_key_is_reported_under_no_language() {
+        let raw = map_cost_models_raw(&cost_models_with(&[4, 5]))
+            .flatten()
+            .expect("no cost models at all");
+
+        assert_eq!(raw.len(), 3);
+        assert!(!raw.contains_key("PlutusV4"));
+
+        let named = map_cost_models_named(&cost_models_with(&[4, 5])).expect("no cost models");
+
+        assert_eq!(named.len(), 3);
+        assert!(!named.contains_key("PlutusV4"));
+    }
+
+    /// MUST FIRE: the model under the PlutusV4 key is reported as PlutusV4, on
+    /// the raw path and on the named one, with every cost it carries.
+    #[test]
+    fn the_model_under_the_plutus_v4_key_is_reported_as_plutus_v4() {
+        let models = cost_models_with(&[PLUTUS_V4_COST_MODEL_KEY]);
+
+        let raw = map_cost_models_raw(&models)
+            .flatten()
+            .expect("no cost models at all");
+
+        assert_eq!(raw.len(), 4);
+        assert_eq!(
+            raw.get("PlutusV4").and_then(|x| x.as_array()).map(Vec::len),
+            Some(251),
+        );
+
+        let named = map_cost_models_named(&models).expect("no cost models");
+
+        assert_eq!(named.len(), 4);
+        assert_eq!(
+            named
+                .get("PlutusV4")
+                .and_then(|x| x.as_array())
+                .map(Vec::len),
+            Some(251),
+        );
+    }
+
+    /// MUST NOT FIRE: reporting PlutusV4 leaves the three named models as they
+    /// were, PlutusV3 still named operation by operation.
+    #[test]
+    fn the_three_named_models_keep_their_operation_names() {
+        let models = cost_models_with(&[PLUTUS_V4_COST_MODEL_KEY]);
+        let named = map_cost_models_named(&models).expect("no cost models");
+
+        assert_eq!(
+            named
+                .get("PlutusV3")
+                .and_then(|x| x.as_object())
+                .map(serde_json::Map::len),
+            Some(350),
+        );
+        assert_eq!(
+            named
+                .get("PlutusV1")
+                .and_then(|x| x.as_object())
+                .map(serde_json::Map::len),
+            Some(332),
+        );
+    }
+
+    /// MUST NOT FIRE: parameters that carry no cost model at all report none,
+    /// rather than an empty PlutusV4.
+    #[test]
+    fn parameters_with_no_cost_model_report_none() {
+        let models = CostModels {
+            plutus_v1: None,
+            plutus_v2: None,
+            plutus_v3: None,
+            unknown: Default::default(),
+        };
+
+        assert!(map_cost_models_raw(&models).is_none());
+        assert!(map_cost_models_named(&models).is_none());
     }
 }
 
