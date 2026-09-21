@@ -6,7 +6,9 @@ use dolos_core::config::{PeerConfig, SyncConfig, SyncLimit};
 use dolos_core::ChainPoint;
 use gasket::framework::*;
 use itertools::Itertools;
-use pallas::ledger::traverse::leios::{AnnouncedEndorserBlock, CertificationTracker};
+use pallas::ledger::traverse::leios::{
+    AnnouncedEndorserBlock, CertificationTracker, HeaderOutcome,
+};
 use pallas::ledger::traverse::MultiEraHeader;
 use pallas::network::facades::PeerClient;
 use pallas::network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
@@ -62,6 +64,40 @@ fn to_traverse(header: &HeaderContent) -> Result<MultiEraHeader<'_>, WorkerError
     };
 
     out.or_panic()
+}
+
+/// Records what a header's outcome makes the follower owe, and answers whether
+/// a fetch is now owed.
+///
+/// One fetch is owed for each endorser block a header certifies and none for
+/// one a header only announces, so an announcement that a later header
+/// supersedes before any certificate names it costs nothing at all.
+///
+/// The debt is recorded before anything is fetched. The walk has already
+/// consumed the announcement by this point and will never offer it again, so a
+/// fetch that failed and was forgotten here is an endorser block no later pass
+/// can know was missing.
+fn record_certification(
+    payloads: &mut PendingPayloads,
+    outstanding: &mut BTreeMap<u64, AnnouncedEndorserBlock>,
+    certifying_slot: u64,
+    outcome: HeaderOutcome,
+) -> bool {
+    let Some(eb) = outcome.certified else {
+        return false;
+    };
+
+    debug!(
+        certifying_slot,
+        eb = %eb.hash,
+        size = eb.size,
+        "a ranking block certifies an endorser block"
+    );
+
+    payloads.expect(certifying_slot);
+    outstanding.insert(certifying_slot, eb);
+
+    true
 }
 
 // ============================================================================
@@ -265,23 +301,16 @@ impl Worker {
             WorkerError::Panic
         })?;
 
-        let Some(eb) = outcome.certified else {
-            return Ok(());
-        };
-
-        debug!(
-            certifying_slot = header.slot(),
-            eb = %eb.hash,
-            size = eb.size,
-            "a ranking block certifies an endorser block"
+        let owed = record_certification(
+            &mut self.payloads,
+            &mut self.outstanding,
+            header.slot(),
+            outcome,
         );
 
-        // The debt is recorded before anything is fetched. The walk has already
-        // consumed the announcement by this point and will never offer it again,
-        // so a fetch that fails and is forgotten here is an endorser block no
-        // later pass can know was missing.
-        self.payloads.expect(header.slot());
-        self.outstanding.insert(header.slot(), eb);
+        if !owed {
+            return Ok(());
+        }
 
         self.fetch_outstanding(stage).await
     }
@@ -599,5 +628,170 @@ impl Stage {
 
     fn track_tip(&self, tip: &Tip) {
         self.chain_tip.set(tip.0.slot_or_default() as i64);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pallas::ledger::traverse::MultiEraBlock;
+
+    use super::*;
+
+    fn block(hex_text: &str) -> Vec<u8> {
+        hex::decode(hex_text.trim()).unwrap()
+    }
+
+    fn announce_with_txs() -> Vec<u8> {
+        block(include_str!(
+            "../../test_data/musashi-w36/ranking-announce-with-txs.block"
+        ))
+    }
+
+    fn announce_quiet() -> Vec<u8> {
+        block(include_str!(
+            "../../test_data/musashi-w36/ranking-announce-quiet.block"
+        ))
+    }
+
+    fn silent() -> Vec<u8> {
+        block(include_str!("../../test_data/dijkstra-quiet.block"))
+    }
+
+    fn certify_only() -> Vec<u8> {
+        block(include_str!("../../test_data/dijkstra-certify-only.block"))
+    }
+
+    fn certifying() -> Vec<u8> {
+        block(include_str!("../../test_data/dijkstra-certifying.block"))
+    }
+
+    fn pre_leios() -> Vec<u8> {
+        block(include_str!("../../test_data/conway.block"))
+    }
+
+    /// The two Leios fields a header carries, read straight off the bytes so a
+    /// sequence built from these fixtures rests on what they say rather than on
+    /// what their names suggest.
+    fn leios_fields(cbor: &[u8]) -> (Option<bool>, bool) {
+        let decoded = MultiEraBlock::decode(cbor).unwrap();
+        let header = decoded.header();
+
+        (
+            header.block_body_contains_leios_cert(),
+            header.eb_announcement().is_some(),
+        )
+    }
+
+    /// MUST FIRE: one fixture announces without certifying, two do both, one
+    /// certifies without announcing, one does neither, and one is of an era that
+    /// has no such fields at all. The sequences below are built from these roles,
+    /// and a fixture swapped for another would otherwise change what they count
+    /// without changing what they assert.
+    #[test]
+    fn each_fixture_carries_the_leios_fields_the_sequences_rest_on() {
+        assert_eq!(leios_fields(&announce_with_txs()), (Some(false), true));
+        assert_eq!(leios_fields(&announce_quiet()), (Some(true), true));
+        assert_eq!(leios_fields(&certify_only()), (Some(true), false));
+        assert_eq!(leios_fields(&certifying()), (Some(true), true));
+        assert_eq!(leios_fields(&silent()), (Some(false), false));
+        assert_eq!(leios_fields(&pre_leios()), (None, false));
+    }
+
+    /// What one header did, as the counts a follower's cost is made of.
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct Seen {
+        announced: usize,
+        certified: usize,
+        fetches_owed: usize,
+        /// Certifying slots the payload map is now holding a place for, which is
+        /// the same debt counted where the apply path reads it.
+        payloads_expected: usize,
+    }
+
+    /// Walks a sequence of real ranking headers and counts what the follower
+    /// announces, certifies and owes a fetch for.
+    fn walk_counting(blocks: &[Vec<u8>]) -> (Seen, Vec<u64>) {
+        let mut tracker = CertificationTracker::default();
+        let mut payloads = PendingPayloads::default();
+        let mut outstanding = BTreeMap::new();
+        let mut seen = Seen::default();
+
+        for cbor in blocks {
+            let decoded = MultiEraBlock::decode(cbor).unwrap();
+            let header = decoded.header();
+            let slot = header.slot();
+
+            let outcome = tracker.observe(&header).unwrap();
+
+            if outcome.announced.is_some() {
+                seen.announced += 1;
+            }
+
+            if outcome.certified.is_some() {
+                seen.certified += 1;
+            }
+
+            if record_certification(&mut payloads, &mut outstanding, slot, outcome) {
+                seen.fetches_owed += 1;
+            }
+        }
+
+        seen.payloads_expected = payloads.len();
+
+        (seen, outstanding.keys().copied().collect())
+    }
+
+    /// MUST FIRE: over three announcements settled by one certificate, the
+    /// follower owes one fetch. A follower that fetched on the announcement
+    /// instead would fetch three times, and that difference is the whole of what
+    /// the certification walk buys.
+    ///
+    /// The announcing header appears twice because it is the only fixture that
+    /// announces without also certifying, and two announcements with no
+    /// certificate between them is the shape the abandonment rule is about.
+    #[test]
+    fn three_announcements_settled_by_one_certificate_cost_one_fetch() {
+        let (seen, owed_at) = walk_counting(&[
+            announce_with_txs(),
+            announce_with_txs(),
+            silent(),
+            announce_quiet(),
+        ]);
+
+        assert_eq!(
+            seen,
+            Seen {
+                announced: 3,
+                certified: 1,
+                fetches_owed: 1,
+                payloads_expected: 1,
+            }
+        );
+        assert_eq!(owed_at.len(), 1, "one certifying slot owes a fetch");
+    }
+
+    /// MUST NOT FIRE: when each announcement is certified before the next one is
+    /// made, the follower owes a fetch for every one of them. Without this the
+    /// test above also holds for a follower that fetches nothing at all, and for
+    /// one that fetches once however many certificates it reads.
+    #[test]
+    fn an_announcement_certified_before_the_next_one_is_fetched() {
+        let (seen, owed_at) =
+            walk_counting(&[announce_with_txs(), announce_quiet(), certify_only()]);
+
+        assert_eq!(
+            seen,
+            Seen {
+                announced: 2,
+                certified: 2,
+                fetches_owed: 2,
+                payloads_expected: 2,
+            }
+        );
+        assert_eq!(
+            owed_at.len(),
+            2,
+            "two certifying slots each owe their own fetch"
+        );
     }
 }
