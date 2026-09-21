@@ -5,25 +5,32 @@ use futures_core::Stream;
 pub struct ChainStream;
 
 impl ChainStream {
+    /// The events from `intersect` onward, or `None` when no candidate point is
+    /// in local history.
+    ///
+    /// The item is a `Result` because the stream would otherwise end the same
+    /// way on a catch up that failed and on a cancellation, and a client has
+    /// nothing else to read that tells the two apart.
     pub fn start<D: Domain, C: CancelToken>(
         domain: D,
         intersect: Vec<ChainPoint>,
         cancel: C,
-    ) -> Result<Option<impl Stream<Item = TipEvent> + 'static>, DomainError> {
+    ) -> Result<Option<impl Stream<Item = Result<TipEvent, DomainError>> + 'static>, DomainError>
+    {
         let Some((mut crawler, intersected)) = ChainCrawler::<D>::start(&domain, &intersect)?
         else {
             return Ok(None);
         };
 
         Ok(Some(async_stream::stream! {
-            yield TipEvent::Mark(intersected.clone());
+            yield Ok(TipEvent::Mark(intersected.clone()));
 
             loop {
                 match crawler.next_block() {
-                    Ok(Some((point, block))) => yield TipEvent::Apply(point, block),
+                    Ok(Some((point, block))) => yield Ok(TipEvent::Apply(point, block)),
                     Ok(None) => break,
                     Err(error) => {
-                        tracing::error!(%error, "chain stream stopped short of the tip");
+                        yield Err(error);
                         return;
                     }
                 }
@@ -35,7 +42,7 @@ impl ChainStream {
                         break;
                     }
                     next = crawler.next_tip() => {
-                        yield next;
+                        yield Ok(next);
                     }
                 }
             }
@@ -90,7 +97,7 @@ mod tests {
 
         pin_mut!(s);
 
-        let first = s.next().await.unwrap();
+        let first = s.next().await.unwrap().unwrap();
 
         assert_eq!(first, TipEvent::Mark(chain_point));
 
@@ -98,7 +105,7 @@ mod tests {
             let evt = timeout(Duration::from_secs(5), s.next())
                 .await
                 .expect("took too long");
-            let value = evt.unwrap();
+            let value = evt.unwrap().unwrap();
 
             match value {
                 TipEvent::Apply(p, _) => {
@@ -109,6 +116,50 @@ mod tests {
         }
 
         background.abort();
+    }
+
+    /// The must-fire case for the `Result` item. A catch up that cannot load
+    /// its next page has to say so, because the stream otherwise ends exactly
+    /// as a cancelled one does.
+    #[tokio::test]
+    async fn a_catch_up_that_fails_says_so_instead_of_ending() {
+        use dolos_core::{ArchiveStore as _, ArchiveWriter as _};
+
+        let domain = ToyDomain::new(None, None);
+
+        // Two blocks the archive holds and the wal never saw, so the crawl
+        // starts in the archive and runs out of it with nowhere to continue.
+        let writer = domain.archive().start_writer().unwrap();
+        for slot in [100u64, 110] {
+            let (point, block) = make_conway_block(slot);
+            writer.apply(&point, &block).unwrap();
+        }
+        writer.commit().unwrap();
+
+        let start = make_conway_block(100).0;
+
+        let s = ChainStream::start::<ToyDomain, CancelTokenImpl>(
+            domain,
+            vec![start],
+            CancelTokenImpl(CancellationToken::new()),
+        )
+        .unwrap()
+        .expect("the archive holds the start point");
+
+        pin_mut!(s);
+
+        assert!(matches!(s.next().await, Some(Ok(TipEvent::Mark(_)))));
+        assert!(matches!(s.next().await, Some(Ok(TipEvent::Apply(_, _)))));
+
+        let last = s
+            .next()
+            .await
+            .expect("the stream ended instead of reporting the failed page");
+
+        assert!(
+            matches!(&last, Err(DomainError::ArchiveWalGap(_))),
+            "{last:?}"
+        );
     }
 
     #[tokio::test]

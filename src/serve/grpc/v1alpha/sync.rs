@@ -296,7 +296,10 @@ where
 
         let mapper = self.mapper.clone();
 
-        let stream = stream.map(move |log| Ok(tip_event_to_response(&mapper, &log, mask)));
+        let stream = stream.map(move |log| {
+            let log = log.map_err(|e| Status::internal(format!("chain stream failed: {e}")))?;
+            Ok(tip_event_to_response(&mapper, &log, mask))
+        });
 
         Ok(Response::new(Box::pin(stream)))
     }
