@@ -53,6 +53,16 @@ fn into_status(err: impl std::error::Error) -> Status {
     Status::internal(err.to_string())
 }
 
+/// Builds the protocol parameters a client is served for the current chain.
+fn map_live_params<C: LedgerContext>(
+    mapper: &interop::Mapper<C>,
+    pparams: &dolos_cardano::PParamsSet,
+) -> Result<u5c::cardano::PParams, ChainError> {
+    let mapped = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(pparams));
+
+    Ok(mapped)
+}
+
 trait IntoSet {
     fn into_set<S: CardanoStateIndexExt>(self, state: &S) -> Result<HashSet<TxoRef>, Status>;
 }
@@ -822,14 +832,11 @@ where
         let pparams = dolos_cardano::load_effective_pparams::<D>(self.domain.state())
             .map_err(|_| Status::internal("Failed to load current pparams"))?;
 
-        let pparams = dolos_cardano::utils::pparams_to_pallas(&pparams);
+        let params = map_live_params(&self.mapper, &pparams).map_err(into_status)?;
 
         let mut response = u5c::query::ReadParamsResponse {
             values: Some(u5c::query::AnyChainParams {
-                params: u5c::query::any_chain_params::Params::Cardano(
-                    self.mapper.map_pparams(pparams),
-                )
-                .into(),
+                params: u5c::query::any_chain_params::Params::Cardano(params).into(),
             }),
             ledger_tip: Some(point_to_u5c(&self.domain, &tip)),
         };
@@ -1307,5 +1314,517 @@ mod tests {
             }
             _ => panic!("missing cardano era summaries"),
         }
+    }
+}
+
+#[cfg(test)]
+mod live_params_tests {
+    use dolos_cardano::model::PParamValue as Val;
+    use dolos_cardano::utils::float_to_rational;
+    use dolos_cardano::PParamsSet;
+    use dolos_testing::toy_domain::ToyDomain;
+    use pallas::ledger::primitives::conway::{
+        DRepVotingThresholds, ExUnitPrices, ExUnits, PoolVotingThresholds, RationalNumber,
+    };
+    use serde_json::Value;
+
+    use super::*;
+
+    /// The protocol parameters the Musashi node answers for the chain it is
+    /// running, read with the cli.
+    fn node() -> Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("crates/core/test_data/musashi/protocol-parameters.json");
+
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    fn whole(node: &Value, key: &str) -> u64 {
+        node.get(key)
+            .unwrap_or_else(|| panic!("the node parameters name no {key}"))
+            .as_u64()
+            .unwrap_or_else(|| panic!("{key} is not a whole number"))
+    }
+
+    fn decimal(node: &Value, key: &str) -> f64 {
+        node.get(key)
+            .unwrap_or_else(|| panic!("the node parameters name no {key}"))
+            .as_f64()
+            .unwrap_or_else(|| panic!("{key} is not a number"))
+    }
+
+    fn nested(node: &Value, key: &str, inner: &str) -> Value {
+        node.get(key)
+            .unwrap_or_else(|| panic!("the node parameters name no {key}"))
+            .get(inner)
+            .unwrap_or_else(|| panic!("{key} names no {inner}"))
+            .clone()
+    }
+
+    fn nested_whole(node: &Value, key: &str, inner: &str) -> u64 {
+        nested(node, key, inner)
+            .as_u64()
+            .unwrap_or_else(|| panic!("{key}.{inner} is not a whole number"))
+    }
+
+    fn nested_ratio(node: &Value, key: &str, inner: &str) -> RationalNumber {
+        let value = nested(node, key, inner)
+            .as_f64()
+            .unwrap_or_else(|| panic!("{key}.{inner} is not a number"));
+
+        float_to_rational(value as f32)
+    }
+
+    fn ratio(node: &Value, key: &str) -> RationalNumber {
+        float_to_rational(decimal(node, key) as f32)
+    }
+
+    fn model(node: &Value, language: &str) -> Vec<i64> {
+        nested(node, "costModels", language)
+            .as_array()
+            .unwrap_or_else(|| panic!("the {language} cost model is not a list"))
+            .iter()
+            .map(|x| {
+                x.as_i64()
+                    .unwrap_or_else(|| panic!("a {language} cost is not a whole number"))
+            })
+            .collect()
+    }
+
+    fn ex_units(node: &Value, key: &str) -> ExUnits {
+        ExUnits {
+            mem: nested_whole(node, key, "memory"),
+            steps: nested_whole(node, key, "steps"),
+        }
+    }
+
+    /// The parameter set the ledger holds for the chain the node is running,
+    /// with every value taken from the node's own answer.
+    fn live_set(node: &Value) -> PParamsSet {
+        PParamsSet::default()
+            .with(Val::MinFeeA(whole(node, "txFeePerByte")))
+            .with(Val::MinFeeB(whole(node, "txFeeFixed")))
+            .with(Val::MaxBlockBodySize(whole(node, "maxBlockBodySize")))
+            .with(Val::MaxTransactionSize(whole(node, "maxTxSize")))
+            .with(Val::MaxBlockHeaderSize(whole(node, "maxBlockHeaderSize")))
+            .with(Val::KeyDeposit(whole(node, "stakeAddressDeposit")))
+            .with(Val::PoolDeposit(whole(node, "stakePoolDeposit")))
+            .with(Val::DesiredNumberOfStakePools(
+                whole(node, "stakePoolTargetNum") as u32,
+            ))
+            .with(Val::ProtocolVersion((
+                nested_whole(node, "protocolVersion", "major"),
+                nested_whole(node, "protocolVersion", "minor"),
+            )))
+            .with(Val::MinPoolCost(whole(node, "minPoolCost")))
+            .with(Val::ExpansionRate(ratio(node, "monetaryExpansion")))
+            .with(Val::TreasuryGrowthRate(ratio(node, "treasuryCut")))
+            .with(Val::MaximumEpoch(whole(node, "poolRetireMaxEpoch")))
+            .with(Val::PoolPledgeInfluence(ratio(node, "poolPledgeInfluence")))
+            .with(Val::AdaPerUtxoByte(whole(node, "utxoCostPerByte")))
+            .with(Val::ExecutionCosts(ExUnitPrices {
+                mem_price: nested_ratio(node, "executionUnitPrices", "priceMemory"),
+                step_price: nested_ratio(node, "executionUnitPrices", "priceSteps"),
+            }))
+            .with(Val::MaxTxExUnits(ex_units(node, "maxTxExecutionUnits")))
+            .with(Val::MaxBlockExUnits(ex_units(
+                node,
+                "maxBlockExecutionUnits",
+            )))
+            .with(Val::MaxValueSize(whole(node, "maxValueSize") as u32))
+            .with(Val::CollateralPercentage(
+                whole(node, "collateralPercentage") as u32,
+            ))
+            .with(Val::MaxCollateralInputs(
+                whole(node, "maxCollateralInputs") as u32
+            ))
+            .with(Val::PoolVotingThresholds(PoolVotingThresholds {
+                motion_no_confidence: nested_ratio(
+                    node,
+                    "poolVotingThresholds",
+                    "motionNoConfidence",
+                ),
+                committee_normal: nested_ratio(node, "poolVotingThresholds", "committeeNormal"),
+                committee_no_confidence: nested_ratio(
+                    node,
+                    "poolVotingThresholds",
+                    "committeeNoConfidence",
+                ),
+                hard_fork_initiation: nested_ratio(
+                    node,
+                    "poolVotingThresholds",
+                    "hardForkInitiation",
+                ),
+                security_voting_threshold: nested_ratio(
+                    node,
+                    "poolVotingThresholds",
+                    "ppSecurityGroup",
+                ),
+            }))
+            .with(Val::DrepVotingThresholds(DRepVotingThresholds {
+                motion_no_confidence: nested_ratio(
+                    node,
+                    "dRepVotingThresholds",
+                    "motionNoConfidence",
+                ),
+                committee_normal: nested_ratio(node, "dRepVotingThresholds", "committeeNormal"),
+                committee_no_confidence: nested_ratio(
+                    node,
+                    "dRepVotingThresholds",
+                    "committeeNoConfidence",
+                ),
+                update_constitution: nested_ratio(
+                    node,
+                    "dRepVotingThresholds",
+                    "updateToConstitution",
+                ),
+                hard_fork_initiation: nested_ratio(
+                    node,
+                    "dRepVotingThresholds",
+                    "hardForkInitiation",
+                ),
+                pp_network_group: nested_ratio(node, "dRepVotingThresholds", "ppNetworkGroup"),
+                pp_economic_group: nested_ratio(node, "dRepVotingThresholds", "ppEconomicGroup"),
+                pp_technical_group: nested_ratio(node, "dRepVotingThresholds", "ppTechnicalGroup"),
+                pp_governance_group: nested_ratio(node, "dRepVotingThresholds", "ppGovGroup"),
+                treasury_withdrawal: nested_ratio(
+                    node,
+                    "dRepVotingThresholds",
+                    "treasuryWithdrawal",
+                ),
+            }))
+            .with(Val::MinCommitteeSize(whole(node, "committeeMinSize")))
+            .with(Val::CommitteeTermLimit(whole(node, "committeeMaxTermLength")))
+            .with(Val::GovernanceActionValidityPeriod(whole(
+                node,
+                "govActionLifetime",
+            )))
+            .with(Val::GovernanceActionDeposit(whole(node, "govActionDeposit")))
+            .with(Val::DrepDeposit(whole(node, "dRepDeposit")))
+            .with(Val::DrepInactivityPeriod(whole(node, "dRepActivity")))
+            .with(Val::MinFeeRefScriptCostPerByte(ratio(
+                node,
+                "minFeeRefScriptCostPerByte",
+            )))
+            .with(Val::CostModelsPlutusV1(model(node, "PlutusV1")))
+            .with(Val::CostModelsPlutusV2(model(node, "PlutusV2")))
+            .with(Val::CostModelsPlutusV3(model(node, "PlutusV3")))
+    }
+
+    fn serve(set: &PParamsSet) -> u5c::cardano::PParams {
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+
+        map_live_params(&mapper, set).unwrap()
+    }
+
+    fn show_ratio(x: &RationalNumber) -> String {
+        format!("{}/{}", x.numerator, x.denominator)
+    }
+
+    fn show_served_ratio(x: &Option<u5c::cardano::RationalNumber>) -> String {
+        match x {
+            Some(x) => format!("{}/{}", x.numerator, x.denominator),
+            None => "no value".to_string(),
+        }
+    }
+
+    fn show_served_number(x: &Option<u5c::cardano::BigInt>) -> String {
+        match x.as_ref().and_then(|x| x.big_int.as_ref()) {
+            Some(u5c::cardano::big_int::BigInt::Int(v)) => v.to_string(),
+            Some(_) => "outside the int64 range".to_string(),
+            None => "no value".to_string(),
+        }
+    }
+
+    fn show_served_units(x: &Option<u5c::cardano::ExUnits>) -> String {
+        match x {
+            Some(x) => format!("{} memory, {} steps", x.memory, x.steps),
+            None => "no value".to_string(),
+        }
+    }
+
+    fn show_units(x: &ExUnits) -> String {
+        format!("{} memory, {} steps", x.mem, x.steps)
+    }
+
+    fn show_served_thresholds(x: &Option<u5c::cardano::VotingThresholds>) -> String {
+        match x {
+            Some(x) => x
+                .thresholds
+                .iter()
+                .map(|r| format!("{}/{}", r.numerator, r.denominator))
+                .collect::<Vec<_>>()
+                .join(" "),
+            None => "no value".to_string(),
+        }
+    }
+
+    fn show_thresholds(x: &[RationalNumber]) -> String {
+        x.iter().map(show_ratio).collect::<Vec<_>>().join(" ")
+    }
+
+    fn show_served_model(x: &Option<u5c::cardano::CostModel>) -> String {
+        match x {
+            Some(x) => format!(
+                "{} entries starting {:?} ending {:?}",
+                x.values.len(),
+                x.values.first(),
+                x.values.last()
+            ),
+            None => "no value".to_string(),
+        }
+    }
+
+    fn show_model(x: &[i64]) -> String {
+        format!(
+            "{} entries starting {:?} ending {:?}",
+            x.len(),
+            x.first(),
+            x.last()
+        )
+    }
+
+    /// Every served parameter, rendered so a mismatch names the field and both
+    /// values. The PlutusV4 cost model the node also reports is left out, since
+    /// no path puts it in the parameter set this reads.
+    fn served_fields(p: &u5c::cardano::PParams) -> Vec<(&'static str, String)> {
+        let models = p.cost_models.clone().unwrap_or_default();
+
+        vec![
+            (
+                "coins_per_utxo_byte",
+                show_served_number(&p.coins_per_utxo_byte),
+            ),
+            ("max_tx_size", p.max_tx_size.to_string()),
+            (
+                "min_fee_coefficient",
+                show_served_number(&p.min_fee_coefficient),
+            ),
+            ("min_fee_constant", show_served_number(&p.min_fee_constant)),
+            ("max_block_body_size", p.max_block_body_size.to_string()),
+            ("max_block_header_size", p.max_block_header_size.to_string()),
+            ("stake_key_deposit", show_served_number(&p.stake_key_deposit)),
+            ("pool_deposit", show_served_number(&p.pool_deposit)),
+            (
+                "pool_retirement_epoch_bound",
+                p.pool_retirement_epoch_bound.to_string(),
+            ),
+            (
+                "desired_number_of_pools",
+                p.desired_number_of_pools.to_string(),
+            ),
+            ("pool_influence", show_served_ratio(&p.pool_influence)),
+            (
+                "monetary_expansion",
+                show_served_ratio(&p.monetary_expansion),
+            ),
+            (
+                "treasury_expansion",
+                show_served_ratio(&p.treasury_expansion),
+            ),
+            ("min_pool_cost", show_served_number(&p.min_pool_cost)),
+            (
+                "protocol_version",
+                p.protocol_version
+                    .as_ref()
+                    .map(|v| format!("{}.{}", v.major, v.minor))
+                    .unwrap_or_else(|| "no value".to_string()),
+            ),
+            ("max_value_size", p.max_value_size.to_string()),
+            ("collateral_percentage", p.collateral_percentage.to_string()),
+            ("max_collateral_inputs", p.max_collateral_inputs.to_string()),
+            ("cost_models.plutus_v1", show_served_model(&models.plutus_v1)),
+            ("cost_models.plutus_v2", show_served_model(&models.plutus_v2)),
+            ("cost_models.plutus_v3", show_served_model(&models.plutus_v3)),
+            (
+                "prices.memory",
+                show_served_ratio(&p.prices.as_ref().and_then(|x| x.memory.clone())),
+            ),
+            (
+                "prices.steps",
+                show_served_ratio(&p.prices.as_ref().and_then(|x| x.steps.clone())),
+            ),
+            (
+                "max_execution_units_per_transaction",
+                show_served_units(&p.max_execution_units_per_transaction),
+            ),
+            (
+                "max_execution_units_per_block",
+                show_served_units(&p.max_execution_units_per_block),
+            ),
+            (
+                "min_fee_script_ref_cost_per_byte",
+                show_served_ratio(&p.min_fee_script_ref_cost_per_byte),
+            ),
+            (
+                "pool_voting_thresholds",
+                show_served_thresholds(&p.pool_voting_thresholds),
+            ),
+            (
+                "drep_voting_thresholds",
+                show_served_thresholds(&p.drep_voting_thresholds),
+            ),
+            ("min_committee_size", p.min_committee_size.to_string()),
+            ("committee_term_limit", p.committee_term_limit.to_string()),
+            (
+                "governance_action_validity_period",
+                p.governance_action_validity_period.to_string(),
+            ),
+            (
+                "governance_action_deposit",
+                show_served_number(&p.governance_action_deposit),
+            ),
+            ("drep_deposit", show_served_number(&p.drep_deposit)),
+            (
+                "drep_inactivity_period",
+                p.drep_inactivity_period.to_string(),
+            ),
+        ]
+    }
+
+    /// The same fields, rendered from the node's own answer.
+    fn node_fields(node: &Value) -> Vec<(&'static str, String)> {
+        let pool = [
+            "motionNoConfidence",
+            "committeeNormal",
+            "committeeNoConfidence",
+            "hardForkInitiation",
+            "ppSecurityGroup",
+        ]
+        .map(|k| nested_ratio(node, "poolVotingThresholds", k));
+
+        let drep = [
+            "motionNoConfidence",
+            "committeeNormal",
+            "committeeNoConfidence",
+            "updateToConstitution",
+            "hardForkInitiation",
+            "ppNetworkGroup",
+            "ppEconomicGroup",
+            "ppTechnicalGroup",
+            "ppGovGroup",
+            "treasuryWithdrawal",
+        ]
+        .map(|k| nested_ratio(node, "dRepVotingThresholds", k));
+
+        vec![
+            ("coins_per_utxo_byte", whole(node, "utxoCostPerByte").to_string()),
+            ("max_tx_size", whole(node, "maxTxSize").to_string()),
+            ("min_fee_coefficient", whole(node, "txFeePerByte").to_string()),
+            ("min_fee_constant", whole(node, "txFeeFixed").to_string()),
+            ("max_block_body_size", whole(node, "maxBlockBodySize").to_string()),
+            ("max_block_header_size", whole(node, "maxBlockHeaderSize").to_string()),
+            ("stake_key_deposit", whole(node, "stakeAddressDeposit").to_string()),
+            ("pool_deposit", whole(node, "stakePoolDeposit").to_string()),
+            ("pool_retirement_epoch_bound", whole(node, "poolRetireMaxEpoch").to_string()),
+            ("desired_number_of_pools", whole(node, "stakePoolTargetNum").to_string()),
+            ("pool_influence", show_ratio(&ratio(node, "poolPledgeInfluence"))),
+            ("monetary_expansion", show_ratio(&ratio(node, "monetaryExpansion"))),
+            ("treasury_expansion", show_ratio(&ratio(node, "treasuryCut"))),
+            ("min_pool_cost", whole(node, "minPoolCost").to_string()),
+            (
+                "protocol_version",
+                format!(
+                    "{}.{}",
+                    nested_whole(node, "protocolVersion", "major"),
+                    nested_whole(node, "protocolVersion", "minor")
+                ),
+            ),
+            ("max_value_size", whole(node, "maxValueSize").to_string()),
+            ("collateral_percentage", whole(node, "collateralPercentage").to_string()),
+            ("max_collateral_inputs", whole(node, "maxCollateralInputs").to_string()),
+            ("cost_models.plutus_v1", show_model(&model(node, "PlutusV1"))),
+            ("cost_models.plutus_v2", show_model(&model(node, "PlutusV2"))),
+            ("cost_models.plutus_v3", show_model(&model(node, "PlutusV3"))),
+            (
+                "prices.memory",
+                show_ratio(&nested_ratio(node, "executionUnitPrices", "priceMemory")),
+            ),
+            (
+                "prices.steps",
+                show_ratio(&nested_ratio(node, "executionUnitPrices", "priceSteps")),
+            ),
+            (
+                "max_execution_units_per_transaction",
+                show_units(&ex_units(node, "maxTxExecutionUnits")),
+            ),
+            (
+                "max_execution_units_per_block",
+                show_units(&ex_units(node, "maxBlockExecutionUnits")),
+            ),
+            (
+                "min_fee_script_ref_cost_per_byte",
+                show_ratio(&ratio(node, "minFeeRefScriptCostPerByte")),
+            ),
+            ("pool_voting_thresholds", show_thresholds(&pool)),
+            ("drep_voting_thresholds", show_thresholds(&drep)),
+            ("min_committee_size", whole(node, "committeeMinSize").to_string()),
+            ("committee_term_limit", whole(node, "committeeMaxTermLength").to_string()),
+            ("governance_action_validity_period", whole(node, "govActionLifetime").to_string()),
+            ("governance_action_deposit", whole(node, "govActionDeposit").to_string()),
+            ("drep_deposit", whole(node, "dRepDeposit").to_string()),
+            ("drep_inactivity_period", whole(node, "dRepActivity").to_string()),
+        ]
+    }
+
+    #[test]
+    fn the_served_pool_retirement_epoch_bound_is_the_node_value() {
+        let node = node();
+
+        assert_eq!(whole(&node, "poolRetireMaxEpoch"), 18);
+        assert_eq!(serve(&live_set(&node)).pool_retirement_epoch_bound, 18);
+    }
+
+    #[test]
+    fn every_served_parameter_is_the_node_value() {
+        let node = node();
+        let served = serve(&live_set(&node));
+
+        assert_eq!(served_fields(&served), node_fields(&node));
+    }
+
+    #[test]
+    fn the_served_cost_models_are_the_node_vectors() {
+        let node = node();
+        let served = serve(&live_set(&node));
+        let models = served.cost_models.unwrap();
+
+        assert_eq!(models.plutus_v1.unwrap().values, model(&node, "PlutusV1"));
+        assert_eq!(models.plutus_v2.unwrap().values, model(&node, "PlutusV2"));
+        assert_eq!(models.plutus_v3.unwrap().values, model(&node, "PlutusV3"));
+    }
+
+    #[test]
+    fn a_set_with_no_retirement_bound_is_refused() {
+        let node = node();
+        let mut set = live_set(&node);
+        set.clear(dolos_cardano::model::PParamKind::MaximumEpoch);
+
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+        let error = map_live_params(&mapper, &set).unwrap_err();
+
+        assert!(
+            error.to_string().contains("MaximumEpoch"),
+            "the refusal names no parameter: {error}"
+        );
+    }
+
+    #[test]
+    fn the_retirement_bound_is_the_only_field_the_era_mapping_leaves_behind() {
+        let node = node();
+        let set = live_set(&node);
+
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+        let era_only = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(&set));
+        let served = map_live_params(&mapper, &set).unwrap();
+
+        let differing: Vec<&'static str> = served_fields(&served)
+            .into_iter()
+            .zip(served_fields(&era_only))
+            .filter(|((_, a), (_, b))| a != b)
+            .map(|((name, _), _)| name)
+            .collect();
+
+        assert_eq!(differing, vec!["pool_retirement_epoch_bound"]);
     }
 }

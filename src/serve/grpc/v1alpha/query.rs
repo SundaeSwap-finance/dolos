@@ -53,6 +53,16 @@ fn into_status(err: impl std::error::Error) -> Status {
     Status::internal(err.to_string())
 }
 
+/// Builds the protocol parameters a client is served for the current chain.
+fn map_live_params<C: LedgerContext>(
+    mapper: &interop::Mapper<C>,
+    pparams: &dolos_cardano::PParamsSet,
+) -> Result<u5c::cardano::PParams, ChainError> {
+    let mapped = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(pparams));
+
+    Ok(mapped)
+}
+
 trait IntoSet {
     fn into_set<S: CardanoStateIndexExt>(self, state: &S) -> Result<HashSet<TxoRef>, Status>;
 }
@@ -822,14 +832,11 @@ where
         let pparams = dolos_cardano::load_effective_pparams::<D>(self.domain.state())
             .map_err(|_| Status::internal("Failed to load current pparams"))?;
 
-        let pparams = dolos_cardano::utils::pparams_to_pallas(&pparams);
+        let params = map_live_params(&self.mapper, &pparams).map_err(into_status)?;
 
         let mut response = u5c::query::ReadParamsResponse {
             values: Some(u5c::query::AnyChainParams {
-                params: u5c::query::any_chain_params::Params::Cardano(
-                    self.mapper.map_pparams(pparams),
-                )
-                .into(),
+                params: u5c::query::any_chain_params::Params::Cardano(params).into(),
             }),
             ledger_tip: Some(point_to_u5c(&self.domain, &tip)),
         };
@@ -1307,5 +1314,67 @@ mod tests {
             }
             _ => panic!("missing cardano era summaries"),
         }
+    }
+}
+
+#[cfg(test)]
+mod live_params_tests {
+    use dolos_cardano::model::{PParamKind, PParamValue as Val};
+    use dolos_cardano::PParamsSet;
+    use dolos_testing::toy_domain::ToyDomain;
+    use serde_json::Value;
+
+    use super::*;
+
+    /// The protocol parameters the Musashi node answers for the chain it is
+    /// running, read with the cli.
+    fn node() -> Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("crates/core/test_data/musashi/protocol-parameters.json");
+
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    fn node_retirement_bound() -> u64 {
+        node()
+            .get("poolRetireMaxEpoch")
+            .expect("the node parameters name no poolRetireMaxEpoch")
+            .as_u64()
+            .expect("poolRetireMaxEpoch is not a whole number")
+    }
+
+    fn live_set(bound: Option<u64>) -> PParamsSet {
+        let set = PParamsSet::default().with(Val::ProtocolVersion((12, 0)));
+
+        match bound {
+            Some(bound) => set.with(Val::MaximumEpoch(bound)),
+            None => {
+                let mut set = set.with(Val::MaximumEpoch(0));
+                set.clear(PParamKind::MaximumEpoch);
+                set
+            }
+        }
+    }
+
+    #[test]
+    fn the_served_pool_retirement_epoch_bound_is_the_node_value() {
+        let bound = node_retirement_bound();
+        assert_eq!(bound, 18);
+
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+        let served = map_live_params(&mapper, &live_set(Some(bound))).unwrap();
+
+        assert_eq!(served.pool_retirement_epoch_bound, bound);
+    }
+
+    #[test]
+    fn a_set_with_no_retirement_bound_is_refused() {
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+        let error = map_live_params(&mapper, &live_set(None)).unwrap_err();
+
+        assert!(
+            error.to_string().contains("MaximumEpoch"),
+            "the refusal names no parameter: {error}"
+        );
     }
 }

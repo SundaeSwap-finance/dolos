@@ -1,0 +1,19 @@
+protocol-parameters.json
+
+chain tag     prototype-2026w36
+source        the Musashi Leios testnet node, read with
+              cardano-cli query protocol-parameters
+harvested_at  2026-09-21T07:36:58Z
+era           Dijkstra
+slot          1236869
+tip           block 55799, epoch 57,
+              hash e988726a5844c44e8c84e8cca49b5a515ad62e5e481d29a1aa5eecf721941fd9
+slot after    1236873, block 55800, still epoch 57 and still Dijkstra, so no
+              epoch boundary and no parameter update fell inside the read
+size          24642 bytes
+sha256        4a3bda4461fcb5c60a8c87a97352a784a726cd79c7a4a54dbc9cadd0dddf62be
+
+These are the values the node answers for the running chain, so a field read
+out of this file is the value a client asking the node would receive. Reharvest
+from the same node and compare the sha256 to tell whether the parameters have
+moved.
