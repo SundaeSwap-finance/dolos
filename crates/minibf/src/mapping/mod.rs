@@ -1319,7 +1319,7 @@ impl<'a> IntoModel<TxContentUtxoOutputsInner> for UtxoOutputModelBuilder<'a> {
             collateral: self.is_collateral,
             reference_script_hash: self
                 .output
-                .script_ref()
+                .multi_era_script_ref()
                 .map(|h| h.into_model())
                 .transpose()?,
         };
@@ -1365,7 +1365,7 @@ impl<'a> IntoModel<AddressUtxoContentInner> for UtxoOutputModelBuilder<'a> {
                 .map(hex::encode),
             reference_script_hash: self
                 .output
-                .script_ref()
+                .multi_era_script_ref()
                 .map(|h| h.into_model())
                 .transpose()?,
 
@@ -1416,7 +1416,7 @@ impl<'a> IntoModel<ScriptUtxosInner> for UtxoOutputModelBuilder<'a> {
             // outputs that carry a reference script.
             reference_script_hash: self
                 .output
-                .script_ref()
+                .multi_era_script_ref()
                 .map(|h| h.into_model())
                 .transpose()?
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?,
@@ -1454,7 +1454,10 @@ impl<'a> IntoModel<TxContentUtxoInputsInner> for UtxoInputModelBuilder<'a> {
                     .into_iter()
                     .filter(|x| x.unit == "lovelace" || !self.is_collateral)
                     .collect(),
-                reference_script_hash: o.script_ref().map(|h| h.into_model()).transpose()?,
+                reference_script_hash: o
+                    .multi_era_script_ref()
+                    .map(|h| h.into_model())
+                    .transpose()?,
                 data_hash: o.datum().map(|x| match x {
                     DatumOption::Hash(x) => x.to_string(),
                     DatumOption::Data(x) => x.original_hash().to_string(),
@@ -2147,7 +2150,7 @@ impl TxModelBuilder<'_> {
         let index = redeemer.index() as usize;
         let tx = self.tx()?;
 
-        match redeemer.tag() {
+        match redeemer.multi_era_tag() {
             MultiEraRedeemerTag::Spend => {
                 let inputs = tx.inputs_sorted_set();
                 let Some(input) = inputs.get(index) else {
@@ -2221,7 +2224,7 @@ impl TxModelBuilder<'_> {
         let fee = self.compute_fee(&units, prices)?;
 
         let out = TxContentRedeemersInner {
-            purpose: match redeemer.tag() {
+            purpose: match redeemer.multi_era_tag() {
                 MultiEraRedeemerTag::Spend => Purpose::Spend,
                 MultiEraRedeemerTag::Mint => Purpose::Mint,
                 MultiEraRedeemerTag::Cert => Purpose::Cert,

@@ -534,8 +534,8 @@ impl<T: LeiosTransport> LeiosClient<T> {
                 InitiatorEvent::PeerInitialized(pid, (version, _)) => {
                     if version < LEIOS_MIN_VERSION {
                         return Err(Error::PreLeiosPeer {
-                            version: version as u64,
-                            minimum: LEIOS_MIN_VERSION as u64,
+                            version,
+                            minimum: LEIOS_MIN_VERSION,
                         });
                     }
 

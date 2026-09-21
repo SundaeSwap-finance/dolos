@@ -4,13 +4,10 @@ use tx3_resolver::{Expression, StructExpr};
 
 use dolos_core::{EraCbor, TxoRef};
 use pallas::{
-    codec::{minicbor, utils::KeyValuePairs},
+    codec::utils::KeyValuePairs,
     ledger::{
         primitives::{conway::DatumOption, BigInt, Constr, PlutusData},
-        traverse::{
-            Era, MultiEraAsset, MultiEraOutput, MultiEraPolicyAssets, MultiEraScriptRef,
-            MultiEraValue,
-        },
+        traverse::{Era, MultiEraAsset, MultiEraOutput, MultiEraPolicyAssets, MultiEraValue},
     },
 };
 
@@ -140,7 +137,7 @@ pub fn into_tx3_utxo(
     // its tag. We must NOT store only the inner script body, which would drop
     // the language tag.
     let script = parsed
-        .script_ref()
+        .multi_era_script_ref()
         .map(|script_ref| script_ref.encode())
         .map(Expression::Bytes);
 

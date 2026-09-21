@@ -208,26 +208,24 @@ pub struct MultiEraVoteDelegation {
 }
 
 pub fn cert_as_vote_delegation(cert: &MultiEraCert) -> Option<MultiEraVoteDelegation> {
-    match cert {
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::VoteDeleg(delegator, drep) => Some(MultiEraVoteDelegation {
-                delegator: delegator.clone(),
-                drep: drep.clone(),
-            }),
-            ConwayCert::VoteRegDeleg(delegator, drep, _) => Some(MultiEraVoteDelegation {
-                delegator: delegator.clone(),
-                drep: drep.clone(),
-            }),
-            ConwayCert::StakeVoteRegDeleg(delegator, _, drep, _) => Some(MultiEraVoteDelegation {
-                delegator: delegator.clone(),
-                drep: drep.clone(),
-            }),
-            ConwayCert::StakeVoteDeleg(delegator, _, drep) => Some(MultiEraVoteDelegation {
-                delegator: delegator.clone(),
-                drep: drep.clone(),
-            }),
-            _ => None,
-        },
+    match as_conway_cert(cert)?.as_ref() {
+        ConwayCert::VoteDeleg(delegator, drep) => Some(MultiEraVoteDelegation {
+            delegator: delegator.clone(),
+            drep: drep.clone(),
+        }),
+        ConwayCert::VoteRegDeleg(delegator, drep, _) => Some(MultiEraVoteDelegation {
+            delegator: delegator.clone(),
+            drep: drep.clone(),
+        }),
+        ConwayCert::StakeVoteRegDeleg(delegator, _, drep, _) => Some(MultiEraVoteDelegation {
+            delegator: delegator.clone(),
+            drep: drep.clone(),
+        }),
+        ConwayCert::StakeVoteDeleg(delegator, _, drep) => Some(MultiEraVoteDelegation {
+            delegator: delegator.clone(),
+            drep: drep.clone(),
+        }),
+        _ => None,
     }
 }
 
@@ -237,28 +235,24 @@ pub struct MultiEraDRepRegistration {
 }
 
 pub fn cert_as_drep_registration(cert: &MultiEraCert) -> Option<MultiEraDRepRegistration> {
-    match cert {
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::RegDRepCert(cred, deposit, _) => Some(MultiEraDRepRegistration {
-                cred: cred.clone(),
-                deposit: *deposit,
-            }),
-            _ => None,
-        },
+    match as_conway_cert(cert)?.as_ref() {
+        ConwayCert::RegDRepCert(cred, deposit, _) => Some(MultiEraDRepRegistration {
+            cred: cred.clone(),
+            deposit: *deposit,
+        }),
+        _ => None,
     }
 }
 
 pub type MultiEraDRepUnRegistration = MultiEraDRepRegistration;
 
 pub fn cert_as_drep_unregistration(cert: &MultiEraCert) -> Option<MultiEraDRepUnRegistration> {
-    match cert {
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::UnRegDRepCert(cred, deposit) => Some(MultiEraDRepRegistration {
-                cred: cred.clone(),
-                deposit: *deposit,
-            }),
-            _ => None,
-        },
+    match as_conway_cert(cert)?.as_ref() {
+        ConwayCert::UnRegDRepCert(cred, deposit) => Some(MultiEraDRepRegistration {
+            cred: cred.clone(),
+            deposit: *deposit,
+        }),
+        _ => None,
     }
 }
 
@@ -268,14 +262,12 @@ pub struct MultiEraCommitteeAuth {
 }
 
 pub fn cert_as_committee_auth(cert: &MultiEraCert) -> Option<MultiEraCommitteeAuth> {
-    match cert {
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::AuthCommitteeHot(cold, hot) => Some(MultiEraCommitteeAuth {
-                cold: cold.clone(),
-                hot: hot.clone(),
-            }),
-            _ => None,
-        },
+    match as_conway_cert(cert)?.as_ref() {
+        ConwayCert::AuthCommitteeHot(cold, hot) => Some(MultiEraCommitteeAuth {
+            cold: cold.clone(),
+            hot: hot.clone(),
+        }),
+        _ => None,
     }
 }
 
@@ -285,14 +277,12 @@ pub struct MultiEraCommitteeResign {
 }
 
 pub fn cert_as_committee_resign(cert: &MultiEraCert) -> Option<MultiEraCommitteeResign> {
-    match cert {
-        _ => match as_conway_cert(cert)?.as_ref() {
-            ConwayCert::ResignCommitteeCold(cold, anchor) => Some(MultiEraCommitteeResign {
-                cold: cold.clone(),
-                anchor: anchor.clone(),
-            }),
-            _ => None,
-        },
+    match as_conway_cert(cert)?.as_ref() {
+        ConwayCert::ResignCommitteeCold(cold, anchor) => Some(MultiEraCommitteeResign {
+            cold: cold.clone(),
+            anchor: anchor.clone(),
+        }),
+        _ => None,
     }
 }
 
@@ -556,6 +546,7 @@ pub fn script_ref_parts(script_ref: &MultiEraScriptRef) -> ScriptRefParts {
         | ScriptLanguage::PlutusV2
         | ScriptLanguage::PlutusV3
         | ScriptLanguage::PlutusV4 => script_ref.plutus_bytes().map(|bytes| bytes.to_vec()),
+        other => panic!("script_ref_parts has no bytes rule for {other:?}"),
     };
 
     ScriptRefParts {

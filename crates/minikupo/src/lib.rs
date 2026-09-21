@@ -55,19 +55,25 @@ impl<D: Domain> Facade<D> {
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        Ok(script.map(|data| {
-            let language = match data.language {
-                CardanoLanguage::Native => types::ScriptLanguage::Native,
-                CardanoLanguage::PlutusV1 => types::ScriptLanguage::PlutusV1,
-                CardanoLanguage::PlutusV2 => types::ScriptLanguage::PlutusV2,
-                CardanoLanguage::PlutusV3 => types::ScriptLanguage::PlutusV3,
-                CardanoLanguage::PlutusV4 => types::ScriptLanguage::PlutusV4,
-            };
+        let Some(data) = script else {
+            return Ok(None);
+        };
 
-            types::Script {
-                language,
-                script: hex::encode(data.script),
-            }
+        let language = match data.language {
+            CardanoLanguage::Native => types::ScriptLanguage::Native,
+            CardanoLanguage::PlutusV1 => types::ScriptLanguage::PlutusV1,
+            CardanoLanguage::PlutusV2 => types::ScriptLanguage::PlutusV2,
+            CardanoLanguage::PlutusV3 => types::ScriptLanguage::PlutusV3,
+            CardanoLanguage::PlutusV4 => types::ScriptLanguage::PlutusV4,
+            // This route's language type has no member for a language added
+            // after PlutusV4, so an unknown one is refused rather than
+            // reported as another.
+            _ => return Err(StatusCode::NOT_IMPLEMENTED),
+        };
+
+        Ok(Some(types::Script {
+            language,
+            script: hex::encode(data.script),
         }))
     }
 
