@@ -931,10 +931,120 @@ mod tests {
         let err = super::compute_apply_delta(&block, &context)
             .expect_err("the strict rule must refuse an input it cannot resolve");
 
-        match err {
-            BrokenInvariant::MissingUtxo(r) => assert_eq!(r, forward_ref_txoref()),
-            other => panic!("wrong refusal: {other:?}"),
+        assert!(
+            err.to_string()
+                .contains(&forward_ref_txoref().0.to_string()),
+            "the refusal must name the input it could not resolve: {err}"
+        );
+    }
+
+    /// The transaction of the forward reference fixture that spends the input
+    /// the other one produces. The stop has to name it, because the block hash
+    /// and the input alone leave an operator reading a block of 1803
+    /// transactions with nothing to look at.
+    fn forward_ref_spender(block: &MultiEraBlock) -> TxHash {
+        let target = forward_ref_txoref();
+
+        block
+            .txs()
+            .iter()
+            .find(|tx| {
+                tx.consumes()
+                    .iter()
+                    .any(|i| TxoRef(*i.hash(), i.index() as u32) == target)
+            })
+            .expect("fixture precondition: some transaction spends the forward reference")
+            .hash()
+    }
+
+    /// MUST FIRE: the stop on an input the ledger does not hold names the block
+    /// slot, the block hash, the transaction and the input, in the text that
+    /// reaches the log. `or_panic` renders the error with `error!(%x)`, so the
+    /// error's own text is the line an operator reads, and a stop that names
+    /// only the input cannot be traced back to a block or a transaction.
+    ///
+    /// MUST NOT FIRE: the same block with the same input present applies with
+    /// no error, so this is a refusal of an unresolved input and not of the
+    /// fixture.
+    #[test]
+    fn an_unresolved_input_stops_and_names_the_block_the_transaction_and_the_input() {
+        let cbor = forward_ref_block();
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        assert_eq!(block.slot(), 1861242, "fixture precondition");
+
+        let target = forward_ref_txoref();
+        let spender = forward_ref_spender(&block);
+
+        let mut context = fake_slice_for_block(&block);
+        context.remove(&target);
+
+        let err = super::compute_apply_delta(&block, &context)
+            .expect_err("an input the ledger does not hold must stop the apply");
+
+        let said = err.to_string();
+
+        for (what, expected) in [
+            ("the block slot", block.slot().to_string()),
+            ("the block hash", block.hash().to_string()),
+            ("the transaction", spender.to_string()),
+            ("the input transaction", target.0.to_string()),
+            ("the input index", format!("#{}", target.1)),
+        ] {
+            assert!(
+                said.contains(&expected),
+                "the stop does not name {what} ({expected}): {said}"
+            );
         }
+
+        // The must not fire half. Nothing was removed this time, so the same
+        // block resolves.
+        let whole = fake_slice_for_block(&block);
+        super::compute_apply_delta(&block, &whole)
+            .expect("the block applies when every input it spends is there");
+    }
+
+    /// MUST FIRE: the lenient rule says which transaction left which input
+    /// unconsumed, not only how many were left. A count says a ledger is wrong
+    /// and nothing says where, and the block, the transaction and the input are
+    /// the three an operator needs to go and look.
+    ///
+    /// MUST NOT FIRE: a block that left nothing unconsumed names nothing, so
+    /// the record is of what happened rather than of every input walked.
+    #[test]
+    fn a_left_input_is_recorded_against_the_transaction_that_spent_it() {
+        let cbor = forward_ref_block();
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+
+        let target = forward_ref_txoref();
+        let spender = forward_ref_spender(&block);
+
+        let mut ledger = FakeLedger::default();
+        ledger.seed_externals(&block);
+        ledger.present.remove(&target);
+
+        let stats = ledger.apply(&block);
+
+        assert_eq!(stats.skipped_inputs(), 1, "exactly one input was left");
+        assert_eq!(
+            stats.skipped,
+            vec![SkippedInput {
+                tx: spender,
+                input: target,
+            }],
+            "the record names the transaction that spent it and the input it spent"
+        );
+
+        let ordinary = trimmed_block("dijkstra-repeat-ranking-first.block");
+        let ordinary = MultiEraBlock::decode(&ordinary).unwrap();
+
+        let mut clean = FakeLedger::default();
+        clean.seed_externals(&ordinary);
+
+        assert_eq!(
+            clean.apply(&ordinary).skipped,
+            vec![],
+            "a block that left nothing unconsumed records nothing"
+        );
     }
 }
 
