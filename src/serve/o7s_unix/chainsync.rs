@@ -126,7 +126,7 @@ impl<D: Domain> Session<D> {
 
         let crawler = self.assume_crawler();
 
-        let next = crawler.next_block();
+        let next = crawler.next_block().map_err(Error::server)?;
 
         if let Some((point, block)) = next {
             self.send_forward(point, block).await?;

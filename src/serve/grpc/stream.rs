@@ -18,8 +18,15 @@ impl ChainStream {
         Ok(Some(async_stream::stream! {
             yield TipEvent::Mark(intersected.clone());
 
-            while let Some((point, block)) = crawler.next_block() {
-                yield TipEvent::Apply(point, block);
+            loop {
+                match crawler.next_block() {
+                    Ok(Some((point, block))) => yield TipEvent::Apply(point, block),
+                    Ok(None) => break,
+                    Err(error) => {
+                        tracing::error!(%error, "chain stream stopped short of the tip");
+                        return;
+                    }
+                }
             }
 
             loop {

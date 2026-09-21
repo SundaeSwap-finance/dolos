@@ -687,6 +687,11 @@ pub enum DomainError {
     )]
     RollbackTargetNotInWal(ChainPoint),
 
+    /// The archive ran out where the wal does not reach back to, so a crawl
+    /// that walked the archive has nowhere to continue.
+    #[error("the archive ends at {0} and the wal holds no point at or before it")]
+    ArchiveWalGap(ChainPoint),
+
     #[error("forced stop epoch reached")]
     StopEpochReached,
 }
