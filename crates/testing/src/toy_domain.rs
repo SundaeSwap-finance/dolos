@@ -497,14 +497,8 @@ impl<B: ToyStores> dolos_core::Domain for ToyDomain<B> {
     fn watch_tip(&self, from: Option<ChainPoint>) -> Result<Self::TipSubscription, DomainError> {
         let receiver = self.tip_broadcast.subscribe();
 
-        let replay = self
-            .wal()
-            .iter_blocks(from.clone(), None)?
-            .filter(|(point, _)| match from.as_ref() {
-                Some(from) => from != point,
-                None => true,
-            })
-            .collect::<Vec<_>>();
+        let blocks = self.wal().iter_blocks(from.clone(), None)?;
+        let replay = dolos_core::wal::blocks_after(from.as_ref(), blocks).collect::<Vec<_>>();
 
         Ok(TipSubscription { replay, receiver })
     }

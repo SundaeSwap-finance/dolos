@@ -125,15 +125,8 @@ impl Domain for DomainAdapter {
         // We then collect any gap between the from point and the current tip. This
         // assumes that no event will be sent between the creation of the receiver and
         // the collection of the replay.
-        //
-        // The from point is the last point the caller applied, so the gap
-        // starts after it. Handing it back applies its transactions a second
-        // time.
-        let replay = self
-            .wal()
-            .iter_blocks(from.clone(), None)?
-            .filter(|(point, _)| from.as_ref() != Some(point))
-            .collect::<VecDeque<_>>();
+        let blocks = self.wal().iter_blocks(from.clone(), None)?;
+        let replay = dolos_core::wal::blocks_after(from.as_ref(), blocks).collect::<VecDeque<_>>();
 
         Ok(TipSubscription { replay, receiver })
     }

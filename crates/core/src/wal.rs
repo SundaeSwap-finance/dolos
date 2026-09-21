@@ -117,3 +117,79 @@ pub trait WalStore: Clone + Send + Sync + 'static {
         Ok(None)
     }
 }
+
+/// Whether two points name the same block.
+///
+/// A point that has no hash names every block at its slot, which is the most a
+/// caller that gave no hash can be held to. The two points are matched by
+/// shape rather than compared with `==`, because `==` on a point answers
+/// differently depending on which side has the hash.
+fn names_the_same_block(a: &ChainPoint, b: &ChainPoint) -> bool {
+    match (a, b) {
+        (ChainPoint::Specific(_, a_hash), ChainPoint::Specific(_, b_hash)) => {
+            a.slot() == b.slot() && a_hash == b_hash
+        }
+        _ => a.slot() == b.slot(),
+    }
+}
+
+/// The blocks a caller resuming at `from` has not applied.
+///
+/// A wal block iteration opened at a point starts with that point, and the
+/// caller named that point as the block it last applied, so it is dropped.
+pub fn blocks_after<'a>(
+    from: Option<&'a ChainPoint>,
+    blocks: impl Iterator<Item = (ChainPoint, RawBlock)> + 'a,
+) -> impl Iterator<Item = (ChainPoint, RawBlock)> + 'a {
+    blocks.filter(move |(point, _)| match from {
+        Some(from) => !names_the_same_block(from, point),
+        None => true,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn block(slot: u64, tag: u8) -> (ChainPoint, RawBlock) {
+        (
+            ChainPoint::Specific(slot, [tag; 32].into()),
+            Arc::new(vec![tag]),
+        )
+    }
+
+    fn slots(blocks: impl Iterator<Item = (ChainPoint, RawBlock)>) -> Vec<u64> {
+        blocks.map(|(point, _)| point.slot()).collect()
+    }
+
+    #[test]
+    fn the_point_the_caller_named_is_dropped() {
+        let from = ChainPoint::Specific(5, [1u8; 32].into());
+        let page = [block(5, 1), block(6, 2), block(7, 3)];
+
+        assert_eq!(slots(blocks_after(Some(&from), page.into_iter())), [6, 7]);
+    }
+
+    #[test]
+    fn a_point_with_no_hash_names_the_block_at_that_slot() {
+        let from = ChainPoint::Slot(5);
+        let page = [block(5, 1), block(6, 2), block(7, 3)];
+
+        assert_eq!(slots(blocks_after(Some(&from), page.into_iter())), [6, 7]);
+    }
+
+    #[test]
+    fn a_different_block_at_the_same_slot_is_kept() {
+        let from = ChainPoint::Specific(5, [9u8; 32].into());
+        let page = [block(5, 1), block(6, 2)];
+
+        assert_eq!(slots(blocks_after(Some(&from), page.into_iter())), [5, 6]);
+    }
+
+    #[test]
+    fn every_block_is_kept_when_the_caller_names_no_point() {
+        let page = [block(5, 1), block(6, 2)];
+
+        assert_eq!(slots(blocks_after(None, page.into_iter())), [5, 6]);
+    }
+}
