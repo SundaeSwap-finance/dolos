@@ -201,9 +201,9 @@ impl<'a> BlockModelBuilder<'a> {
             // "there is no certificate" and that one means "this build does
             // not know".
             MultiEraHeader::EpochBoundary(_) | MultiEraHeader::Byron(_) => (None, None),
-            // A header era this build does not model. `MultiEraHeader` became
-            // non_exhaustive upstream, so the compile error a new era used to
-            // cause here is gone and this arm is the only notice there is.
+            // A header era this build does not model. `MultiEraHeader` is
+            // non_exhaustive, so the compile error a new era used to cause
+            // here is gone and this arm is the only notice there is.
             //
             // The two nulls it answers with are indistinguishable from Byron's
             // real answer, which is why the log line exists and why it is at
