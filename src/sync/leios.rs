@@ -26,9 +26,11 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use pallas::ledger::traverse::leios::{
-    resolve_certified_block, AnnouncedEndorserBlock, EndorserBlockBody, PendingAnnouncement,
-};
+use dolos_cardano::pallas_extras::inline_endorser_transactions;
+use pallas::codec::minicbor::{self, bytes::ByteSlice};
+use pallas::codec::utils::AnyCbor;
+use pallas::crypto::hash::Hash;
+use pallas::ledger::traverse::leios::EndorserBlockBody;
 use pallas::ledger::traverse::MultiEraBlock;
 use pallas::network2::behavior::initiator::{
     Config as HandshakeConfig, DisconnectReason, HandshakeBehavior, InitiatorBehavior,
@@ -42,7 +44,7 @@ use pallas::network2::{Manager, PeerId};
 use tokio::time::interval;
 use tracing::{debug, info, warn};
 
-use dolos_core::{BlockBody, RawBlock};
+use dolos_core::BlockBody;
 
 /// Transactions asked for in one leios-fetch request.
 ///
@@ -114,6 +116,12 @@ pub enum Error {
     BadBlock(String),
 
     #[error(
+        "the block at slot {slot} certifies an endorser block and carries {count} transactions \
+         of its own"
+    )]
+    CertifiesAndCarries { slot: u64, count: usize },
+
+    #[error(
         "endorser block {hash} certified at slot {slot} was fetched and no block of that slot \
          arrived to carry it"
     )]
@@ -140,92 +148,13 @@ pub enum Error {
     },
 }
 
-/// What the certification walk knew at a stored point, and the evidence for it.
-///
-/// The state alone would not say whether it was read off the chain or fallen
-/// back to, so the block that settled it is carried beside it and an operator
-/// reading the log can see which.
+/// A certified endorser block's announcement, with the slot of the header that
+/// made it, which is the slot a leios-fetch point carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResumedWalk {
-    pub state: PendingAnnouncement,
-    /// Blocks read back before the question was settled.
-    pub scanned: usize,
-    /// Slot of the block that settled it, when one did.
-    pub settled_at: Option<u64>,
-}
-
-/// Reconstructs the certification walk from stored blocks, read newest first.
-///
-/// A follower resuming from its own stored point has to know whether an
-/// announcement is waiting for a certificate, and nothing on the chain writes
-/// that down. It is derived from the blocks the follower already has rather
-/// than saved separately, because a separately saved copy can disagree with the
-/// cursor after a crash or a rollback and nothing would notice.
-///
-/// The walk back stops at the first block that settles the question:
-///
-/// - a header that announces, whatever else it does: that announcement is
-///   waiting, because no later block announced or certified;
-/// - a header that certifies and announces nothing: nothing is waiting, because
-///   it consumed what came before;
-/// - a header of an era with no endorsement layer: nothing is waiting, because
-///   an announcement cannot cross forward into an era that has none.
-///
-/// Reading to the end of the stored blocks without meeting any of the three
-/// settles nothing, and the answer says so. Answering "nothing is waiting"
-/// there would be reading an absence as a fact, and it is the exact absence
-/// that loses a whole endorser block at the next certificate.
-/// The iterator is consumed lazily and abandoned at the block that settles the
-/// question, which on a chain in its endorsement era is almost always the first
-/// one read. Draining it first would read every block the retention holds to
-/// answer a question one block answers.
-pub fn resume_walk(blocks: impl Iterator<Item = RawBlock>) -> Result<ResumedWalk, Error> {
-    let mut scanned = 0usize;
-
-    for cbor in blocks {
-        scanned += 1;
-
-        let block = MultiEraBlock::decode(&cbor).map_err(|e| Error::BadBlock(e.to_string()))?;
-        let header = block.header();
-        let slot = header.slot();
-
-        if let Some(announcement) = header.eb_announcement() {
-            return Ok(ResumedWalk {
-                state: PendingAnnouncement::Waiting(AnnouncedEndorserBlock {
-                    slot,
-                    hash: announcement.eb_hash,
-                    size: announcement.eb_size,
-                }),
-                scanned,
-                settled_at: Some(slot),
-            });
-        }
-
-        match header.block_body_contains_leios_cert() {
-            // An era with no endorsement layer at all.
-            None => {
-                return Ok(ResumedWalk {
-                    state: PendingAnnouncement::Nothing,
-                    scanned,
-                    settled_at: Some(slot),
-                })
-            }
-            Some(true) => {
-                return Ok(ResumedWalk {
-                    state: PendingAnnouncement::Nothing,
-                    scanned,
-                    settled_at: Some(slot),
-                })
-            }
-            Some(false) => continue,
-        }
-    }
-
-    Ok(ResumedWalk {
-        state: PendingAnnouncement::Unknown,
-        scanned,
-        settled_at: None,
-    })
+pub struct AnnouncedEndorserBlock {
+    pub slot: u64,
+    pub hash: Hash<32>,
+    pub size: u32,
 }
 
 /// A fetched, verified endorser block waiting for the ranking block that
@@ -305,9 +234,9 @@ impl PendingPayloads {
         let mut out = Vec::with_capacity(blocks.len());
 
         for cbor in blocks {
-            let slot = MultiEraBlock::decode(&cbor)
-                .map_err(|e| Error::BadBlock(e.to_string()))?
-                .slot();
+            let (slot, own) = MultiEraBlock::decode(&cbor)
+                .map(|block| (block.slot(), block.tx_count()))
+                .map_err(|e| Error::BadBlock(e.to_string()))?;
 
             match self.0.remove(&slot) {
                 None => out.push(cbor),
@@ -315,8 +244,12 @@ impl PendingPayloads {
                     return Err(Error::Unfetched { slot });
                 }
                 Some(Some(payload)) => {
-                    let borrowed: Vec<&[u8]> = payload.txs.iter().map(|t| t.as_slice()).collect();
-                    let resolved = resolve_certified_block(&cbor, &borrowed)?;
+                    if own > 0 {
+                        return Err(Error::CertifiesAndCarries { slot, count: own });
+                    }
+
+                    let resolved = inline_endorser_transactions(&cbor, &payload.txs)
+                        .map_err(|e| Error::BadBlock(e.to_string()))?;
 
                     info!(
                         slot,
@@ -479,7 +412,7 @@ impl<T: LeiosTransport> LeiosClient<T> {
         let started = tokio::time::Instant::now();
 
         let mut body: Option<EndorserBlockBody> = None;
-        let mut txs: BTreeMap<usize, Vec<u8>> = BTreeMap::new();
+        let mut txs: BTreeMap<usize, AnyCbor> = BTreeMap::new();
         let mut inflight: Vec<usize> = Vec::new();
         let mut asked_for_body = false;
         let mut round_trips = 0usize;
@@ -508,7 +441,7 @@ impl<T: LeiosTransport> LeiosClient<T> {
                             .collect();
 
                         if want.is_empty() {
-                            let wire: Vec<Vec<u8>> = txs.into_values().collect();
+                            let wire: Vec<AnyCbor> = txs.into_values().collect();
 
                             debug!(
                                 eb = %eb.hash,
@@ -616,19 +549,10 @@ impl<T: LeiosTransport> LeiosClient<T> {
                             // surface as an unexplained hash failure at the end
                             // of every retry, forever.
                             for (index, tx) in asked.iter().zip(delivered.iter()) {
-                                let wire = tx.raw_bytes();
-                                let named = decoded.entries()[*index].hash;
+                                let named = decoded[*index].0;
 
-                                let found = pallas::ledger::traverse::leios::unwrap_tx(wire)
-                                    .map(pallas::crypto::hash::Hasher::<256>::hash)
-                                    .map_err(|reason| {
-                                        Error::Endorser(
-                                            pallas::ledger::traverse::leios::Error::Envelope {
-                                                index: *index,
-                                                reason,
-                                            },
-                                        )
-                                    })?;
+                                let found = strip_envelope(*index, tx.raw_bytes())
+                                    .map(pallas::crypto::hash::Hasher::<256>::hash)?;
 
                                 if found != named {
                                     return Err(Error::Misaligned {
@@ -641,7 +565,7 @@ impl<T: LeiosTransport> LeiosClient<T> {
                                     });
                                 }
 
-                                txs.insert(*index, wire.to_vec());
+                                txs.insert(*index, tx.clone());
                             }
                         }
                     }
@@ -671,20 +595,28 @@ impl<T: LeiosTransport> LeiosClient<T> {
 /// The verification runs before anything is returned, so a caller cannot be
 /// handed a transaction the endorser block did not name or one delivered in the
 /// wrong place.
-fn finish(body: &EndorserBlockBody, wire: Vec<Vec<u8>>) -> Result<Vec<Vec<u8>>, Error> {
+fn finish(body: &EndorserBlockBody, wire: Vec<AnyCbor>) -> Result<Vec<Vec<u8>>, Error> {
     let verified = body.transactions(&wire)?;
     debug!(txs = verified.len(), "endorser block verified whole");
 
     let mut out = Vec::with_capacity(wire.len());
     for (index, w) in wire.iter().enumerate() {
-        let inner = pallas::ledger::traverse::leios::unwrap_tx(w).map_err(|reason| {
-            pallas::ledger::traverse::leios::Error::Envelope { index, reason }
-        })?;
-
-        out.push(inner.to_vec());
+        out.push(strip_envelope(index, w.raw_bytes())?.to_vec());
     }
 
     Ok(out)
+}
+
+/// The transaction inside the byte string envelope a leios-fetch transaction
+/// arrives in.
+fn strip_envelope(index: usize, wire: &[u8]) -> Result<&[u8], Error> {
+    let inner: &ByteSlice =
+        minicbor::decode(wire).map_err(|e| pallas::ledger::traverse::leios::Error::TxDecode {
+            index,
+            reason: e.to_string(),
+        })?;
+
+    Ok(&**inner)
 }
 
 #[cfg(test)]
@@ -941,11 +873,8 @@ mod tests {
         let txs = client.fetch(&announced).await.expect("must fetch whole");
 
         assert_eq!(txs.len(), 425, "the whole endorser block comes back");
-        assert_eq!(
-            txs[0],
-            pallas::ledger::traverse::leios::unwrap_tx(&wire_txs[0]).unwrap(),
-            "the envelopes are stripped"
-        );
+        let first: &ByteSlice = minicbor::decode(&wire_txs[0]).unwrap();
+        assert_eq!(txs[0], first.to_vec(), "the envelopes are stripped");
 
         assert_eq!(
             client.transport.overlaps, 0,
@@ -1130,111 +1059,6 @@ mod tests {
         }
     }
 
-    fn hex_block(text: &str) -> BlockBody {
-        hex::decode(text.trim()).unwrap()
-    }
-
-    /// Slot 376695 of Musashi: certifies an endorser block and announces
-    /// nothing of its own.
-    fn certify_only_block() -> BlockBody {
-        hex_block(include_str!("../../test_data/dijkstra-certify-only.block"))
-    }
-
-    /// Slot 375843 of Musashi: a Dijkstra block that neither certifies nor
-    /// announces, so it settles nothing either way.
-    fn quiet_block() -> BlockBody {
-        hex_block(include_str!("../../test_data/dijkstra-quiet.block"))
-    }
-
-    /// A Conway block, from an era with no endorsement layer.
-    fn pre_leios_block() -> BlockBody {
-        hex_block(include_str!("../../test_data/conway.block"))
-    }
-
-    fn walk(blocks: &[BlockBody]) -> ResumedWalk {
-        resume_walk(blocks.iter().cloned().map(std::sync::Arc::new)).expect("blocks must decode")
-    }
-
-    /// MUST FIRE: reading back to a block that announces gives that
-    /// announcement, so a follower resuming inside an endorsement window knows
-    /// what the next certificate will name.
-    ///
-    /// MUST NOT FIRE: the quiet block nearer the resume point settles nothing
-    /// and must not stop the walk, because stopping there is how a follower
-    /// would decide an announcement was not pending when it was.
-    #[test]
-    fn reading_back_to_an_announcement_recovers_it() {
-        let out = walk(&[quiet_block(), certifying_block()]);
-
-        assert_eq!(out.scanned, 2, "the quiet block does not settle anything");
-        assert_eq!(out.settled_at, Some(2_514_319));
-
-        let waiting = out.state.waiting().expect("an announcement is waiting");
-        assert_eq!(waiting.slot, 2_514_319);
-        assert_eq!(
-            waiting.hash.to_string(),
-            "2baaaf7169be390e43ec401a12f664cc01c39bfe52c7ce7a13818a2d8922eac6"
-        );
-        assert_eq!(waiting.size, 28519);
-    }
-
-    /// MUST FIRE: a block that certifies and announces nothing settles the walk
-    /// as nothing waiting, and the walk stops there.
-    ///
-    /// MUST NOT FIRE: it must not read past that block to the older
-    /// announcement behind it. Doing so would hand the follower an endorser
-    /// block that was already certified and applied, and the next certificate
-    /// would resolve to the wrong payload.
-    #[test]
-    fn a_certificate_settles_the_walk_and_hides_the_announcement_behind_it() {
-        let out = walk(&[certify_only_block(), certifying_block()]);
-
-        assert_eq!(out.state, PendingAnnouncement::Nothing);
-        assert_eq!(out.scanned, 1, "the walk stops at the certificate");
-        assert_eq!(out.settled_at, Some(376_695));
-    }
-
-    /// MUST FIRE: stored blocks that settle nothing give an answer that says so.
-    ///
-    /// MUST NOT FIRE: they must not give "nothing is waiting". The two look the
-    /// same as an absence and mean opposite things: one lets the follower carry
-    /// on and lose a whole endorser block at the next certificate, the other
-    /// makes it wait until an announcement tells it where it stands. This is
-    /// the case the whole reconstruction exists for.
-    #[test]
-    fn a_log_that_settles_nothing_says_so_rather_than_saying_nothing_is_waiting() {
-        let out = walk(&[quiet_block(), quiet_block(), quiet_block()]);
-
-        assert_eq!(out.state, PendingAnnouncement::Unknown);
-        assert_ne!(
-            out.state,
-            PendingAnnouncement::Nothing,
-            "not knowing must not be reported as knowing"
-        );
-        assert_eq!(out.scanned, 3);
-        assert_eq!(out.settled_at, None);
-
-        // An empty log is the same answer, reached with nothing read at all.
-        let empty = walk(&[]);
-        assert_eq!(empty.state, PendingAnnouncement::Unknown);
-        assert_eq!(empty.scanned, 0);
-    }
-
-    /// MUST FIRE: an era with no endorsement layer settles the walk as nothing
-    /// waiting, because an announcement cannot cross forward into it.
-    ///
-    /// MUST NOT FIRE: a follower resuming before the hard fork must not be told
-    /// the walk cannot tell. That refusal would block every restart on the
-    /// whole pre-Leios part of the chain, which is most of it.
-    #[test]
-    fn an_era_with_no_endorsement_layer_settles_the_walk() {
-        let out = walk(&[quiet_block(), pre_leios_block()]);
-
-        assert_eq!(out.state, PendingAnnouncement::Nothing);
-        assert_eq!(out.scanned, 2);
-        assert!(out.settled_at.is_some());
-    }
-
     fn certifying_block() -> BlockBody {
         hex::decode(include_str!("../../test_data/dijkstra-certifying.block").trim()).unwrap()
     }
@@ -1248,9 +1072,8 @@ mod tests {
             .split_whitespace()
             .map(|l| {
                 let wire = hex::decode(l).unwrap();
-                pallas::ledger::traverse::leios::unwrap_tx(&wire)
-                    .unwrap()
-                    .to_vec()
+                let inner: &ByteSlice = minicbor::decode(&wire).unwrap();
+                inner.to_vec()
             })
             .collect()
     }
@@ -1307,6 +1130,30 @@ mod tests {
 
         assert!(pending.is_empty());
         assert!(pending.refuse_undelivered().is_ok());
+    }
+
+    /// MUST FIRE: a block that carries transactions of its own is refused when
+    /// a payload is delivered at its slot, since inlining would replace them.
+    #[test]
+    fn a_block_with_transactions_of_its_own_is_not_inlined() {
+        let plain = plain_block();
+        let decoded = MultiEraBlock::decode(&plain).unwrap();
+        let (slot, own) = (decoded.slot(), decoded.tx_count());
+        assert!(own > 0, "fixture precondition");
+
+        let mut pending = PendingPayloads::default();
+        pending.expect(slot);
+        pending.deliver(slot, payload());
+
+        match pending.apply(vec![plain.clone()]) {
+            Err(Error::CertifiesAndCarries {
+                slot: refused,
+                count,
+            }) => {
+                assert_eq!((refused, count), (slot, own));
+            }
+            other => panic!("wrong answer: {other:?}"),
+        }
     }
 
     /// MUST FIRE: a payload keyed to a slot no block in the batch carries is
