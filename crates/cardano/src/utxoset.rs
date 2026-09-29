@@ -774,15 +774,13 @@ mod tests {
             .split_whitespace()
             .map(|line| {
                 let wire = hex::decode(line).unwrap();
-                pallas::ledger::traverse::leios::unwrap_tx(&wire)
-                    .unwrap()
-                    .to_vec()
+                let inner: &pallas::codec::minicbor::bytes::ByteSlice =
+                    pallas::codec::minicbor::decode(&wire).unwrap();
+                inner.to_vec()
             })
             .collect();
 
-        let borrowed: Vec<&[u8]> = txs.iter().map(|t| t.as_slice()).collect();
-
-        pallas::ledger::traverse::leios::resolve_certified_block(&block, &borrowed).unwrap()
+        crate::pallas_extras::inline_endorser_transactions(&block, &txs).unwrap()
     }
 
     fn forward_ref_txoref() -> TxoRef {

@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use pallas::codec::utils::AnyCbor;
 use pallas::crypto::hash::Hash;
 use pallas::ledger::primitives::dijkstra::EbAnnouncement;
 use pallas::ledger::traverse::cert::BlsKeySlot;
@@ -294,7 +295,10 @@ fn every_endorser_block_verifies_against_its_announcement() {
             f.name
         );
 
-        let wire = read_wire_txs(txs_file);
+        let wire: Vec<AnyCbor> = read_wire_txs(txs_file)
+            .into_iter()
+            .map(AnyCbor::from_raw_bytes)
+            .collect();
         let txs = body
             .transactions(&wire)
             .unwrap_or_else(|e| panic!("{} transactions do not verify: {e}", f.name));
