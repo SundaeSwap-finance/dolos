@@ -1,4 +1,6 @@
 use dolos_core::BlockSlot;
+use pallas::codec::minicbor;
+use pallas::codec::utils::MaybeIndefArray;
 use pallas::crypto::hash::Hash;
 use pallas::ledger::addresses::{
     Address, Network, ShelleyAddress, ShelleyDelegationPart, StakeAddress, StakePayload,
@@ -7,6 +9,7 @@ use pallas::ledger::primitives::alonzo::MoveInstantaneousReward;
 use pallas::ledger::primitives::conway::{
     CostModels, DRep, DRepVotingThresholds, PoolVotingThresholds,
 };
+use pallas::ledger::primitives::dijkstra;
 use pallas::ledger::primitives::{Epoch, ExUnitPrices, ExUnits, Nonce, NonceVariant};
 use pallas::ledger::primitives::{PoolMetadata, RationalNumber, Relay, StakeCredential};
 use pallas::ledger::traverse::cert::BlsKeySlot;
@@ -506,6 +509,24 @@ pub fn for_each_applied_tx<E>(
     }
 
     f(tx)
+}
+
+/// A Dijkstra block with its transaction list replaced by `txs`, each a
+/// transaction without its leios-fetch byte string envelope.
+pub fn inline_endorser_transactions(
+    block_cbor: &[u8],
+    txs: &[Vec<u8>],
+) -> Result<Vec<u8>, minicbor::decode::Error> {
+    let (era, mut block): (u16, dijkstra::Block) = minicbor::decode(block_cbor)?;
+
+    let replacement = txs
+        .iter()
+        .map(|tx| minicbor::decode::<dijkstra::MempoolTransaction>(tx).map(Into::into))
+        .collect::<Result<_, _>>()?;
+
+    block.block_body.transactions = MaybeIndefArray::Def(replacement);
+
+    Ok(minicbor::to_vec((era, block)).expect("write to a vec"))
 }
 
 #[cfg(test)]
