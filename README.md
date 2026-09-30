@@ -57,7 +57,7 @@ Branches on this fork may be rewritten at any time. A published tag is never
 moved and never deleted, and the commit it names stays reachable. Consumers pin
 a tag or a commit, never a branch.
 
-Build it as upstream Dolos is built, with a rust toolchain matching
+Build it as upstream Dolos is built, with Rust 1.97 or newer, matching
 `rust-toolchain.toml`:
 
 ```sh

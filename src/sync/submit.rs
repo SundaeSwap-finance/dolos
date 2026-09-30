@@ -91,20 +91,21 @@ impl Worker {
         if stage.mempool.has_pending() {
             debug!(request, "found txs to fulfill request");
 
-            // we have txs available so we process the work unit as a new one. We don't
-            // acknowledge anything because that already happened on the initial attempt to
-            // fulfill the request.
+            // we have txs available so we process the work unit as a new one.
+            // We don't acknowledge anything because that already
+            // happened on the initial attempt to fulfill the
+            // request.
             Ok(WorkSchedule::Unit(Request::TxIds(0, request as u16)))
         } else {
             debug!(request, "still not enough txs to fulfill request");
 
             // we wait a few secs to avoid turning this stage into a hot loop.
-            // TODO: we need to watch the mempool and abort the wait if there's a change in
-            // the list of available txs.
+            // TODO: we need to watch the mempool and abort the wait if there's
+            // a change in the list of available txs.
             tokio::time::sleep(Duration::from_secs(10)).await;
 
-            // we store the request again so that the next schedule knows we're still
-            // waiting for new transactions.
+            // we store the request again so that the next schedule knows we're
+            // still waiting for new transactions.
             self.unfulfilled_request = Some(request);
 
             Ok(WorkSchedule::Idle)
@@ -237,6 +238,109 @@ impl Stage {
             peer_address,
             network_magic,
             mempool,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dolos_core::builtin::EphemeralMempool;
+    use dolos_redb3::mempool::RedbMempool;
+    use gasket::framework::Worker as _;
+    use pallas::network::{facades::PeerServer, miniprotocols::txsubmission::Reply};
+    use tokio::net::TcpListener;
+
+    mod capture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/musashi_submission.rs"
+        ));
+    }
+
+    #[tokio::test]
+    async fn musashi_recording_peer_receives_original_signed_bytes() {
+        for persistent in [false, true] {
+            for alternate in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let db_path = dir.path().join("mempool.redb");
+                let store = if persistent {
+                    MempoolBackend::Redb(RedbMempool::open(&db_path, &Default::default()).unwrap())
+                } else {
+                    MempoolBackend::Ephemeral(EphemeralMempool::new())
+                };
+                let mut expected = vec![];
+                for settings in [false, true] {
+                    let tx = capture::assert_submission(settings, alternate);
+                    expected.push((tx.hash.to_vec(), tx.payload.1.clone()));
+                    store.receive(tx).unwrap();
+                }
+                // Exercise durable encoding and a real reopen, not only Clone.
+                let store = if persistent {
+                    drop(store);
+                    MempoolBackend::Redb(RedbMempool::open(&db_path, &Default::default()).unwrap())
+                } else {
+                    store
+                };
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let mut stage = Stage::new(listener.local_addr().unwrap().to_string(), 164, store);
+                let server = async {
+                    let mut peer = PeerServer::accept(&listener, 164).await.unwrap();
+                    let server = peer.txsubmission();
+                    server.wait_for_init().await.unwrap();
+                    server
+                        .acknowledge_and_request_tx_ids(false, 0, 2)
+                        .await
+                        .unwrap();
+                    let Reply::TxIds(ids) = server.receive_next_reply().await.unwrap() else {
+                        panic!("expected IDs")
+                    };
+                    assert_eq!(ids.len(), 2);
+                    for (TxIdAndSize(EraTxId(era, hash), size), (expected_hash, bytes)) in
+                        ids.iter().zip(&expected)
+                    {
+                        assert_eq!(*era, 7, "node-to-node Dijkstra tag");
+                        assert_eq!(hash, expected_hash);
+                        assert_eq!(*size as usize, bytes.len());
+                    }
+                    server
+                        .request_txs(ids.into_iter().map(|x| x.0).collect())
+                        .await
+                        .unwrap();
+                    let Reply::Txs(bodies) = server.receive_next_reply().await.unwrap() else {
+                        panic!("expected bodies")
+                    };
+                    assert_eq!(bodies.len(), 2);
+                    for (EraTxBody(era, bytes), (hash, original)) in bodies.iter().zip(&expected) {
+                        assert_eq!(*era, 7);
+                        assert_eq!(bytes, original);
+                        let tx = pallas::ledger::traverse::MultiEraTx::decode_for_era(
+                            pallas::ledger::traverse::Era::Dijkstra,
+                            bytes,
+                        )
+                        .unwrap();
+                        assert_eq!(tx.hash().to_vec(), *hash);
+                    }
+                };
+                let client = async {
+                    let mut worker =
+                        <Worker as gasket::framework::Worker<Stage>>::bootstrap(&stage)
+                            .await
+                            .unwrap();
+                    for _ in 0..2 {
+                        let WorkSchedule::Unit(request) = worker.schedule_next().await.unwrap()
+                        else {
+                            panic!("expected request")
+                        };
+                        worker.execute(&request, &mut stage).await.unwrap();
+                    }
+                };
+                tokio::time::timeout(Duration::from_secs(20), async {
+                    tokio::join!(server, client);
+                })
+                .await
+                .unwrap();
+            }
         }
     }
 }

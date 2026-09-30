@@ -2,6 +2,7 @@
 name = "dolos-fjall"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 dolos-core = { path = "../core" }

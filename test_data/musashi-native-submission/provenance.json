@@ -1,0 +1,124 @@
+{
+  "network": "Musashi",
+  "network_magic": 164,
+  "era": "Dijkstra",
+  "historical_node_revision": "unknown",
+  "historical_evaluator_revision": "unknown",
+  "files": {
+    "control.mempool.hex": {
+      "source": "test_data/musashi-submission/transactions/control.mempool.cbor",
+      "revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+      "sha256_decoded": "99208f4643d309383001aaa406d5c6cd7cd8fde8be030aa538a859f69eb85672",
+      "representation": "captured mempool"
+    },
+    "control.block.hex": {
+      "source": "test_data/musashi-submission/transactions/control.block.cbor",
+      "revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+      "sha256_decoded": "56e36d751c7c28b0420a3159706a203dcd9d0cc419f6695c895b8308a18cc7b8",
+      "representation": "extracted block transaction"
+    },
+    "settings-registration.mempool.hex": {
+      "source": "test_data/musashi-submission/transactions/settings-registration.mempool.cbor",
+      "revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+      "sha256_decoded": "2242087ec49516077a202bee6c139ebfc7b6f54fe1eb5ed8731a8e291e1ecad7",
+      "representation": "captured mempool"
+    },
+    "settings-registration.block.hex": {
+      "source": "test_data/musashi-submission/transactions/settings-registration.block.cbor",
+      "revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+      "sha256_decoded": "25f5f89b4734848bc708f799108f9fe9b8174cb7fe7fd6e6d71eb577b4de28fd",
+      "representation": "extracted block transaction"
+    },
+    "control.input.hex": {
+      "source": "test_data/musashi-phase1/control.input.hex",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256_decoded": "36f6bd747f2852f369c622f043c006bbae1998678eba089b898461f0c6f61be8"
+    },
+    "1401345.block": {
+      "source": "test_data/musashi-registration/blocks/1401345.block",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256_decoded": "3fd9508c06aeb45c8bd55fff119356ce48b268da9bd27d452f87a5f952deda44"
+    },
+    "1401365.block": {
+      "source": "test_data/musashi-registration/blocks/1401365.block",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256_decoded": "fb6d1e959d5f64aff41f8c932baa4a94050d14b74d62c97558e41b70de84d0b4"
+    },
+    "registration-epoch64-parameters.json": {
+      "source": "test_data/musashi-phase1/registration-epoch64-parameters.json",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256": "56dae0ae1d97b172225555804c621a1dc74ff58f5f4963b9118add52592acea6"
+    },
+    "registration-dijkstra-genesis.json": {
+      "source": "test_data/musashi-phase1/registration-dijkstra-genesis.json",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256": "e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be"
+    },
+    "registration-certificate-state.json": {
+      "source": "test_data/musashi-phase1/registration-certificate-state.json",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256": "d28a6c537d0e1a07cfc091ec2bcfda341974fcc8411ba1280726edf6707fae42"
+    },
+    "registration-provenance.json": {
+      "source": "test_data/musashi-phase1/registration-provenance.json",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256": "9e1fdfb5472e5c1f6aae49e86c433adc0512b842e2a1981cad6b53059828b399",
+      "source_sha256": "8f815dbd09c5612c07f8f498c3e8e27fbf0cad2a165c304cc1ee82186bdc38b1",
+      "adaptation": "Local planning labels removed or replaced with descriptive historical scope; source report context clarified. Capture identities, values and source checksums unchanged."
+    },
+    "control-provenance.json": {
+      "source": "test_data/musashi-phase1/provenance.json",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256": "92b5bfad85072f586f8590cf2b9d67533b324541441dc9adb6d33ee11cf19049",
+      "source_sha256": "f3821dad4021462348300313f9e90f552cfb9f2b9bc036355e12e7c271f1e712",
+      "adaptation": "Local planning labels removed or replaced with descriptive historical scope; source report context clarified. Capture identities, values and source checksums unchanged."
+    },
+    "byron-genesis.json": {
+      "source": "test_data/musashi-submission/context/byron-genesis.json",
+      "revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+      "sha256": "4620a2a14b26731467c954263eb2af9b86e5f5248aae247f1c183ca0368dde65"
+    },
+    "shelley-genesis.json": {
+      "source": "test_data/musashi-submission/context/shelley-genesis.json",
+      "revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+      "sha256": "da8508afc546a0b1824d93629a7a5fc8c0898d85095c2cf1b25730eb99d5a151"
+    },
+    "alonzo-genesis.json": {
+      "source": "test_data/musashi-submission/context/alonzo-genesis.json",
+      "revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+      "sha256": "23bf365cae730137ad6868787f20ef4f58e446d22617d7b824f1c75695c760b5"
+    },
+    "conway-genesis.json": {
+      "source": "test_data/musashi-submission/context/conway-genesis.json",
+      "revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+      "sha256": "51e9d92f09ea79e61811983b4b1e299926a61b352c3313aaebc7c287169ae2f0"
+    },
+    "conway-control.hex": {
+      "source": "test_data/conway3.tx",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "representation": "original Pallas Conway transaction; input/context reconstructed from its existing successful_mainnet_tx test, not independently captured here",
+      "sha256_decoded": "66b8ff1857f50668d8de29e20c5a6ab99a8dc1be5e2fbeb1e85821ae1fd8096b",
+      "network": "mainnet (Pallas fixture label)",
+      "era": "Conway",
+      "capture_tool_revision": "unknown",
+      "historical_state": "reconstructed test input, synthetic active context; not a historical node-state capture"
+    },
+    "registration-certificate-history.json": {
+      "source": "test_data/musashi-phase1/registration-certificate-history.json",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256": "1db1fde7ef816a3d38e93bb37981417d6de42e0d48afe197c572cc6d31cfa6c3"
+    },
+    "registration-parameter-history.json": {
+      "source": "test_data/musashi-phase1/registration-parameter-history.json",
+      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+      "sha256": "fb209022f61473b423e6973218c2d64bae7f9995ce65fd08b756c792af45b685"
+    }
+  },
+  "rules": {
+    "mempool_wrapper_source": "pallas-primitives/src/dijkstra/defs.cddl",
+    "pallas_revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+    "source_sha256": "5dcfbe00dd3a46882166a8e2cb3f6ce683da24d0dffdff3c1133bb187e08f1b7",
+    "accepted": "[body,witnesses,auxiliary/null] or [body,witnesses,true,auxiliary/null]",
+    "rejected_for_relay": "block-only [body,witnesses,auxiliary/null,success]"
+  }
+}

@@ -1,0 +1,24 @@
+    Finished `test` profile [unoptimized] target(s) in 0.69s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/musashi_submission.rs (<fixed-build>/debug/deps/musashi_submission-e89f0d9c6963e495)
+
+running 16 tests
+test accepted_validity_third_wrapper_preserves_bytes_and_false_rejects ... ok
+test block_only_envelopes_are_evidence_not_relay_payloads ... ok
+test captured_alternate_mempool_wrappers_submission ... ok
+test captured_control_submission ... ok
+test captured_settings_submission ... ok
+test captured_validity_third_relay_era ... ok
+test earlier_conway_submission_still_accepts_original_signed_transaction ... ok
+test historical_native_evaluation_keeps_full_parameters_and_budgets ... ok
+test indefinite_native_envelopes_preserve_bytes_but_extra_fields_reject ... ok
+test original_signatures_are_verified ... ok
+test pending_registration_reserves_credential_without_changing_ledger_state ... ok
+test registered_credential_rejects_and_validation_does_not_commit_state ... ok
+test scripted_subtransaction_is_explicitly_outside_native_evaluation ... ok
+test unknown_protocols_and_malformed_envelopes_reject ... ok
+test unsupported_unregistration_rejects_explicitly ... ok
+test v4_reference_script_is_rejected_by_native_evaluation ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.01s

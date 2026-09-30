@@ -1,16 +1,10 @@
-use dolos_core::config::RootConfig;
-use itertools::*;
-use miette::{Context, IntoDiagnostic};
-use pallas::{
-    ledger::traverse::{Era, MultiEraInput, MultiEraOutput},
-    ledger::validate::utils::{CertState, Environment as ValidationContext, UTxOs},
-};
-use std::{borrow::Cow, path::PathBuf};
-
 use dolos::{
     adapters::DomainAdapter,
-    core::{Domain, EraCbor, StateStore as _, TxoRef},
+    core::{ChainPoint, Domain, MempoolAwareUtxoStore},
 };
+use dolos_core::config::RootConfig;
+use miette::{Context, IntoDiagnostic};
+use std::path::PathBuf;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -44,66 +38,41 @@ pub async fn run(config: &RootConfig, args: &Args) -> miette::Result<()> {
         .into_diagnostic()
         .context("decoding hex content from file")?;
 
-    let era = Era::try_from(args.era).unwrap();
-
-    let tx = pallas::ledger::traverse::MultiEraTx::decode_for_era(era, &cbor)
-        .into_diagnostic()
-        .context("decoding tx cbor")?;
-
-    let refs = tx
-        .consumes()
-        .iter()
-        .map(|utxo| TxoRef(*utxo.hash(), utxo.index() as u32))
-        .collect_vec();
-
-    let resolved = domain
-        .state()
-        .get_utxos(refs)
-        .into_diagnostic()
-        .context("resolving utxo")?;
-
-    let mut utxos2 = UTxOs::new();
-
-    for (ref_, body) in resolved.iter() {
-        let EraCbor(era, cbor) = body.as_ref();
-
-        let era = (*era)
-            .try_into()
-            .into_diagnostic()
-            .context("era out of range")?;
-
-        let txin = pallas::ledger::primitives::byron::TxIn::Variant0(
-            pallas::codec::utils::CborWrap((ref_.0, ref_.1)),
-        );
-
-        let key = MultiEraInput::Byron(
-            <Box<Cow<'_, pallas::ledger::primitives::byron::TxIn>>>::from(Cow::Owned(txin)),
-        );
-
-        let value = MultiEraOutput::decode(era, cbor)
-            .into_diagnostic()
-            .context("decoding utxo")?;
-
-        utxos2.insert(key, value);
-    }
-
-    let pparams =
-        dolos_cardano::load_effective_pparams::<DomainAdapter>(domain.state()).into_diagnostic()?;
-
-    let pparams = dolos_cardano::utils::pparams_to_pallas(&pparams);
-
-    let context = ValidationContext {
-        block_slot: args.block_slot,
-        prot_magic: config.chain.magic() as u32,
-        network_id: args.network_id,
-        prot_params: pparams,
-        acnt: None,
+    let genesis = domain.genesis();
+    let epoch = dolos_cardano::load_epoch::<DomainAdapter>(domain.state()).into_diagnostic()?;
+    let era = dolos_cardano::validate::submission_era(
+        epoch
+            .pparams
+            .unwrap_live()
+            .ensure_protocol_version()
+            .into_diagnostic()?,
+    )
+    .into_diagnostic()?;
+    miette::ensure!(
+        u16::from(era) == args.era,
+        "requested era differs from active chain era"
+    );
+    miette::ensure!(
+        epoch.number == args.epoch,
+        "requested epoch differs from active chain state"
+    );
+    let network = match genesis.shelley.network_id.as_deref() {
+        Some("Mainnet") => 1,
+        Some("Testnet") => 0,
+        _ => return Err(miette::miette!("genesis network id is missing")),
     };
-
-    let mut cert_state = CertState::default();
-
-    pallas::ledger::validate::phase1::validate_tx(&tx, 0, &context, &utxos2, &mut cert_state)
-        .unwrap();
-
+    miette::ensure!(
+        network == args.network_id,
+        "requested network differs from chain genesis"
+    );
+    let utxos = MempoolAwareUtxoStore::<DomainAdapter>::new(domain.state(), domain.mempool());
+    dolos_cardano::validate::validate_tx(
+        &cbor,
+        &utxos,
+        Some(ChainPoint::Slot(args.block_slot)),
+        &genesis,
+    )
+    .into_diagnostic()
+    .context("validating and evaluating transaction")?;
     Ok(())
 }

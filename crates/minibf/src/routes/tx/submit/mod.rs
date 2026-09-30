@@ -69,7 +69,32 @@ mod tests {
 
     #[tokio::test]
     async fn tx_submit_happy_path() {
-        let app = TestApp::new();
+        use dolos_cardano::{model::PParamValue, SingletonEntity};
+        use dolos_core::{StateStore, StateWriter};
+        use dolos_testing::{synthetic::SyntheticBlockConfig, toy_domain::ToyDomain};
+
+        // This fixture constructs a Conway transaction. The shared preview
+        // harness starts at protocol 6, so give submission its matching active
+        // Conway context rather than relying on shape-based era inference.
+        let app = TestApp::new_with_cfg_and_setup(
+            SyntheticBlockConfig {
+                block_count: 5,
+                txs_per_block: 3,
+                ..Default::default()
+            },
+            |domain, _| {
+                let mut epoch = dolos_cardano::load_epoch::<ToyDomain>(domain.state()).unwrap();
+                epoch
+                    .pparams
+                    .unwrap_live_mut()
+                    .set(PParamValue::ProtocolVersion((9, 0)));
+                let writer = domain.state().start_writer().unwrap();
+                writer
+                    .write_entity_typed(&dolos_cardano::model::EpochState::singleton_key(), &epoch)
+                    .unwrap();
+                writer.commit().unwrap();
+            },
+        );
         let (status, body) = app
             .post_bytes(
                 "/tx/submit",
@@ -81,6 +106,19 @@ mod tests {
         let hash = String::from_utf8(body).expect("hash must be utf-8");
         assert_eq!(hash.len(), 64);
         assert!(hex::decode(hash).is_ok());
+    }
+
+    #[tokio::test]
+    async fn tx_submit_rejects_transaction_from_later_era() {
+        // Valid Conway bytes must not select Conway on the protocol-6 harness.
+        let app = TestApp::new();
+        assert_status(
+            &app,
+            "application/cbor",
+            app.vectors().tx_cbor.clone(),
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
     }
 
     #[tokio::test]

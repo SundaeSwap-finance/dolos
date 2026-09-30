@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- **Breaking:** Rust 1.97 is required by the pinned native Dijkstra evaluator. The Cardano `evaluate_tx` helper now also requires genesis context.
+- Select submission and evaluation eras from active protocol parameters; preserve signed transaction bytes through native Musashi validation and relay. Native evaluation remains limited to protocol 12.0 top-level Plutus V3 Reg reference scripts.
+
 ## [2.0.0-alpha.0] - 2026-09-11
 
 ### 🚀 Features
