@@ -79,7 +79,7 @@ pub fn cert_as_pool_registration(cert: &MultiEraCert) -> Option<MultiEraPoolRegi
             pool_owners: params.pool_owners.to_vec(),
             relays: params.relays.to_vec(),
             pool_metadata: params.pool_metadata.cloned(),
-            bls_key: params.bls_key.into(),
+            bls_key: cert.bls_key().into(),
         }),
         _ => None,
     }
