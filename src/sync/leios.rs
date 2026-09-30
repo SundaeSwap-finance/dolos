@@ -100,6 +100,7 @@ pub enum Error {
         match reason {
             DisconnectReason::Closed => "with no error reported",
             DisconnectReason::Errored => "on a connection error",
+            _ => "on a connection error",
         }
     )]
     Disconnected {
