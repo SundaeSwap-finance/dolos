@@ -1,0 +1,173 @@
+{
+  "date": "2026-09-30",
+  "status": "Focused submission/evaluation and relay regressions pass; existing workspace verification failures remain",
+  "dolos_base": "abe2642391006e7e5439a00493d41db5da280a02",
+  "pallas_pin": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+  "amaru_pin": "e122ffb2018196ba9c57f42b70b94ada603d3fbc",
+  "legacy_evaluator": "registry amaru-uplc 0.1.0",
+  "baseline": {
+    "command": "python3 test_data/musashi-native-submission/evidence/reproduce-baseline.py",
+    "exit_code": 101,
+    "runtime_results": {
+      "passed": 0,
+      "failed": 4,
+      "ignored": 0
+    },
+    "failure_reasons": [
+      "original native three-element captures fail shape decoding",
+      "accepted validity-third control stores Conway era 7 instead of Dijkstra era 8; alternate-wrapper test fails the same era assertion"
+    ],
+    "target": "target/musashi-native-submission-baseline",
+    "log": "baseline.log"
+  },
+  "focused": [
+    {
+      "command": "cargo +1.97.0 test --offline --locked --test musashi_submission",
+      "log": "fixed.log",
+      "exit_code": 0,
+      "results": {
+        "passed": 16,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "command": "cargo +1.97.0 test --offline --locked --lib musashi_recording_peer_receives_original_signed_bytes",
+      "log": "relay.log",
+      "exit_code": 0,
+      "results": {
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    }
+  ],
+  "gate_results": {
+    "environment": {
+      "CARGO_TARGET_DIR": "target/musashi-native-submission-fixed",
+      "CARGO_PROFILE_DEV_DEBUG": "0",
+      "RUST_TEST_THREADS": "1",
+      "CARGO_BUILD_JOBS": "2"
+    },
+    "checks": [
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "+1.97.0",
+          "clippy",
+          "--workspace",
+          "--all-targets",
+          "--all-features",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exit_code": 101
+      },
+      {
+        "name": "build",
+        "command": [
+          "cargo",
+          "+1.97.0",
+          "build",
+          "--workspace",
+          "--all-targets",
+          "--all-features"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "tests-default",
+        "command": [
+          "cargo",
+          "+1.97.0",
+          "test",
+          "--workspace",
+          "--all-targets",
+          "--no-fail-fast"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "tests-all-features",
+        "command": [
+          "cargo",
+          "+1.97.0",
+          "test",
+          "--workspace",
+          "--all-features",
+          "--exclude",
+          "dolos-minibf",
+          "--exclude",
+          "dolos-minikupo",
+          "--exclude",
+          "dolos-trp",
+          "--no-fail-fast"
+        ],
+        "exit_code": 101
+      }
+    ]
+  },
+  "default_test_totals": {
+    "passed": 1792,
+    "failed": 0,
+    "ignored": 33
+  },
+  "all_features_test_totals": {
+    "passed": 1224,
+    "failed": 14,
+    "ignored": 38
+  },
+  "known_failures": {
+    "clippy": {
+      "locations": 19,
+      "files_changed_by_submission_fix": 0,
+      "first_failure": "crates/core/src/crawl.rs:50; cloned_ref_to_slice_refs; also reproduced on baseline"
+    },
+    "strict_fixtures": {
+      "query_failures": 2,
+      "pipeline_failures": 12,
+      "baseline_reproduced": true,
+      "left": "Epoch(0)",
+      "right_epochs": [
+        1,
+        9,
+        11
+      ]
+    },
+    "dependency_future_warning": "proc-macro-error2 2.0.1"
+  },
+  "format": {
+    "changed_files": "pass, nightly-2026-09-04",
+    "workspace": "86 unchanged files differ with installed nightly-2026-09-04",
+    "ci_formatter": "nightly-2026-08-27 not run",
+    "diff_check": "pass"
+  },
+  "capture_results": {
+    "settings_transaction": "da910a9bfbe657724d64b505099010dd47f86fb573aa1d20b4da0367163e94c6",
+    "control_transaction": "f4ed3784097149431498b0df6ceaf13b3a531df88838d1f8f39df1269eb54b20",
+    "settings_memory": 18485,
+    "settings_cpu": 4805428,
+    "v3_coefficients": 350,
+    "native_protocol": [
+      12,
+      0
+    ],
+    "stored_era": 8,
+    "wire_era": 7,
+    "payloads_preserved": true,
+    "signatures_verified": true,
+    "registration_state_committed": false,
+    "relay_backends": [
+      "Ephemeral",
+      "Redb with reopen"
+    ],
+    "accepted_wrappers": [
+      "original native mempool",
+      "derived validity-third/true mempool"
+    ],
+    "block_only_envelope": "rejected for submission/evaluation; retained as body/witness identity evidence"
+  },
+  "evidence_policy": "Fixtures, provenance, reproduction scripts and focused before/after logs are retained. Log checkout/build paths are normalized to placeholders; commands use descriptive target directory names. Full workspace output is not included."
+}

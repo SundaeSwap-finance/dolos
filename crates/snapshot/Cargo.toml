@@ -3,6 +3,7 @@ name = "dolos-snapshot"
 description = "The io.txpipe.dolos.cardano Stelae profile"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 # This crate is the *profile* half of the Stelae boundary: it depends on the
 # stelae crates and on `dolos-*`, never the other way around — structural now

@@ -1,0 +1,171 @@
+{
+  "fixture_id": "musashi-native-phase1-registration-and-key-batches",
+  "date": "2026-09-29",
+  "baseline": "1af163ecfa94515477c24f97180dc1aaf849023c",
+  "ledger_revision": "1587f21a7d1306dc590c2749a5c66232ef66aad0",
+  "historical_node_version": null,
+  "historical_node_version_status": "unknown; specification revision is not a node build identity",
+  "network": {
+    "name": "Musashi",
+    "magic": 164,
+    "era": "Dijkstra",
+    "protocol_version": [
+      12,
+      0
+    ]
+  },
+  "capture_provenance": "../musashi-registration/provenance.json",
+  "input_provenance": "../musashi-registration/native-inputs-provenance.json",
+  "certificate_witness_provenance": "../musashi-registration/certificate-witnesses-provenance.json",
+  "script_provenance": "../musashi-registration/registration-scripts-provenance.json",
+  "retained_source_revision": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+  "registration": {
+    "transaction_id": "da910a9bfbe657724d64b505099010dd47f86fb573aa1d20b4da0367163e94c6",
+    "slot": 1401365,
+    "transaction_index": 0,
+    "source_block": "../musashi-registration/blocks/1401365.block",
+    "producer_block": "../musashi-registration/blocks/1401345.block",
+    "input": "3171608e4d1b0812131e64e40f670ab7cdeef7f8e0cbad096b0d15dc62b76ba9#1",
+    "reference": "3171608e4d1b0812131e64e40f670ab7cdeef7f8e0cbad096b0d15dc62b76ba9#0",
+    "input_eras": "original native Dijkstra",
+    "fee": 233167,
+    "mempool_size": 427,
+    "deposit": 2000000,
+    "script_integrity_hash": "c4aebcfa833c9d1cd63d4109435cc98eda5114912ae3c68724d94a0fccc1876d",
+    "cost_model_length": 350,
+    "certificate_prestate": "explicit Unregistered from registration-certificate-state.json; missing entries reject as unknown"
+  },
+  "parameter_evidence": {
+    "epoch64": "unchanged Dolos API capture; no independent node-state comparison",
+    "reference_parameters": "captured Dijkstra genesis; no proposal changed these fields in the scanned archive",
+    "archive_scan": "63158 canonical blocks, 69466 frames, slots 12..1404987; cost-model and hard-fork proposals only",
+    "trust_boundary": "Dolos expanded archive with header continuity; not consensus replay or independent verification of all endorser commitments"
+  },
+  "synthetic_evidence": {
+    "modules": [
+      "dijkstra_registration_tests.rs",
+      "dijkstra_batch_tests.rs"
+    ],
+    "key_batches": "deterministic test keys, synthetic UTxOs and signed bodies; not captured network acceptance",
+    "boundaries": "state/deposit/author, scripts/redeemers/integrity, budgets/fees/collateral, per-level signatures/guards/validity, aggregate balance/size and original/evolving input membership"
+  },
+  "captured_unsupported_batch": {
+    "file": "../dijkstra-subtx.tx",
+    "transaction_id": "74e2116ca6e0c809f156aa062a9d4ee8b156322618846f1bdea5d9ad7a206a12",
+    "reason": "script spending in subtransaction; top references/collateral; no original UTxO set packaged for native phase-one replay",
+    "positive_acceptance_claim": false
+  },
+  "excluded": [
+    "phase-two execution and native context translation",
+    "post-bootstrap V3 deposit/refund translation",
+    "submission, pin changes and workaround removal",
+    "script/certificate subtransactions",
+    "account/governance state",
+    "all certificate forms except top-level Reg",
+    "script guards, script spending, mint, withdrawals, datums, witness-carried Plutus",
+    "Plutus upper-bound forecast state",
+    "bootstrap/pointer/script outputs and multiasset"
+  ],
+  "checksums_sha256": {
+    "registration-dijkstra-genesis.json": "e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be",
+    "registration-certificate-state.json": "d28a6c537d0e1a07cfc091ec2bcfda341974fcc8411ba1280726edf6707fae42",
+    "registration-fixed-validation.txt": "93db6987fbd88e7eba3ffa4f7ed6acd8cbde2b6b50fa8107b62e53126d9cee94",
+    "registration-shelley-genesis.json": "da8508afc546a0b1824d93629a7a5fc8c0898d85095c2cf1b25730eb99d5a151",
+    "registration-certificate-history.json": "1db1fde7ef816a3d38e93bb37981417d6de42e0d48afe197c572cc6d31cfa6c3",
+    "registration-parameter-history.json": "fb209022f61473b423e6973218c2d64bae7f9995ce65fd08b756c792af45b685",
+    "registration-baseline-preparation.patch": "0e87c85b8c4dbbd76f06b89957881e6aae2eab282dbf5e65b14496043a74121b",
+    "registration-epoch64-parameters.json": "56dae0ae1d97b172225555804c621a1dc74ff58f5f4963b9118add52592acea6",
+    "registration-baseline-validation.txt": "64d9a2394b7cec19f65653c965034b7c886baeaf454d6199c215e4b9b808940e",
+    "registration-parameter-history-scanner.rs": "8af1670cb73a6adddae6cb0fe56bca3123233f5be814f948bcc0ccb442108a3d",
+    "registration-verification.json": "5f1bcff91bf72737dbc1c345b9c5450158550a55f345c9cf9fdca22f10fda9d9"
+  },
+  "ledger_sources": [
+    {
+      "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/PParams.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/PParams.hs",
+      "sha256": "2fdce66dc4a053b1307e72cef5b412cb6d53ca299fc8984063b32878c51bf462"
+    },
+    {
+      "path": "eras/babbage/impl/src/Cardano/Ledger/Babbage/Rules/Utxow.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/babbage/impl/src/Cardano/Ledger/Babbage/Rules/Utxow.hs",
+      "sha256": "61532124df1e3bda00115bba9fc4e26388fb9da99be50a6979a0a36d0e64b25c"
+    },
+    {
+      "path": "eras/alonzo/impl/src/Cardano/Ledger/Alonzo/TxBody.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/TxBody.hs",
+      "sha256": "cfb94886a6325ab27dbaaadc70f5566fedb03edb22be59e49bbe0c7869b135af"
+    },
+    {
+      "path": "eras/alonzo/impl/src/Cardano/Ledger/Alonzo/TxWits.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/TxWits.hs",
+      "sha256": "ec562d36384f019a8c3c99f029ddc116ab24836602af22be07692359e554fe3b"
+    },
+    {
+      "path": "eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Deleg.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Deleg.hs",
+      "sha256": "7480625a944bd29764fe13ad35c38e154966040707b23bd3b4cfb245e13a0f76"
+    },
+    {
+      "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Deleg.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Deleg.hs",
+      "sha256": "da70f19714c201041862cfaa24170222f4798781990938931b72764da8edf823"
+    },
+    {
+      "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Cert.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Cert.hs",
+      "sha256": "785bcfb30926cb53f2c81bb8d45be8e58d9b9e5f0c181238e49373e9d29bcb9a"
+    },
+    {
+      "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Entities.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Entities.hs",
+      "sha256": "6b4ef38ae8107a626f3bad764e084f300b5500aad0771524e048b3cdef1d3537"
+    },
+    {
+      "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubUtxow.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubUtxow.hs",
+      "sha256": "0ad1223d559e0ea76c063f212369dbca4e12ce5e9a08bc735eae66679fe27e5d"
+    },
+    {
+      "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubUtxo.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubUtxo.hs",
+      "sha256": "90d827ca73da3d36415c1ca1b446614e88a9a51caf7ab23f1913ca2ca7eb1f58"
+    },
+    {
+      "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubLedgers.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubLedgers.hs",
+      "sha256": "52ea4986e49004662c9c68e43bd6c0cb47577bc53210ff9bf33eb8c7e8d9fa27"
+    },
+    {
+      "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubLedger.hs",
+      "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubLedger.hs",
+      "sha256": "cd5f0af079e1cf1e130be8dc2a9e7a424c63d3e52b066b527166f1945a7b995d"
+    }
+  ],
+  "parameter_proposal_payloads": {
+    "registration-parameter-proposal-slot780.block.hex": {
+      "evidence": "extracted original Dolos archive frame, not an independent wire capture",
+      "bytes": 6336,
+      "sha256_decoded_bytes": "25abc1671ef0ae6fadff7179d4b4e436bec78dbd13635028c1ca179d5aee6ebf",
+      "blake2b256_decoded_bytes": "ad494f254fdffd33e4f064dc69df7cff702dc4d267f9ee2e17ecd6fb586501bf"
+    },
+    "registration-parameter-proposal-slot45527.block.hex": {
+      "evidence": "extracted original Dolos archive frame, not an independent wire capture",
+      "bytes": 1278,
+      "sha256_decoded_bytes": "63a52e9cb3fd23f9d15f357e6a5c6b51e11638d813f25b3233e85da9d1cf56fa",
+      "blake2b256_decoded_bytes": "77046dd1c19264c22f88f146bda6fef8ab2a874f63dc89a27f2ba6381e0bbfe7"
+    }
+  },
+  "source_extraction_paths": {
+    "registration-epoch64-parameters.json": "sources/dolos/epoch-64-parameters.json",
+    "registration-certificate-state.json": "certificate-state.json",
+    "registration-certificate-history.json": "sources/dolos/certificate-history/scan.json",
+    "registration-dijkstra-genesis.json": "context/dijkstra-genesis.json",
+    "registration-shelley-genesis.json": "context/shelley-genesis.json"
+  },
+  "sha256_test_modules": {
+    "dijkstra_tests.rs": "184ccfd528bc6d954957b0250d5b34a961e9e4418a04923ed48d399082c62e1e",
+    "dijkstra_registration_tests.rs": "2470de799dce5aa8f5ab47ed552cb00463c2434cb941ae65cd320e4176cad68a",
+    "dijkstra_batch_tests.rs": "a544dbe440061160f15d4c168ebc90b01be5603ca89407a45b9abec9744a937f"
+  },
+  "context": "Historical Pallas phase-one registration report; exclusions describe that report, not current Dolos integration. Relative paths refer to the source repository recorded in provenance.json."
+}

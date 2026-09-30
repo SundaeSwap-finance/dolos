@@ -2,6 +2,7 @@
 name = "dolos-flatfiles"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 rayon.workspace = true

@@ -1,0 +1,110 @@
+{
+  "archive": "/tmp/musashi-s00/dolos-query/data/archive",
+  "canonical_blocks": 63158,
+  "continuity": "all parent hashes present; block numbers consecutive from zero",
+  "dictionary_sha256": "c47b2eb1f69a997bf01a720f26bcc1b668e0fddb95431e91c90cebf4f9b87139",
+  "events": [
+    {
+      "archive_block": "1401321.archive.block",
+      "block_hash": "b803547e4b0f181e8b050789783c3ac323a7124395091a966ab0843374cf2d04",
+      "block_number": 62985,
+      "certificate": "Dijkstra(Reg(ScriptHash(Hash<28>(\"aabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f\")), 2000000))",
+      "certificate_cbor": "83078201581caabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f1a001e8480",
+      "certificate_index": 0,
+      "credential": "aabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f",
+      "slot": 1401321,
+      "successful_archive_view": true,
+      "transaction_id": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e",
+      "tx_index": 0
+    },
+    {
+      "archive_block": "1401321.archive.block",
+      "block_hash": "b803547e4b0f181e8b050789783c3ac323a7124395091a966ab0843374cf2d04",
+      "block_number": 62985,
+      "certificate": "Dijkstra(Reg(ScriptHash(Hash<28>(\"550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b\")), 2000000))",
+      "certificate_cbor": "83078201581c550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b1a001e8480",
+      "certificate_index": 1,
+      "credential": "550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b",
+      "slot": 1401321,
+      "successful_archive_view": true,
+      "transaction_id": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e",
+      "tx_index": 0
+    },
+    {
+      "archive_block": "1401321.archive.block",
+      "block_hash": "b803547e4b0f181e8b050789783c3ac323a7124395091a966ab0843374cf2d04",
+      "block_number": 62985,
+      "certificate": "Dijkstra(Reg(ScriptHash(Hash<28>(\"a32d963e3d56399410ec00e6748f80b21743de02b3c49ffb69fae95a\")), 2000000))",
+      "certificate_cbor": "83078201581ca32d963e3d56399410ec00e6748f80b21743de02b3c49ffb69fae95a1a001e8480",
+      "certificate_index": 2,
+      "credential": "a32d963e3d56399410ec00e6748f80b21743de02b3c49ffb69fae95a",
+      "slot": 1401321,
+      "successful_archive_view": true,
+      "transaction_id": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e",
+      "tx_index": 0
+    },
+    {
+      "archive_block": "1401321.archive.block",
+      "block_hash": "b803547e4b0f181e8b050789783c3ac323a7124395091a966ab0843374cf2d04",
+      "block_number": 62985,
+      "certificate": "Dijkstra(Reg(ScriptHash(Hash<28>(\"8741e553cf9488894334c48052f1aa698a32e6902453dd0cf51f3779\")), 2000000))",
+      "certificate_cbor": "83078201581c8741e553cf9488894334c48052f1aa698a32e6902453dd0cf51f37791a001e8480",
+      "certificate_index": 3,
+      "credential": "8741e553cf9488894334c48052f1aa698a32e6902453dd0cf51f3779",
+      "slot": 1401321,
+      "successful_archive_view": true,
+      "transaction_id": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e",
+      "tx_index": 0
+    },
+    {
+      "archive_block": "1401365.archive.block",
+      "block_hash": "c73d2e1f1c280344d1145b023744c635be3da150be753e5cda1419d6e32fac8b",
+      "block_number": 62988,
+      "certificate": "Dijkstra(Reg(ScriptHash(Hash<28>(\"9eb9018892f84064087cfb1559cab8956d6300c47b6f325a7262c3db\")), 2000000))",
+      "certificate_cbor": "83078201581c9eb9018892f84064087cfb1559cab8956d6300c47b6f325a7262c3db1a001e8480",
+      "certificate_index": 0,
+      "credential": "9eb9018892f84064087cfb1559cab8956d6300c47b6f325a7262c3db",
+      "slot": 1401365,
+      "successful_archive_view": true,
+      "transaction_id": "da910a9bfbe657724d64b505099010dd47f86fb573aa1d20b4da0367163e94c6",
+      "tx_index": 0
+    }
+  ],
+  "first_slot": 12,
+  "frames_read": 69466,
+  "initial_credentials_absent": [
+    "aabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f",
+    "550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b",
+    "a32d963e3d56399410ec00e6748f80b21743de02b3c49ffb69fae95a",
+    "8741e553cf9488894334c48052f1aa698a32e6902453dd0cf51f3779",
+    "9eb9018892f84064087cfb1559cab8956d6300c47b6f325a7262c3db"
+  ],
+  "last_hash": "1b2f5a402789360fbe155f1681f7306032817c1140bf1c7dbf9e0b431ad8d958",
+  "last_slot": 1404987,
+  "limits": "Dolos expanded archive trust; this verifies header continuity, not full consensus or all endorser commitments. Certificate CBOR is re-encoded for reporting; original archive blocks retained.",
+  "ordered_header_inventory_sha256": "e8e55e4cc73125fe927916681dca46414567d50d762952dcafbbce1b28a69224",
+  "shelley_genesis_sha256": "da8508afc546a0b1824d93629a7a5fc8c0898d85095c2cf1b25730eb99d5a151",
+  "source_segments": [
+    {
+      "bytes": 101549718,
+      "file": "000000.segment",
+      "sha256": "276074d64832dbf48ae76328434d73f82a85aa5c213817ecbc08c1bdc351aaaf"
+    },
+    {
+      "bytes": 855292610,
+      "file": "000001.segment",
+      "sha256": "06a484d9fef4e5696af8b406cc11e567d03762a8c0bb81fa02a9c666a2dd0106"
+    },
+    {
+      "bytes": 997107882,
+      "file": "000002.segment",
+      "sha256": "715485b9c5de71771eae7add4624e49151a917c0dd49ecef9abce78a90ac7fb8"
+    },
+    {
+      "bytes": 352145777,
+      "file": "000003.segment",
+      "sha256": "1b11656ab9f3017bbaee1a8d98cb59e58ea7637197286c745fd2f3956d506264"
+    }
+  ],
+  "tool": "musashi-certificate-history"
+}

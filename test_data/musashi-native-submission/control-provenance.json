@@ -1,0 +1,242 @@
+{
+  "fixture_id": "musashi-native-dijkstra-phase1-control",
+  "date": "2026-09-29",
+  "baseline": "baafb53cab4a31a7e8e529a31aeadde953da7ed0",
+  "captured_at": "2026-09-25T18:06:46.997077+00:00",
+  "network": {
+    "name": "Musashi",
+    "magic": 164,
+    "era": "Dijkstra",
+    "genesis_start": "2026-09-07T00:00:00Z",
+    "shelley_genesis_blake2b_256": "1944510a4fd91415444285231058f6f6ff0f6f3ff3d0356c76c00c5a77f29567",
+    "node_version": "unknown; N2N handshake version 15 only",
+    "config_minimum_version": "11.1.0.164-prototype-2026w36"
+  },
+  "capture": {
+    "tool": "Pallas harvest",
+    "revision": "385599890cda4c6384dbfc102849709f7adc9d97",
+    "peer": "52.58.138.208:3001",
+    "method": "N2N block-fetch and endorser payload fetch; independent chain-sync header index",
+    "retained_commit": "472c235eca7597c96cb95e77fe1b7b0080fce791",
+    "retained_directory": "test_data/musashi-submission",
+    "fixture_id": "musashi-submission-20260925-s00",
+    "signed_source_sha256": "4463bb3019a07632782d66ef24ec68c1ef2d48b0100a729d793ff40bff1cf92c",
+    "signed_cborHex_verified_equal": true
+  },
+  "case": {
+    "id": "control",
+    "transaction_id": "f4ed3784097149431498b0df6ceaf13b3a531df88838d1f8f39df1269eb54b20",
+    "slot": 1400007,
+    "block": "control.block",
+    "block_transaction_index": 0,
+    "success": true,
+    "wrapper_elements": 3,
+    "fee": 200000,
+    "certificates": [],
+    "explicit_registration_deposits": 0,
+    "redeemer_pointers": [],
+    "inputs": [
+      {
+        "role": "spending",
+        "ref": "884c9befc41220fbfb2026a79e2a0a293797a0de0f29f6e3ce13977fe7329e6f#1"
+      }
+    ],
+    "historical_validation_context": "historical parameters and original inputs captured; five registration prestates reconstructed; full evaluator/node identity and independent parameter comparison remain open",
+    "original_source": "sources/probe-self-transfer.signed.json",
+    "mempool": "control.mempool.hex",
+    "block_transaction": "control.block.hex"
+  },
+  "input": {
+    "era": "Dijkstra",
+    "producer": "884c9befc41220fbfb2026a79e2a0a293797a0de0f29f6e3ce13977fe7329e6f",
+    "index": 1,
+    "announcement_slot": 1391831,
+    "certification_slot": 1391855,
+    "endorser_transaction_index": 23,
+    "endorser_transaction_count": 2340,
+    "endorser_hash": "39a31c6ede6867438a11b70658f074a9d62bca14151824a7daa8dcedd5b05edd",
+    "outcome_evidence": "certified endorser payload and subsequent successful captured spend; wire envelope has no success flag"
+  },
+  "parameters": {
+    "file": "historical-parameters.json",
+    "origin": "Named-field excerpt of captured Dolos historical epoch-64 response; no cost models used",
+    "original_source": "test_data/musashi-submission/sources/dolos/epoch-64-parameters.json",
+    "original_sha256": "56dae0ae1d97b172225555804c621a1dc74ff58f5f4963b9118add52592acea6",
+    "excerpt_sha256": "55c0e4808f6bb11b86a320ed6a39b4397aac6b82c393e56fa9b7ff9f7de23da4",
+    "archive": {
+      "source": "/home/rodrigo/projects/musashi-readiness/local-dolos/data",
+      "access": "scratch copy; serve only on loopback, no sync",
+      "tip": {
+        "time": 1790296532,
+        "height": 69465,
+        "hash": "07399d647197d33694958cc730daa9dd5517b456bec7cbbd4b4d53093c5026f1",
+        "slot": 1557332,
+        "epoch": 72,
+        "epoch_slot": 2132,
+        "slot_leader": "pool187a7fvjryyc83r59tgct7j7wuthdc3t09zv4f57za6vcqcfmtz4",
+        "size": 87641,
+        "tx_count": 436,
+        "output": "4188555000000",
+        "fees": "436000000",
+        "block_vrf": "vrf_vk1tpq6kd4a5z8j5sn3e5sexjxuwuzr2cth442en7xqk7963fv7kw0spj4yxj",
+        "op_cert": "034dc4023e954a2ffbbdf3a961e67beee05366bb7cba01f1f3eaf9832918ffbc",
+        "op_cert_counter": "1",
+        "previous_block": "89b09b7c7d953e546bcba6fb5c961e04d558b385115fe4485d6dbd00d1da4c3b",
+        "next_block": null,
+        "confirmations": 0
+      },
+      "binary": "/home/rodrigo/projects/realfi/.musashi-private/dolos-submit-fix/target/release/dolos",
+      "binary_sha256": "4ca5a2fe3b56eed75fc19dfa0517a903212c06f778812cfd2402847cd88ffdad",
+      "source_checkout_revision": "3cf1483545d24d0b934673abebc9e368d0ec27a9",
+      "binary_revision_caveat": "checkout revision is recorded, not independently embedded/attested by binary",
+      "registration_history": "Reconstructed from frozen flatfiles; five first-ever Reg events. Empty account API responses are inconclusive because its certificate index skips Dijkstra."
+    },
+    "independent_node_comparison": "unavailable",
+    "certificate_state": "not supplied; certificates explicitly rejected",
+    "synthetic_boundaries": "fee coefficients, size limits, minimum coin coefficient, slot and max value size are mutated only in named tests",
+    "timing": {
+      "system_start": "2026-09-07T00:00:00Z",
+      "epoch_length": 21600,
+      "slot_length": 1,
+      "source": "Captured Shelley genesis; unused for this script-free subset"
+    }
+  },
+  "ledger": {
+    "revision": "1587f21a7d1306dc590c2749a5c66232ef66aad0",
+    "historical_node_revision": "unknown; pinned ledger is a specification comparison",
+    "sources": [
+      {
+        "path": "eras/allegra/impl/src/Cardano/Ledger/Allegra/Scripts.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/allegra/impl/src/Cardano/Ledger/Allegra/Scripts.hs",
+        "sha256": "f6a89ef073f5ce3d4b2d49279d65cb3cec7df1f5e3fb3ca7c88d7e2d9413cdc5"
+      },
+      {
+        "path": "eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxo.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxo.hs",
+        "sha256": "551b23ffa3bef69a802dd2f4cba0369dc2a7c3c6db32b62810161666e7be5a53"
+      },
+      {
+        "path": "eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Tx.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Tx.hs",
+        "sha256": "4bdd8081b0b8107fb394ff5f1f155ffd51236e9caa1052023bb17fd65e91afc2"
+      },
+      {
+        "path": "eras/babbage/impl/src/Cardano/Ledger/Babbage/Rules/Utxo.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/babbage/impl/src/Cardano/Ledger/Babbage/Rules/Utxo.hs",
+        "sha256": "86f140ec715b5d7e9fe436677e8dda1b2e00aaa1289fae8c7a031ff6bba75d2c"
+      },
+      {
+        "path": "eras/babbage/impl/src/Cardano/Ledger/Babbage/TxOut.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/babbage/impl/src/Cardano/Ledger/Babbage/TxOut.hs",
+        "sha256": "8062da7b84f001fd7e4a390b1c1a11bff6082affa3a15cde3b43613b50eae114"
+      },
+      {
+        "path": "eras/babbage/impl/src/Cardano/Ledger/Babbage/UTxO.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/babbage/impl/src/Cardano/Ledger/Babbage/UTxO.hs",
+        "sha256": "1734acff282f45dbd389c9d7bdf7519f2bb8b7baee035597bb904ac34f4c6667"
+      },
+      {
+        "path": "eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Utxow.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Utxow.hs",
+        "sha256": "4eeea66c6e80cd9e4ee4c4c97ae122550bd04cb7631c6dc7f954d449a8dfca99"
+      },
+      {
+        "path": "eras/conway/impl/src/Cardano/Ledger/Conway/Tx.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/conway/impl/src/Cardano/Ledger/Conway/Tx.hs",
+        "sha256": "4dee4c3e717bb21721729afc008b49a39a2f9fcd8fb661e0436a5e6e494521ff"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Certs.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Certs.hs",
+        "sha256": "70e4c1a437ae04775e75badc689edc8d8a624ac773a25810eb64774e1f378d29"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Ledger.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Ledger.hs",
+        "sha256": "55227f2cf64cd83f1c55233ac06ac4845288a261afb5ab9dbf36bd0d01e12d09"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Utxo.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Utxo.hs",
+        "sha256": "8cf3db98611bf1d445e6fbdc7e2ed7dd6db9b162748b3aec3f6062d6e06caf34"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Utxow.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Utxow.hs",
+        "sha256": "8559e432c1ada9db784165eae218ac32c4fce9eb7eb2a3d65342464465971659"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Scripts.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Scripts.hs",
+        "sha256": "391a730dd5c9640db8726dbff0a2ae7772b94662f54211089643e5cb0db014fd"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Tx.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Tx.hs",
+        "sha256": "635b50a371340e3a6796db58b516844dc0e9f0bd64e35a79cdcfb6945da63790"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/TxBody.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/TxBody.hs",
+        "sha256": "a4b16eeb4c96fed6fce91dfdf5ecbe24109b8eb0e4745b00132a1a10f11c207e"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/TxOut.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/TxOut.hs",
+        "sha256": "802666de93f4d756e57ea176520c05d5fb42d624f53044f36f48e1232102694f"
+      },
+      {
+        "path": "eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/UTxO.hs",
+        "url": "https://raw.githubusercontent.com/IntersectMBO/cardano-ledger/1587f21a7d1306dc590c2749a5c66232ef66aad0/eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/UTxO.hs",
+        "sha256": "3a56ca8074e7a1b23d4b32400cf2cf84da3856afbdc4c586d9d8e7571e94df52"
+      }
+    ]
+  },
+  "payload_checksums": "payload-provenance.json",
+  "supported": "Protocol 12.0, top-level ADA-only Shelley base/enterprise key transfers; optional validity interval and network id; legacy/map outputs; no auxiliary data, datum or scripts",
+  "unsupported": [
+    "certificates without historical certificate state",
+    "all scripts and redeemers, including V4 and native guards",
+    "mint",
+    "reference inputs",
+    "collateral",
+    "withdrawals and governance",
+    "treasury and donations",
+    "guards and required top-level guards",
+    "direct deposits",
+    "account-balance intervals",
+    "subtransactions",
+    "bootstrap/pointer/script addresses",
+    "multiassets",
+    "unknown or duplicate body/witness/output map keys",
+    "protocol versions other than 12.0"
+  ],
+  "proof_boundaries": {
+    "input_consumers": "scoped input consumers only",
+    "earlier_evaluation": "derived Conway protocol-9 execution only",
+    "native_evaluation": "native evaluation and protocol-aware post-bootstrap V3 deposit/refund translation were not established by this source report",
+    "dolos_integration": "complete submission, pin changes and workaround removal were not established by this source report"
+  },
+  "synthetic_cases": [
+    "Re-signed deterministic test-key transactions for validity and map-output boundaries",
+    "Fee/size/minimum-coin/value-size parameter boundaries",
+    "Missing, invalid and malformed-length signatures; valid required signature followed by invalid extra signature",
+    "Unsupported known/unknown/duplicate map fields, including ignored witness V4 key",
+    "Guards, required guards, direct deposits, balance intervals, treasury, collateral, reference input and auxiliary hash fields",
+    "Nested and standalone subtransactions",
+    "V4 reference output, datum, multiasset, script payment and pointer input addresses",
+    "Value/minimum-coin overflow",
+    "Synthetic earlier-era encodings of the original key/coin input; no genuine earlier-era network capture"
+  ],
+  "control_expectations": {
+    "mempool_bytes": 196,
+    "block_transaction_bytes": 197,
+    "fee_size": 196,
+    "minimum_fee": 164005,
+    "actual_fee": 200000,
+    "expected_native_dispatch": "Ok(())",
+    "baseline_actual": "TxAndProtParamsDiffer",
+    "historical_slot": 1400007
+  },
+  "context": "Historical Pallas phase-one control report; scope statements describe that report, not current Dolos integration. Relative paths refer to the source repository recorded in provenance.json."
+}

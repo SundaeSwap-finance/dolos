@@ -2,10 +2,12 @@
 name = "dolos-cardano"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 dolos-core = { path = "../core" }
 pallas.workspace = true
+pallas-validate.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true

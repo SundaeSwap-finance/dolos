@@ -1,0 +1,77 @@
+{
+  "scope": "Five Reg (tag 7) script credentials, immediately before their captured registration transactions; reconstructed from Dolos archive, not a node ledger-state dump.",
+  "scan": "sources/dolos/certificate-history/scan.json",
+  "source_archive": "/home/rodrigo/projects/musashi-readiness/local-dolos/data",
+  "snapshot": "Frozen query copy from the earlier input capture; the original archive subsequently grew.",
+  "trust_boundary": "Dolos expanded archive trust; this verifies header continuity, not full consensus or all endorser commitments. Certificate CBOR is re-encoded for reporting; original archive blocks retained.",
+  "credentials": [
+    {
+      "credential": "aabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f",
+      "credential_type": "script",
+      "before_transaction": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e",
+      "before_slot": 1401321,
+      "registered_before": false,
+      "deposit_before": null,
+      "registered_after": true,
+      "deposit_after": 2000000,
+      "prior_events": [],
+      "basis": "absent in Shelley genesis including extraConfig.stakeCredentials; no earlier certificate occurrences in the continuous archive chain; registration block equals independently fetched network bytes"
+    },
+    {
+      "credential": "550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b",
+      "credential_type": "script",
+      "before_transaction": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e",
+      "before_slot": 1401321,
+      "registered_before": false,
+      "deposit_before": null,
+      "registered_after": true,
+      "deposit_after": 2000000,
+      "prior_events": [],
+      "basis": "absent in Shelley genesis including extraConfig.stakeCredentials; no earlier certificate occurrences in the continuous archive chain; registration block equals independently fetched network bytes"
+    },
+    {
+      "credential": "a32d963e3d56399410ec00e6748f80b21743de02b3c49ffb69fae95a",
+      "credential_type": "script",
+      "before_transaction": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e",
+      "before_slot": 1401321,
+      "registered_before": false,
+      "deposit_before": null,
+      "registered_after": true,
+      "deposit_after": 2000000,
+      "prior_events": [],
+      "basis": "absent in Shelley genesis including extraConfig.stakeCredentials; no earlier certificate occurrences in the continuous archive chain; registration block equals independently fetched network bytes"
+    },
+    {
+      "credential": "8741e553cf9488894334c48052f1aa698a32e6902453dd0cf51f3779",
+      "credential_type": "script",
+      "before_transaction": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e",
+      "before_slot": 1401321,
+      "registered_before": false,
+      "deposit_before": null,
+      "registered_after": true,
+      "deposit_after": 2000000,
+      "prior_events": [],
+      "basis": "absent in Shelley genesis including extraConfig.stakeCredentials; no earlier certificate occurrences in the continuous archive chain; registration block equals independently fetched network bytes"
+    },
+    {
+      "credential": "9eb9018892f84064087cfb1559cab8956d6300c47b6f325a7262c3db",
+      "credential_type": "script",
+      "before_transaction": "da910a9bfbe657724d64b505099010dd47f86fb573aa1d20b4da0367163e94c6",
+      "before_slot": 1401365,
+      "registered_before": false,
+      "deposit_before": null,
+      "registered_after": true,
+      "deposit_after": 2000000,
+      "prior_events": [],
+      "basis": "absent in Shelley genesis including extraConfig.stakeCredentials; no earlier certificate occurrences in the continuous archive chain; registration block equals independently fetched network bytes"
+    }
+  ],
+  "scanner_source_sha256": "17d5623be75f49bd2b6f6f0d36af6ef4734a3b5ef2120504bf6c04423865bd90",
+  "genesis_files_checked_for_target_credentials": [
+    "context/alonzo-genesis.json",
+    "context/byron-genesis.json",
+    "context/conway-genesis.json",
+    "context/dijkstra-genesis.json",
+    "context/shelley-genesis.json"
+  ]
+}

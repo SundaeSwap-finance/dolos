@@ -3,6 +3,7 @@ name = "dolos-mithril"
 description = "Acquiring immutable chain data from a mithril aggregator"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 dolos-core = { path = "../core" }
