@@ -676,6 +676,9 @@ impl Stage {
 }
 
 #[cfg(test)]
+mod endorser_retry;
+
+#[cfg(test)]
 mod tests {
     use dolos_core::import::{seed_wal_from_state, WalSeed};
     use dolos_core::{StateStore as _, StateWriter as _};
