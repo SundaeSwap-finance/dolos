@@ -1,0 +1,46 @@
+{
+  "canonical_headers": 63158,
+  "credentials": [
+    "550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b",
+    "aabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f"
+  ],
+  "events": [
+    {
+      "block": "b803547e4b0f181e8b050789783c3ac323a7124395091a966ab0843374cf2d04",
+      "events": [
+        {
+          "cbor": "83078201581caabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f1a001e8480",
+          "decoded": "Dijkstra(Reg(ScriptHash(Hash<28>(\"aabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f\")), 2000000))",
+          "kind": "certificate",
+          "transaction": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e"
+        },
+        {
+          "cbor": "83078201581c550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b1a001e8480",
+          "decoded": "Dijkstra(Reg(ScriptHash(Hash<28>(\"550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b\")), 2000000))",
+          "kind": "certificate",
+          "transaction": "4918868794546ff4c10121a7caef9b74a208e59e191945a3bd48d21dc7fe2b2e"
+        }
+      ],
+      "slot": 1401321
+    },
+    {
+      "block": "1b2f5a402789360fbe155f1681f7306032817c1140bf1c7dbf9e0b431ad8d958",
+      "events": [
+        {
+          "address": "f0550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b",
+          "amount": 0,
+          "kind": "withdrawal",
+          "transaction": "3a44fbaaf49822fa51d1b4f02818298a183e02d73ec1edb8915b48fd52a89a62"
+        },
+        {
+          "address": "f0aabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f",
+          "amount": 0,
+          "kind": "withdrawal",
+          "transaction": "3a44fbaaf49822fa51d1b4f02818298a183e02d73ec1edb8915b48fd52a89a62"
+        }
+      ],
+      "slot": 1404987
+    }
+  ],
+  "limit": "successful transactions in the frozen Dolos expanded archive; not consensus validation or a node account-state dump"
+}

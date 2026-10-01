@@ -1,0 +1,18 @@
+{
+  "network_magic": 164,
+  "network_id": 0,
+  "validation_slot": 1404987,
+  "kind": "reconstructed historical prestate under frozen Dolos archive trust",
+  "accounts": {
+    "550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b": {
+      "registered": true,
+      "balance": 0
+    },
+    "aabeb9796cfbf5847e567e16adb0d021632bd16685458d67a8f9a09f": {
+      "registered": true,
+      "balance": 0
+    }
+  },
+  "basis": "account-history.json: Reg at 1401321, no delegation, pool reward account, MIR or direct-deposit event before the target; zero withdrawals in target",
+  "limitation": "not an independent node account-state dump"
+}

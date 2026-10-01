@@ -1,0 +1,39 @@
+{
+  "abe8e65857bd7f36d72a92bb73d145775abcd3cf3acb51c2ca5470081c4b5c40.0.output.hex": [
+    "spending"
+  ],
+  "f4ed3784097149431498b0df6ceaf13b3a531df88838d1f8f39df1269eb54b20.0.output.hex": [
+    "spending"
+  ],
+  "58fe1a06294925f67725afbb87c1a306027c96bee6e8138a89d7248d2996a8df.1.output.hex": [
+    "spending"
+  ],
+  "abe8e65857bd7f36d72a92bb73d145775abcd3cf3acb51c2ca5470081c4b5c40.1.output.hex": [
+    "spending"
+  ],
+  "2cea3692233e891d35ed12466cfb5678746bd388516e7af74820d197e78ffeea.1.output.hex": [
+    "spending"
+  ],
+  "5dff52786bba33411497e53dfd8654de5a3145d6fc0b5016dfc13deea55bfc10.1.output.hex": [
+    "spending",
+    "collateral"
+  ],
+  "884c9befc41220fbfb2026a79e2a0a293797a0de0f29f6e3ce13977fe7329e6f.0.output.hex": [
+    "spending"
+  ],
+  "36a9fa1aa611cfc956a48e0600103eb831a22b9f605437b5415dc74989e22c9f.0.output.hex": [
+    "reference"
+  ],
+  "35dfbbeacf2b272965afebf93506af4db68b51246ebc88a326a6ab5f745454ca.0.output.hex": [
+    "reference"
+  ],
+  "5dff52786bba33411497e53dfd8654de5a3145d6fc0b5016dfc13deea55bfc10.0.output.hex": [
+    "reference"
+  ],
+  "534955fcb209ae442b0f4aba8bd8ca9c2a198102f8449a37ee14fefa0bb07547.0.output.hex": [
+    "reference"
+  ],
+  "9aa83ea1ef493f9dff31f34d639ef823489af63d15cf7e112d0ab9c41607a6d2.0.output.hex": [
+    "reference"
+  ]
+}
