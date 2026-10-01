@@ -275,19 +275,145 @@ fn original_signatures_are_verified() {
     }
 }
 
+/// Synthetic key registrations with separate funding and one shared credential.
+/// Only the transaction shape and protocol context come from the control fixture.
+fn independent_registrations() -> (
+    ToyDomain,
+    [Vec<u8>; 2],
+    pallas::ledger::primitives::dijkstra::StakeCredential,
+) {
+    use pallas::{
+        codec::utils::MaybeIndefArray,
+        crypto::{hash::Hasher, key::ed25519::SecretKey},
+        ledger::{
+            addresses::{Network, ShelleyAddress, ShelleyDelegationPart, ShelleyPaymentPart},
+            primitives::dijkstra as n,
+        },
+    };
+
+    let (domain, control) = support::fixture(false);
+    // Public, deterministic test key; never used for network funds.
+    let key = SecretKey::from([71; 32]);
+    let key_hash = Hasher::<224>::hash(key.public_key().as_ref());
+    let credential = n::StakeCredential::AddrKeyhash(key_hash);
+    let address = ShelleyAddress::new(
+        Network::Testnet,
+        ShelleyPaymentPart::Key(key_hash),
+        ShelleyDelegationPart::Null,
+    )
+    .to_vec();
+    let output = |coin| {
+        n::TransactionOutput::PostAlonzo(
+            n::PostAlonzoTransactionOutput {
+                address: address.clone().into(),
+                value: n::Value::Coin(coin),
+                datum_option: None,
+                script_ref: None,
+            }
+            .into(),
+        )
+    };
+    let deposit = dolos_cardano::load_epoch::<ToyDomain>(domain.state())
+        .unwrap()
+        .pparams
+        .unwrap_live()
+        .key_deposit()
+        .unwrap();
+    let template = MultiEraTx::decode_for_era(Era::Dijkstra, &control).unwrap();
+    let mut delta = UtxoSetDelta::default();
+    let transactions = [81u8, 82].map(|id| {
+        let input = n::TransactionInput {
+            transaction_id: [id; 32].into(),
+            index: 0,
+        };
+        delta.produced_utxo.insert(
+            TxoRef(input.transaction_id, 0),
+            std::sync::Arc::new(EraCbor(8, minicbor::to_vec(output(20_000_000)).unwrap())),
+        );
+        let mut tx = template.as_dijkstra().unwrap().clone();
+        tx.transaction_body.inputs = n::Set::from(vec![input]);
+        tx.transaction_body.fee = 1_000_000;
+        tx.transaction_body.outputs =
+            MaybeIndefArray::Def(vec![output(20_000_000 - 1_000_000 - deposit)]);
+        tx.transaction_body.certificates =
+            n::NonEmptySet::from_vec(vec![n::Certificate::Reg(credential.clone(), deposit)]);
+        let hash = Hasher::<256>::hash(&minicbor::to_vec(&tx.transaction_body).unwrap());
+        tx.transaction_witness_set.vkeywitness = n::NonEmptySet::from_vec(vec![n::VKeyWitness {
+            vkey: key.public_key().as_ref().to_vec().into(),
+            signature: key.sign(hash).as_ref().to_vec().into(),
+        }]);
+        minicbor::to_vec(tx.to_mempool_transaction()).unwrap()
+    });
+    let writer = domain.state().start_writer().unwrap();
+    writer.apply_utxoset(&delta).unwrap();
+    writer.commit().unwrap();
+    (domain, transactions, credential)
+}
+
 #[test]
 fn pending_registration_reserves_credential_without_changing_ledger_state() {
-    let (domain, bytes) = support::fixture(true);
-    domain
-        .receive_tx("first-registration", &domain.read_chain(), &bytes)
-        .unwrap();
-    let error = domain
-        .validate_tx(&domain.read_chain(), &bytes)
-        .unwrap_err();
-    assert!(
-        format!("{error:?}").contains("already registered"),
-        "{error:?}"
-    );
+    use pallas::ledger::validate::utils::ValidationError;
+
+    for inflight in [false, true] {
+        let (domain, [first, second], credential) = independent_registrations();
+        let account_key = minicbor::to_vec(&credential).unwrap().into();
+        let assert_unregistered = || {
+            assert!(domain
+                .state()
+                .read_entity_typed::<AccountState>(AccountState::NS, &account_key)
+                .unwrap()
+                .is_none());
+        };
+        let first_tx = MultiEraTx::decode_for_era(Era::Dijkstra, &first).unwrap();
+        let second_tx = MultiEraTx::decode_for_era(Era::Dijkstra, &second).unwrap();
+        let inputs: Vec<TxoRef> = first_tx
+            .inputs()
+            .iter()
+            .chain(second_tx.inputs().iter())
+            .map(TxoRef::from)
+            .collect();
+        assert_ne!(inputs[0], inputs[1]);
+        let before = domain.state().get_utxos(inputs.clone()).unwrap();
+        assert_eq!(before.len(), 2);
+        assert_unregistered();
+        // Both signed transactions are valid before either reserves the credential.
+        domain.validate_tx(&domain.read_chain(), &first).unwrap();
+        domain.validate_tx(&domain.read_chain(), &second).unwrap();
+        assert_unregistered();
+        let hash = domain
+            .receive_tx("synthetic-registration", &domain.read_chain(), &first)
+            .unwrap();
+        if inflight {
+            domain.mempool().mark_inflight(&[hash]).unwrap();
+        }
+        assert_unregistered();
+        let available = MempoolAwareUtxoStore::<ToyDomain>::new(domain.state(), domain.mempool())
+            .get_utxos([inputs[1].clone()].into())
+            .unwrap();
+        assert_eq!(
+            available.len(),
+            1,
+            "second registration must retain its own input"
+        );
+        let error = domain
+            .receive_tx("conflicting-registration", &domain.read_chain(), &second)
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                DomainError::ChainError(ChainError::Phase1ValidationRejected(
+                    ValidationError::DijkstraInvalidCertificate("already registered")
+                ))
+            ),
+            "{error:?}"
+        );
+        assert_unregistered();
+        assert_eq!(domain.state().get_utxos(inputs).unwrap(), before);
+        let mut accepted = domain.mempool().peek_pending();
+        accepted.extend(domain.mempool().peek_inflight());
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].payload.1, first);
+    }
 }
 
 #[test]

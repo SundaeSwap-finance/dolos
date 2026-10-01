@@ -120,5 +120,16 @@
     "source_sha256": "5dcfbe00dd3a46882166a8e2cb3f6ce683da24d0dffdff3c1133bb187e08f1b7",
     "accepted": "[body,witnesses,auxiliary/null] or [body,witnesses,true,auxiliary/null]",
     "rejected_for_relay": "block-only [body,witnesses,auxiliary/null,success]"
+  },
+  "synthetic_cases": {
+    "independent_registrations": {
+      "generator": "tests/musashi_submission.rs::independent_registrations",
+      "classification": "synthetic signed transactions and funding outputs; not network captures",
+      "template": "control.mempool.hex",
+      "context": "fixture(false): retained Musashi protocol-12 parameters and genesis",
+      "changes": "Two separate synthetic input IDs, key enterprise address, 20000000 lovelace funding per input, 1000000 fee, active key deposit, matching change output and shared key registration; both bodies re-signed with deterministic public test key.",
+      "expected": "Each validates independently. Once the first is pending or inflight, the second fails DijkstraInvalidCertificate(already registered) while its funding remains available and stored account/UTxO state is unchanged.",
+      "limits": "Tests Dolos credential reservation for key registrations; does not establish independent script-registration conflicts or live-node acceptance."
+    }
   }
 }
