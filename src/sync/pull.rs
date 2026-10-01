@@ -657,6 +657,9 @@ impl Stage {
 }
 
 #[cfg(test)]
+mod endorser_retry;
+
+#[cfg(test)]
 mod tests {
     use pallas::ledger::traverse::MultiEraBlock;
 
