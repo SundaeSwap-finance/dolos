@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "baseline": "62081cc778d9ee9571fb16415384591ea717f5ba",
+  "fixed": "commit containing this file",
+  "pallas": "952167c57fff4433dbdc0fac40e145e8dae32795",
+  "test_source": "../../tests/dijkstra_withdrawals.rs",
+  "test_source_sha256": "04d99452826918ee6a1253d4b17716d5156125981bba06be9bbaff5a55f3bb5d",
+  "baseline_result": {
+    "passed": 0,
+    "failed": 10,
+    "kind": "runtime assertion failures",
+    "observed": "DijkstraAccountStateUnavailable despite explicit store account state"
+  },
+  "fixed_result": {
+    "passed": 10,
+    "failed": 0,
+    "existing_submission_controls_passed": 16
+  },
+  "baseline_adapter": null,
+  "reproduction": [
+    "git worktree add --detach /tmp/dolos-withdrawals-baseline 62081cc778d9ee9571fb16415384591ea717f5ba",
+    "cp tests/dijkstra_withdrawals.rs /tmp/dolos-withdrawals-baseline/tests/",
+    "cp -r test_data/musashi-withdrawals /tmp/dolos-withdrawals-baseline/test_data/",
+    "CARGO_TARGET_DIR=/tmp/dolos-withdrawals-baseline-target cargo test --offline --locked --manifest-path /tmp/dolos-withdrawals-baseline/Cargo.toml --test dijkstra_withdrawals -- --nocapture",
+    "cargo test --offline --locked --test dijkstra_withdrawals --test musashi_submission -- --nocapture"
+  ],
+  "actual_build_outputs": {
+    "baseline": "target/musashi-s07-baseline",
+    "fixed": "target/debug",
+    "note": "Separate Cargo outputs; baseline target reuses only dependency caches from earlier work, with Cargo rebuilding against the isolated baseline worktree"
+  },
+  "checks": [
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 101,
+      "seconds": 109.33
+    },
+    {
+      "name": "build",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "seconds": 238.4
+    },
+    {
+      "name": "workspace-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-fail-fast"
+      ],
+      "exit_code": 0,
+      "seconds": 443.32
+    },
+    {
+      "name": "strict-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--exclude",
+        "dolos-minibf",
+        "--exclude",
+        "dolos-minikupo",
+        "--exclude",
+        "dolos-trp",
+        "--no-fail-fast"
+      ],
+      "exit_code": 101,
+      "seconds": 291.16
+    }
+  ],
+  "log_summaries": {
+    "workspace-tests": {
+      "passed": 1802,
+      "failed": 0,
+      "ignored": 33,
+      "failed_tests": []
+    },
+    "strict-tests": {
+      "passed": 1234,
+      "failed": 14,
+      "ignored": 38,
+      "failed_tests": [
+        "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+        "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+        "every_lookup_by_hash_finds_each_sub_transaction",
+        "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+        "minibf_address_routes_count_each_sub_transaction",
+        "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+        "minibf_block_routes_count_each_sub_transaction",
+        "minibf_resolves_an_input_a_sub_transaction_made",
+        "minibf_serves_each_sub_transaction_by_its_own_hash",
+        "minikupo_matches_the_outputs_of_a_sub_transaction",
+        "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+        "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+        "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+        "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+      ]
+    }
+  },
+  "known_failures": {
+    "strict": "Same two gRPC query and twelve pipeline replay epoch-coherence failures as prior recorded verification; no additional failure names",
+    "strict_prior_evidence": "target/musashi-remote-reconcile/tests-all-features.log",
+    "strict_prior_evidence_sha256": "bf749363544e4b985a84b7b8f68d9ce96bc12bcb7a6bd70a080417d136a7e896",
+    "clippy": "Strict warnings-as-errors stops at unchanged crates/core/src/crawl.rs:50; normal workspace Clippy exits successfully with pre-existing warnings in unchanged files",
+    "future_compatibility": "Existing proc-macro-error2 2.0.1 warning"
+  },
+  "additional_checks": {
+    "workspace_clippy_exit_code": 0,
+    "final_cardano_clippy_exit_code": 0,
+    "changed_rust_format": "passed",
+    "fixture_checksums": "25 passed",
+    "diff_whitespace": "passed",
+    "final_targeted_command": "cargo test --offline --locked --test dijkstra_withdrawals --test musashi_submission -- --nocapture"
+  },
+  "limitations": [
+    "Historical replay assembles epoch-65 account state with retained epoch-64 parameters; no independent epoch-65 parameter query or epoch transition replay",
+    "Account prestate reconstructed under frozen Dolos archive trust, not independently verified consensus state",
+    "No network submission or current acceptance claim",
+    "Earlier-era withdrawal validation and evaluation RPC estimation unchanged"
+  ],
+  "local_logs": {
+    "target/dijkstra-withdrawal-evidence/baseline.log": "df506846c6db8a903b33051968ef8060c91c79e044f4e8a5e31c301a42755762",
+    "target/dijkstra-withdrawal-evidence/fixed-final.log": "51335ed0e7f646152f7478b759e3e3b28414400ed94025a670f16894ee41612a",
+    "target/dijkstra-withdrawal-evidence/clippy.log": "015d04099f439476e4192d4f21b11683f66dcf9ccf8c9b248c0ee1a0ca9c80da",
+    "target/dijkstra-withdrawal-evidence/clippy-final.log": "5dcd1205ac9bde38bde182204d0632b69fd853ae0e59e732e5cc80a302a005d9",
+    "target/dijkstra-withdrawal-evidence/clippy-cardano-final.log": "d1b1c30295fce70aacbd8d76286fd2a758efafdf3a13569ef5396ff4ebd7d799",
+    "target/dijkstra-withdrawal-evidence/build.log": "49fa2dbdc89553776a0f75c6cd6bdf402c8f079adf7ff6b577fa05f84c84d828",
+    "target/dijkstra-withdrawal-evidence/workspace-tests.log": "d5e21f23ddc5bd2a82edc3a8e81f200d4e091b1873375749a021d5a50f82b465",
+    "target/dijkstra-withdrawal-evidence/strict-tests.log": "d55f8a2d2bd7ef053987e14c95e952e4101208fdfcadf28e9d55e922baf88ee7"
+  }
+}

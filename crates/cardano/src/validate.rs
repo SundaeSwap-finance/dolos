@@ -78,6 +78,9 @@ pub fn validate_tx<D: Domain>(
 
     let mut cert_state = certificate_state(&tx, utxos)?;
     pallas_validate::phase1::validate_tx(&tx, 0, &env, &pallas_utxos, &mut cert_state)?;
+    if era == Era::Dijkstra {
+        check_dijkstra_withdrawal_reservations(&cert_state, utxos)?;
+    }
 
     let report = evaluate_decoded::<D>(&tx, utxos, &env.prot_params)?;
 
@@ -266,6 +269,49 @@ fn certificate_state<D: Domain>(
     use pallas::ledger::primitives::dijkstra::Certificate;
     let mut state = CertState::default();
     if let Some(native) = tx.as_dijkstra() {
+        if let Some(withdrawals) = &native.transaction_body.withdrawals {
+            let epoch = crate::load_epoch::<D>(utxos.state())?.number;
+            for raw in withdrawals.keys() {
+                let credential = withdrawal_credential(raw)?;
+                let key = pallas::codec::minicbor::to_vec(&credential).unwrap();
+                let account = utxos
+                    .state()
+                    .read_entity_typed::<AccountState>(AccountState::NS, &key.into())?;
+                let unavailable = |reason| {
+                    pallas_validate::utils::ValidationError::DijkstraAccountStateUnavailable(
+                        format!("{}: {reason}", hex::encode(raw.as_slice())),
+                    )
+                };
+                let balance = match account {
+                    None => None, // Absence in the synced namespace means unregistered.
+                    Some(account) => {
+                        if account.credential != credential {
+                            return Err(unavailable(
+                                "stored credential does not match account key",
+                            )
+                            .into());
+                        }
+                        if account.is_registered() {
+                            if !account.stake.is_at_epoch(epoch) {
+                                return Err(unavailable(
+                                    "account snapshot does not match current epoch",
+                                )
+                                .into());
+                            }
+                            let stake = account.stake.live().ok_or_else(|| {
+                                unavailable("registered account has no live balance")
+                            })?;
+                            Some(stake.rewards_sum.checked_sub(stake.withdrawals_sum).ok_or_else(|| {
+                                unavailable("recorded withdrawals exceed rewards; account state is inconsistent")
+                            })?)
+                        } else {
+                            None
+                        }
+                    }
+                };
+                state.dijkstra_account_balances.insert(credential, balance);
+            }
+        }
         for cert in native.transaction_body.certificates.iter().flatten() {
             if let Certificate::Reg(credential, _) = cert {
                 // The synced account namespace is authoritative, including
@@ -302,6 +348,66 @@ fn certificate_state<D: Domain>(
         }
     }
     Ok(state)
+}
+
+fn withdrawal_credential(
+    raw: &[u8],
+) -> Result<pallas::ledger::primitives::StakeCredential, ChainError> {
+    let pallas::ledger::addresses::Address::Stake(address) =
+        pallas::ledger::addresses::Address::from_bytes(raw)?
+    else {
+        return Err(
+            pallas_validate::utils::ValidationError::DijkstraInvalidWithdrawal(
+                "expected a reward account address",
+            )
+            .into(),
+        );
+    };
+    Ok(crate::pallas_extras::stake_address_to_cred(&address))
+}
+
+fn check_dijkstra_withdrawal_reservations<D: Domain>(
+    state: &CertState,
+    utxos: &MempoolAwareUtxoStore<D>,
+) -> Result<(), ChainError> {
+    if state.dijkstra_account_balances.is_empty() {
+        return Ok(());
+    }
+    // Phase one has already checked ledger semantics (including V3 draining)
+    // against the original balances, and deducted this candidate's withdrawals
+    // from its provisional state. Reserve pending withdrawals only afterward:
+    // using reduced balances in phase one could incorrectly authorize a partial
+    // V3 withdrawal. No provisional balances are written to the state store.
+    let mut remaining = state.dijkstra_account_balances.clone();
+    let mut pending = utxos.mempool().peek_pending();
+    pending.extend(utxos.mempool().peek_inflight());
+    // Relay can move a transaction between these two reads. Count it once.
+    let mut seen = std::collections::HashSet::new();
+    for entry in pending {
+        if !seen.insert(entry.hash) {
+            continue;
+        }
+        if !matches!(
+            entry.stage,
+            dolos_core::MempoolTxStage::Pending
+                | dolos_core::MempoolTxStage::Propagated
+                | dolos_core::MempoolTxStage::Acknowledged
+        ) {
+            continue; // Confirmed withdrawals are already reflected in ledger state.
+        }
+        let tx = MultiEraTx::try_from(&entry.payload)?;
+        for (raw, amount) in tx.withdrawals().collect::<Vec<_>>() {
+            let credential = withdrawal_credential(raw)?;
+            if let Some(Some(balance)) = remaining.get_mut(&credential) {
+                *balance = balance.checked_sub(amount).ok_or_else(|| {
+                    ChainError::DijkstraWithdrawalConflict {
+                        account: hex::encode(raw),
+                    }
+                })?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError> {

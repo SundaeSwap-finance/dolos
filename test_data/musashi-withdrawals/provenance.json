@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "network": "Musashi",
+  "network_magic": 164,
+  "network_id": 0,
+  "protocol_version": [
+    12,
+    0
+  ],
+  "validation_slot": 1404987,
+  "validation_epoch": 65,
+  "dolos_baseline": "62081cc778d9ee9571fb16415384591ea717f5ba",
+  "pallas_revision": "952167c57fff4433dbdc0fac40e145e8dae32795",
+  "ledger_revision": "1587f21a7d1306dc590c2749a5c66232ef66aad0",
+  "source": "Pallas test_data/musashi-dijkstra-validation at pallas_revision; exact subset copied 2026-10-01",
+  "capture_date": "2026-10-01",
+  "capture_tool": {
+    "source": "Pallas test_data/musashi-dijkstra-validation/extract-archive.rs at pallas_revision",
+    "revision": "local tool included in this change; source checksum below",
+    "decoder_base": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
+    "archive": "Frozen S00 expanded archive; segment provenance in Pallas test_data/musashi-phase1/registration-parameter-history.json at pallas_revision",
+    "dictionary_sha256": "c47b2eb1f69a997bf01a720f26bcc1b668e0fddb95431e91c90cebf4f9b87139",
+    "source_sha256": "20622ed0509ec7946b6273afbc8d73da24ea0bb3cbc00b2b385b0df1716be8fd"
+  },
+  "historical_node_revision": null,
+  "historical_builder_revision": null,
+  "transaction": {
+    "body_blake2b256": "3a44fbaaf49822fa51d1b4f02818298a183e02d73ec1edb8915b48fd52a89a62",
+    "envelope_elements": 3,
+    "bytes": 2169,
+    "source_relative_to_realfi": ".musashi-private/order-flows-v1-1.json.mintExecute.signed.json",
+    "payload": "exact retained signed bytes",
+    "metadata_review": "SDK source/version only; public addresses, datum fields and signatures reviewed; no signing secrets, credentials or private journals copied",
+    "historical_validation_slot": 1404987,
+    "replay_scope": "phase one and phase two with reconstructed historical state"
+  },
+  "account_prestate": "reconstructed from frozen canonical archive events; account-history.json; not independent node state",
+  "synthetic_cases": {
+    "source": "../../tests/dijkstra_withdrawals.rs",
+    "keys": "public deterministic test-only key from [73;32]",
+    "state": "explicit in-memory fixtures; lifecycle uses WithdrawalInc apply/undo and Redb mempool notifications",
+    "phase2_negative": "invalid reference datum shape in synthetic UTxO context; original captured payload unchanged"
+  },
+  "limitations": [
+    "No submission or current spendability claim",
+    "No full sync/consensus replay",
+    "Captured prestate is reconstructed under Dolos archive trust",
+    "Earlier-era withdrawal validation is unchanged",
+    "Epoch-64 parameters reused at epoch-65 validation slot; no epoch transition replay"
+  ],
+  "files": {
+    "account-state.json": {
+      "sha256": "1c97a447b58b2cfe19688406f94e92042c1628ebb80206a5cebe325126106cd4",
+      "bytes": 636,
+      "domain": "file bytes"
+    },
+    "mint-batch-inputs.json": {
+      "sha256": "0c866c731c0cb9c3fcc7be9eb4cef9c9d020406d9ee478998304f4c609353c26",
+      "bytes": 1286,
+      "domain": "file bytes"
+    },
+    "account-history.json": {
+      "sha256": "0e2e80c1f728b013cf9049143be5f858bab755e953e4bd2faa38f487d207fc16",
+      "bytes": 1875,
+      "domain": "file bytes"
+    },
+    "mint-batch.tx.hex": {
+      "sha256": "0dd0d685923abb8fd712ed02f1fcaef38944346e56a47fca3167e4e7dc415bde",
+      "bytes": 2169,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/36a9fa1aa611cfc956a48e0600103eb831a22b9f605437b5415dc74989e22c9f.0.output.hex": {
+      "sha256": "44e5a4709eccfb2367b4f2aabbcf42ecfceb5af490bae6957e4a39fab0facbce",
+      "bytes": 7282,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/5dff52786bba33411497e53dfd8654de5a3145d6fc0b5016dfc13deea55bfc10.0.output.hex": {
+      "sha256": "cda45c40bd1378799f1ca3620abb51b254c0f858f7bef3f87fb8c2122de71652",
+      "bytes": 730,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/f4ed3784097149431498b0df6ceaf13b3a531df88838d1f8f39df1269eb54b20.0.output.hex": {
+      "sha256": "5544ae2b556f60d1c890518ffb1db6f1ece775bce2c914de52345e83cfa66e37",
+      "bytes": 37,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/534955fcb209ae442b0f4aba8bd8ca9c2a198102f8449a37ee14fefa0bb07547.0.output.hex": {
+      "sha256": "08c949598efd27847e957e0368438cfe834ae34b9360d510748619e6d8be8612",
+      "bytes": 10823,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/5dff52786bba33411497e53dfd8654de5a3145d6fc0b5016dfc13deea55bfc10.1.output.hex": {
+      "sha256": "728d963501041a02b5cbe558183a4354b49a81102f465688c22ecf863f8f8cac",
+      "bytes": 41,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/2cea3692233e891d35ed12466cfb5678746bd388516e7af74820d197e78ffeea.1.output.hex": {
+      "sha256": "f8b8cb12cbf0bd1ab53ad218f76c5537fa120bf49b2ed1d21dc07cb4d29c45e6",
+      "bytes": 37,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/abe8e65857bd7f36d72a92bb73d145775abcd3cf3acb51c2ca5470081c4b5c40.1.output.hex": {
+      "sha256": "cbcc408b7d439926399ce424d4cbf0dbfef7d384b8a8b8938e4978ada7beb26e",
+      "bytes": 99,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/abe8e65857bd7f36d72a92bb73d145775abcd3cf3acb51c2ca5470081c4b5c40.0.output.hex": {
+      "sha256": "28ff6714b72bb2282e7476bd2ad2d67808d5ea1f563f8e3ab4cf3524dc492c18",
+      "bytes": 259,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/9aa83ea1ef493f9dff31f34d639ef823489af63d15cf7e112d0ab9c41607a6d2.0.output.hex": {
+      "sha256": "79ec5127246658203c5e8c3386415b38213b294f955b089c36b5ec3addc00a63",
+      "bytes": 892,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/35dfbbeacf2b272965afebf93506af4db68b51246ebc88a326a6ab5f745454ca.0.output.hex": {
+      "sha256": "9b848f1bfc8bed436f8559d55cb60df68f8f8a43eeef98e7ba387edc773e371a",
+      "bytes": 5801,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/58fe1a06294925f67725afbb87c1a306027c96bee6e8138a89d7248d2996a8df.1.output.hex": {
+      "sha256": "9e38010abb61d56d0945b3a2f4d513c14f046b8ad0103f43107cd1d19ec34e63",
+      "bytes": 37,
+      "domain": "decoded CBOR"
+    },
+    "batch-inputs/884c9befc41220fbfb2026a79e2a0a293797a0de0f29f6e3ce13977fe7329e6f.0.output.hex": {
+      "sha256": "3becefb457c6544a962f59001524d947f01eedfe29b76ad5367d099387ec60f8",
+      "bytes": 93,
+      "domain": "decoded CBOR"
+    },
+    "../musashi-native-submission/byron-genesis.json": {
+      "sha256": "4620a2a14b26731467c954263eb2af9b86e5f5248aae247f1c183ca0368dde65",
+      "bytes": 1384,
+      "domain": "file bytes"
+    },
+    "../musashi-native-submission/shelley-genesis.json": {
+      "sha256": "da8508afc546a0b1824d93629a7a5fc8c0898d85095c2cf1b25730eb99d5a151",
+      "bytes": 2761,
+      "domain": "file bytes"
+    },
+    "../musashi-native-submission/alonzo-genesis.json": {
+      "sha256": "23bf365cae730137ad6868787f20ef4f58e446d22617d7b824f1c75695c760b5",
+      "bytes": 2320,
+      "domain": "file bytes"
+    },
+    "../musashi-native-submission/conway-genesis.json": {
+      "sha256": "51e9d92f09ea79e61811983b4b1e299926a61b352c3313aaebc7c287169ae2f0",
+      "bytes": 3914,
+      "domain": "file bytes"
+    },
+    "../musashi-native-submission/registration-dijkstra-genesis.json": {
+      "sha256": "e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be",
+      "bytes": 3028,
+      "domain": "file bytes"
+    },
+    "../musashi-native-submission/registration-epoch64-parameters.json": {
+      "sha256": "56dae0ae1d97b172225555804c621a1dc74ff58f5f4963b9118add52592acea6",
+      "bytes": 50968,
+      "domain": "file bytes"
+    },
+    "../musashi-native-submission/registration-certificate-state.json": {
+      "sha256": "d28a6c537d0e1a07cfc091ec2bcfda341974fcc8411ba1280726edf6707fae42",
+      "bytes": 4094,
+      "domain": "file bytes"
+    },
+    "../musashi-native-submission/control.mempool.hex": {
+      "sha256": "99208f4643d309383001aaa406d5c6cd7cd8fde8be030aa538a859f69eb85672",
+      "bytes": 196,
+      "domain": "decoded CBOR"
+    },
+    "../musashi-native-submission/control.input.hex": {
+      "sha256": "36f6bd747f2852f369c622f043c006bbae1998678eba089b898461f0c6f61be8",
+      "bytes": 37,
+      "domain": "decoded CBOR"
+    }
+  },
+  "parameters": "Reused historical epoch-64 vector; epoch-65 transition and independent epoch-65 parameters not established by this replay"
+}

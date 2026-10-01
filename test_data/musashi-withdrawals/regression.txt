@@ -1,0 +1,100 @@
+BASELINE: identical test source; no validation adapter
+running 10 tests
+
+thread 'simultaneous_submissions_cannot_overdraw_one_account' (204) panicked at tests/dijkstra_withdrawals.rs:493:5:
+assertion `left == right` failed
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test simultaneous_submissions_cannot_overdraw_one_account ... FAILED
+
+thread 'unavailable_or_inconsistent_account_state_rejects_without_defaults' (205) panicked at tests/dijkstra_withdrawals.rs:204:5:
+expected registered account has no live balance: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("e090c83de5e7d7cb36ea58a8c88ac3a484b985b86cf0226361387b6326")))
+test unavailable_or_inconsistent_account_state_rejects_without_defaults ... FAILED
+
+thread 'rejected_signature_does_not_reserve_rewards_and_zero_withdrawals_can_repeat' (203) panicked at tests/dijkstra_withdrawals.rs:204:5:
+expected VKWrongSignature: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("e090c83de5e7d7cb36ea58a8c88ac3a484b985b86cf0226361387b6326")))
+test rejected_signature_does_not_reserve_rewards_and_zero_withdrawals_can_repeat ... FAILED
+
+thread 'confirmation_rollback_and_drop_update_withdrawal_reservations' (199) panicked at tests/dijkstra_withdrawals.rs:377:10:
+called `Result::unwrap()` on an `Err` value: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("e090c83de5e7d7cb36ea58a8c88ac3a484b985b86cf0226361387b6326")))
+
+thread 'failed_v3_execution_leaves_accounts_and_mempool_unchanged' (200) panicked at tests/dijkstra_withdrawals.rs:204:5:
+expected Phase2ValidationRejected: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("f0550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b")))
+test confirmation_rollback_and_drop_update_withdrawal_reservations ... FAILED
+test failed_v3_execution_leaves_accounts_and_mempool_unchanged ... FAILED
+
+thread 'captured_v3_withdrawals_validate_both_phases_without_changing_state' (197) panicked at tests/dijkstra_withdrawals.rs:181:68:
+called `Result::unwrap()` on an `Err` value: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("f0550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b")))
+test captured_v3_withdrawals_validate_both_phases_without_changing_state ... FAILED
+
+thread 'pending_and_inflight_withdrawals_reserve_only_available_rewards' (202) panicked at tests/dijkstra_withdrawals.rs:352:58:
+called `Result::unwrap()` on an `Err` value: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("e090c83de5e7d7cb36ea58a8c88ac3a484b985b86cf0226361387b6326")))
+test pending_and_inflight_withdrawals_reserve_only_available_rewards ... FAILED
+
+thread 'absent_deregistered_and_unreadable_accounts_do_not_become_zero_balances' (196) panicked at tests/dijkstra_withdrawals.rs:204:5:
+expected unregistered account: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("e090c83de5e7d7cb36ea58a8c88ac3a484b985b86cf0226361387b6326")))
+test absent_deregistered_and_unreadable_accounts_do_not_become_zero_balances ... FAILED
+
+thread 'captured_zero_withdrawal_requires_registered_zero_balance' (198) panicked at tests/dijkstra_withdrawals.rs:204:5:
+expected unregistered account: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("f0550fafb22a38e9df21ca1735f9eb7ec4ca75fb6efcd2a6d0d2c7d69b")))
+test captured_zero_withdrawal_requires_registered_zero_balance ... FAILED
+
+thread 'key_withdrawals_allow_zero_partial_and_full_but_not_stake_or_overdraft' (201) panicked at tests/dijkstra_withdrawals.rs:305:54:
+called `Result::unwrap()` on an `Err` value: ChainError(Phase1ValidationRejected(DijkstraAccountStateUnavailable("e090c83de5e7d7cb36ea58a8c88ac3a484b985b86cf0226361387b6326")))
+test key_withdrawals_allow_zero_partial_and_full_but_not_stake_or_overdraft ... FAILED
+
+failures:
+
+failures:
+    absent_deregistered_and_unreadable_accounts_do_not_become_zero_balances
+    captured_v3_withdrawals_validate_both_phases_without_changing_state
+    captured_zero_withdrawal_requires_registered_zero_balance
+    confirmation_rollback_and_drop_update_withdrawal_reservations
+    failed_v3_execution_leaves_accounts_and_mempool_unchanged
+    key_withdrawals_allow_zero_partial_and_full_but_not_stake_or_overdraft
+    pending_and_inflight_withdrawals_reserve_only_available_rewards
+    rejected_signature_does_not_reserve_rewards_and_zero_withdrawals_can_repeat
+    simultaneous_submissions_cannot_overdraw_one_account
+    unavailable_or_inconsistent_account_state_rejects_without_defaults
+
+test result: FAILED. 0 passed; 10 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+error: test failed, to rerun pass `--test dijkstra_withdrawals`
+
+FIXED:
+running 10 tests
+test simultaneous_submissions_cannot_overdraw_one_account ... ok
+test failed_v3_execution_leaves_accounts_and_mempool_unchanged ... ok
+test absent_deregistered_and_unreadable_accounts_do_not_become_zero_balances ... ok
+test key_withdrawals_allow_zero_partial_and_full_but_not_stake_or_overdraft ... ok
+test confirmation_rollback_and_drop_update_withdrawal_reservations ... ok
+test captured_zero_withdrawal_requires_registered_zero_balance ... ok
+test unavailable_or_inconsistent_account_state_rejects_without_defaults ... ok
+test rejected_signature_does_not_reserve_rewards_and_zero_withdrawals_can_repeat ... ok
+test captured_v3_withdrawals_validate_both_phases_without_changing_state ... ok
+test pending_and_inflight_withdrawals_reserve_only_available_rewards ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+     Running tests/musashi_submission.rs (target/debug/deps/musashi_submission-865cc3eb77d33bf6)
+
+running 16 tests
+test unsupported_unregistration_rejects_explicitly ... ok
+test captured_control_submission ... ok
+test scripted_subtransaction_is_explicitly_outside_native_evaluation ... ok
+test captured_settings_submission ... ok
+test historical_native_evaluation_keeps_full_parameters_and_budgets ... ok
+test indefinite_native_envelopes_preserve_bytes_but_extra_fields_reject ... ok
+test registered_credential_rejects_and_validation_does_not_commit_state ... ok
+test v4_reference_script_is_rejected_by_native_evaluation ... ok
+test block_only_envelopes_are_evidence_not_relay_payloads ... ok
+test captured_alternate_mempool_wrappers_submission ... ok
+test captured_validity_third_relay_era ... ok
+test unknown_protocols_and_malformed_envelopes_reject ... ok
+test original_signatures_are_verified ... ok
+test accepted_validity_third_wrapper_preserves_bytes_and_false_rejects ... ok
+test pending_registration_reserves_credential_without_changing_ledger_state ... ok
+test earlier_conway_submission_still_accepts_original_signed_transaction ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.54s
