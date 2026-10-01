@@ -78,7 +78,14 @@ This proves the local transport boundary, not acceptance by a live Cardano node.
 Synthetic negative tests cover unknown future protocols, malformed/trailing
 bytes, tampered signatures, already-registered and pending credentials, native
 UnReg, V4 reference scripts and scripted subtransactions. Successful validation
-does not commit provisional certificate state. Missing active parameters/genesis
+does not commit provisional certificate state. The pending-credential regression
+uses two synthetic, signed key registrations with separate funded inputs and the
+same credential. Each validates independently; once the first is pending or
+inflight, the second must fail specifically as already registered while its input
+remains available. Stored account and funding state remain unchanged. This avoids
+depending on whether input or certificate checks run first. The generator and
+proof limits are recorded under `synthetic_cases` in `provenance.json`; original
+capture files remain unchanged. Missing active parameters/genesis
 remain errors. The full Pallas native exclusions remain authoritative: protocol
 12.0 top-level V3 Reg reference scripts and the audited builtin/input/output
 subset only. General V3 deposit/refund context encoding does not establish native
