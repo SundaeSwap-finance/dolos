@@ -59,43 +59,75 @@ fn event_to_wait_for_tx_response(event: MempoolEvent) -> WaitForTxResponse {
     }
 }
 
-fn tx_eval_to_u5c(eval: Result<MempoolTx, DomainError>) -> u5c::cardano::TxEval {
-    match eval {
-        Ok(tx) => u5c::cardano::TxEval {
-            ex_units: tx.report.iter().flatten().try_fold(
-                u5c::cardano::ExUnits::default(),
-                |acc, eval| {
-                    Some(ExUnits {
-                        steps: acc.steps + eval.units.steps,
-                        memory: acc.memory + eval.units.mem,
-                    })
-                },
-            ),
-            redeemers: tx
-                .report
-                .iter()
-                .flatten()
-                .map(|x| u5c::cardano::Redeemer {
-                    purpose: x.tag as i32,
-                    index: x.index,
-                    ex_units: Some(u5c::cardano::ExUnits {
-                        steps: x.units.steps,
-                        memory: x.units.mem,
-                    }),
-                    ..Default::default()
-                })
-                .collect(),
-            fee: None,      // TODO
-            traces: vec![], // TODO
-            ..Default::default()
-        },
-        Err(e) => u5c::cardano::TxEval {
-            errors: vec![u5c::cardano::EvalError {
-                msg: format!("{e:#?}"),
-            }],
-            ..Default::default()
-        },
+fn tx_eval_to_u5c(
+    eval: Result<dolos_core::mempool::EvalReport, DomainError>,
+) -> u5c::cardano::TxEval {
+    let report = match eval {
+        Ok(report) => report,
+        Err(e) => {
+            return u5c::cardano::TxEval {
+                errors: vec![u5c::cardano::EvalError {
+                    msg: format!("{e:#?}"),
+                }],
+                ..Default::default()
+            }
+        }
+    };
+    let mut result = u5c::cardano::TxEval {
+        ex_units: report.iter().try_fold(ExUnits::default(), |acc, eval| {
+            Some(ExUnits {
+                steps: acc.steps.checked_add(eval.units.steps)?,
+                memory: acc.memory.checked_add(eval.units.mem)?,
+            })
+        }),
+        ..Default::default()
+    };
+    if result.ex_units.is_none() {
+        result.errors.push(u5c::cardano::EvalError {
+            msg: "total execution units overflow".into(),
+        });
     }
+    for entry in report {
+        use pallas::ledger::primitives::conway::RedeemerTag;
+        use u5c::cardano::RedeemerPurpose;
+        let purpose = match entry.tag {
+            RedeemerTag::Spend => RedeemerPurpose::Spend,
+            RedeemerTag::Mint => RedeemerPurpose::Mint,
+            RedeemerTag::Cert => RedeemerPurpose::Cert,
+            RedeemerTag::Reward => RedeemerPurpose::Reward,
+            RedeemerTag::Vote => RedeemerPurpose::Vote,
+            RedeemerTag::Propose => RedeemerPurpose::Propose,
+        };
+        if !entry.success {
+            result.errors.push(u5c::cardano::EvalError {
+                msg: format!(
+                    "{:?}[{}]: {}",
+                    entry.tag,
+                    entry.index,
+                    entry
+                        .failure_message
+                        .as_deref()
+                        .unwrap_or("script evaluation failed")
+                ),
+            });
+        }
+        result.traces.extend(
+            entry
+                .logs
+                .into_iter()
+                .map(|msg| u5c::cardano::EvalTrace { msg }),
+        );
+        result.redeemers.push(u5c::cardano::Redeemer {
+            purpose: purpose as i32,
+            index: entry.index,
+            ex_units: Some(ExUnits {
+                steps: entry.units.steps,
+                memory: entry.units.mem,
+            }),
+            ..Default::default()
+        });
+    }
+    result
 }
 
 #[async_trait::async_trait]
@@ -206,7 +238,7 @@ where
 
         let chain = self.domain.read_chain();
 
-        let result = self.domain.validate_tx(&chain, &tx_raw);
+        let result = self.domain.estimate_tx(&chain, &tx_raw);
         let result = tx_eval_to_u5c(result);
 
         let report = AnyChainEval {
@@ -217,4 +249,14 @@ where
             report: Some(report),
         }))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    include!("../submit_tests.rs");
+}
+
+#[cfg(test)]
+mod mapping_tests {
+    include!("../submit_mapping_tests.rs");
 }

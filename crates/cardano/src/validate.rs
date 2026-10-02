@@ -82,7 +82,7 @@ pub fn validate_tx<D: Domain>(
         check_dijkstra_withdrawal_reservations(&cert_state, utxos)?;
     }
 
-    let report = evaluate_decoded::<D>(&tx, utxos, &env.prot_params)?;
+    let report = evaluate_decoded::<D>(&tx, utxos, &env.prot_params, false)?;
 
     for eval in report.iter() {
         if !eval.success {
@@ -113,13 +113,29 @@ pub fn evaluate_tx<D: Domain>(
     let active = crate::load_effective_pparams::<D>(utxos.state())?;
     let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
     let pparams = validation_parameters(&active, genesis)?;
-    evaluate_decoded::<D>(&tx, utxos, &pparams)
+    evaluate_decoded::<D>(&tx, utxos, &pparams, false)
+}
+
+/// Estimate native script costs independently of signatures and declared budgets.
+/// Earlier eras retain their existing phase-two evaluation behavior. Successful
+/// per-script estimates may sum above the transaction limit; admission still
+/// requires phase one and budget-enforcing phase two through `validate_tx`.
+pub fn estimate_tx<D: Domain>(
+    cbor: &[u8],
+    utxos: &MempoolAwareUtxoStore<D>,
+    genesis: &Genesis,
+) -> Result<pallas_validate::phase2::EvalReport, ChainError> {
+    let active = crate::load_effective_pparams::<D>(utxos.state())?;
+    let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
+    let pparams = validation_parameters(&active, genesis)?;
+    evaluate_decoded::<D>(&tx, utxos, &pparams, true)
 }
 
 fn evaluate_decoded<D: Domain>(
     tx: &MultiEraTx<'_>,
     utxos: &MempoolAwareUtxoStore<D>,
     pparams: &MultiEraProtocolParameters,
+    estimate: bool,
 ) -> Result<pallas_validate::phase2::EvalReport, ChainError> {
     use dolos_core::TxoRef;
 
@@ -144,8 +160,12 @@ fn evaluate_decoded<D: Domain>(
         })
         .collect::<Result<_, _>>()?;
 
-    let report = pallas_validate::phase2::evaluate_tx(tx, pparams, &utxos, &slot_config)
-        .map_err(|e| ChainError::Phase2EvaluationError(e.to_string()))?;
+    let report = if estimate && tx.era() == Era::Dijkstra {
+        pallas_validate::phase2::estimate_tx(tx, pparams, &utxos, &slot_config)
+    } else {
+        pallas_validate::phase2::evaluate_tx(tx, pparams, &utxos, &slot_config)
+    }
+    .map_err(|e| ChainError::Phase2EvaluationError(e.to_string()))?;
 
     Ok(report)
 }

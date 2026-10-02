@@ -17,6 +17,18 @@ static SUBMIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// This trait extends any `Domain` implementation with methods for
 /// validating and submitting transactions to the mempool.
 pub trait SubmitExt: Domain {
+    /// Estimate script costs using ledger and mempool inputs, without admission
+    /// validation or inserting the transaction into the mempool.
+    #[instrument(skip_all)]
+    fn estimate_tx(
+        &self,
+        chain: &Self::Chain,
+        cbor: &[u8],
+    ) -> Result<crate::mempool::EvalReport, DomainError> {
+        let utxos = MempoolAwareUtxoStore::<'_, Self>::new(self.state(), self.mempool());
+        Ok(chain.estimate_tx(cbor, &utxos, &self.genesis())?)
+    }
+
     /// Validate a transaction against the current ledger state.
     ///
     /// Checks that the transaction is valid according to the current

@@ -1,0 +1,335 @@
+{
+  "date": "2026-10-02",
+  "platform": "Linux x86_64",
+  "rust_toolchain": "1.97.0",
+  "dolos_baseline": "b26c8a7cc547e2242b6698b634300acd40fb7a04",
+  "pallas_revision": "3b85c27dd665474e49adcbd328364e39c26bf27f",
+  "publication": "Pallas revision verified published; Dolos remote publication not authorized",
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/rodrigo/projects/dolos/target/musashi-s07-fixed",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0"
+  },
+  "regression": {
+    "baseline": {
+      "command": "cargo test --manifest-path target/dolos-estimation-baseline-source/Cargo.toml --offline --locked -p dolos --lib estimation_rpc_ -- --nocapture",
+      "target": "target/musashi-s07-baseline",
+      "passed": 6,
+      "failed": 14,
+      "production": "Unmodified baseline; only test inclusion and identical test module added"
+    },
+    "fixed": {
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dolos",
+        "--lib",
+        "estimation_",
+        "--",
+        "--nocapture"
+      ],
+      "target": "target/musashi-s07-fixed",
+      "passed": 26,
+      "failed": 0,
+      "rpc_tests": 20,
+      "mapping_tests": 6
+    }
+  },
+  "checks": [
+    {
+      "name": "submission",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--test",
+        "musashi_submission",
+        "--test",
+        "dijkstra_withdrawals"
+      ],
+      "exit_code": 0,
+      "seconds": 48.86,
+      "counts": {
+        "passed": 26,
+        "failed": 0,
+        "ignored": 0
+      },
+      "failed_tests": [],
+      "log": "target/dolos-estimation-checks/submission.log",
+      "log_sha256": "79e03995efa483bfa66a0c48d9cdc47ca8e0555182f73be0b14c887239774bea"
+    },
+    {
+      "name": "workspace-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-fail-fast"
+      ],
+      "exit_code": 0,
+      "seconds": 210.41,
+      "counts": {
+        "passed": 1828,
+        "failed": 0,
+        "ignored": 36
+      },
+      "failed_tests": [],
+      "log": "target/dolos-estimation-checks/workspace-tests.log",
+      "log_sha256": "a7e539d9043393dda85cae79c7450c6b3702a13c9a8e5624fcacfe508ab2e50a"
+    },
+    {
+      "name": "strict-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--exclude",
+        "dolos-minibf",
+        "--exclude",
+        "dolos-minikupo",
+        "--exclude",
+        "dolos-trp",
+        "--no-fail-fast"
+      ],
+      "exit_code": 101,
+      "seconds": 184.32,
+      "counts": {
+        "passed": 1260,
+        "failed": 14,
+        "ignored": 41
+      },
+      "failed_tests": [
+        "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+        "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+        "every_lookup_by_hash_finds_each_sub_transaction",
+        "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+        "minibf_address_routes_count_each_sub_transaction",
+        "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+        "minibf_block_routes_count_each_sub_transaction",
+        "minibf_resolves_an_input_a_sub_transaction_made",
+        "minibf_serves_each_sub_transaction_by_its_own_hash",
+        "minikupo_matches_the_outputs_of_a_sub_transaction",
+        "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+        "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+        "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+        "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+      ],
+      "log": "target/dolos-estimation-checks/strict-tests.log",
+      "log_sha256": "0b616a7593bfff98b4ab5212f70cece73bf5ce04b081d2abfa612784c609c741"
+    },
+    {
+      "name": "fixed-final",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dolos",
+        "--lib",
+        "estimation_",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "seconds": 5.78,
+      "counts": {
+        "passed": 26,
+        "failed": 0,
+        "ignored": 0
+      },
+      "log": "target/dolos-estimation-checks/fixed-final.log",
+      "log_sha256": "5805862132ef32e0eb84bf1e158e2a545092941dc399a5fedf801675b51bbabe"
+    },
+    {
+      "name": "clippy-final",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "seconds": 16.57,
+      "counts": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "log": "target/dolos-estimation-checks/clippy-final.log",
+      "log_sha256": "020b8e36064f771a2fe38bf4dddd8b3f4297fc8b2762f7c640c0e9c3ef202a07"
+    },
+    {
+      "name": "build-final",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "seconds": 3.32,
+      "counts": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "log": "target/dolos-estimation-checks/build-final.log",
+      "log_sha256": "bc9b6ca66694e358753014e795aebd506ccebe6c5f77bb9ff75b911204978450"
+    }
+  ],
+  "preexisting": {
+    "strict_failures": [
+      "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+      "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+      "every_lookup_by_hash_finds_each_sub_transaction",
+      "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+      "minibf_address_routes_count_each_sub_transaction",
+      "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+      "minibf_block_routes_count_each_sub_transaction",
+      "minibf_resolves_an_input_a_sub_transaction_made",
+      "minibf_serves_each_sub_transaction_by_its_own_hash",
+      "minikupo_matches_the_outputs_of_a_sub_transaction",
+      "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+      "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+      "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+      "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+    ],
+    "strict_failure_comparison": "Exact same 14 test names as baseline reconciliation at b26c8a7; unchanged epoch-coherence fixture failures",
+    "clippy_warning_locations": [
+      {
+        "file": "crates/cardano/src/roll/dreps.rs",
+        "line": 178,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/cardano/src/utxoset.rs",
+        "line": 601,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/cardano/src/utxoset.rs",
+        "line": 605,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/cardano/src/utxoset.rs",
+        "line": 635,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/core/src/crawl.rs",
+        "line": 50,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/core/tests/crawl_gap.rs",
+        "line": 39,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/core/tests/crawl_gap.rs",
+        "line": 60,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/fjall/src/archive/mod.rs",
+        "line": 1087,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/fjall/src/archive/mod.rs",
+        "line": 1150,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/minibf/src/routes/accounts.rs",
+        "line": 601,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/minibf/src/routes/accounts.rs",
+        "line": 602,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/redb3/src/state/mod.rs",
+        "line": 136,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/redb3/src/state/utxoset.rs",
+        "line": 88,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "crates/redb3/src/state/utxoset.rs",
+        "line": 93,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "src/prelude.rs",
+        "line": 165,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "tests/archive_segments.rs",
+        "line": 599,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "tests/musashi_pipeline_replay.rs",
+        "line": 1300,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "xtask/src/perf/storage/codec.rs",
+        "line": 679,
+        "source_identical_to_baseline": true
+      },
+      {
+        "file": "xtask/src/perf/storage/node.rs",
+        "line": 415,
+        "source_identical_to_baseline": true
+      }
+    ],
+    "future_incompatibility": "proc-macro-error2 2.0.1",
+    "format_configuration": "Stable rustfmt ignores existing nightly-only wrap_comments setting"
+  },
+  "additional_checks": {
+    "changed_rust_formatting": "passed",
+    "git_diff_check": "passed",
+    "native_submission_checksums": "19 passed",
+    "withdrawal_checksums": "25 passed",
+    "estimation_provenance_verifier": "passed",
+    "locked_metadata": "passed with published Git revision",
+    "lockfile_scope": "Exactly 13 Pallas source revision replacements; versions and dependency lists unchanged",
+    "baseline_source_hashes": "Identical to final RPC test source; baseline code/pins verified against git show HEAD",
+    "baseline_wiring_patch": "reverse dry-run passes on prepared baseline"
+  },
+  "limitations": [
+    "In-process tonic service tests; no HTTP/2 transport or live-node submission test",
+    "Historical node/evaluator builds and current spendability remain unknown",
+    "Native Trace builtin support is not expanded; logs mapped using synthetic reports",
+    "Earlier-era behavior preserved; no full native Dijkstra conformance claim",
+    "Registry Docker suite not applicable; no snapshot/registry or Stelae changes",
+    "No macOS/Windows run"
+  ],
+  "development_notes": "Initial wrong binary test filter, assertion display spelling and synthetic fee setup corrected before final identical baseline/fixed reproduction. Duplicate-module test-wiring warnings removed with existing include! style; final lint/build/targeted suite rerun. Initial logs remain local and are not final evidence."
+}
