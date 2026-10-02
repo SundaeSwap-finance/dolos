@@ -164,6 +164,18 @@ impl MempoolStore for EphemeralMempool {
             self.notify(tx);
         }
 
+        // confirm() also moves still-propagated entries into this map. A
+        // later peer acknowledgement must update them, but never regress an
+        // already confirmed transaction or reset its expiry counters.
+        for hash in hashes {
+            if let Some(tx) = state.acknowledged.get_mut(hash) {
+                if tx.stage == MempoolTxStage::Propagated {
+                    tx.stage = MempoolTxStage::Acknowledged;
+                    self.notify(tx.clone());
+                }
+            }
+        }
+
         self.log_state(&state);
         Ok(())
     }

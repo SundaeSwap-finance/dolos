@@ -1,0 +1,362 @@
+{
+  "baseline": "b0c772d84923a62b62dda5154c7327d8f56c733d",
+  "pallas_unchanged": "3b85c27dd665474e49adcbd328364e39c26bf27f",
+  "baseline_production_matches_head": true,
+  "baseline_tests_equal_fixed": true,
+  "source_sha256": {
+    "src/sync/submit.rs": "47f2fc9d2eb68f7d9e6d8fa0e1b038ac24e45841c743da959d27d78b7f0586bc",
+    "src/serve/grpc/v1alpha/submit.rs": "41f1423568f002cf42f0d27438b0e09993b07ab4d8d27ad0d3e74e310df2d04f",
+    "src/serve/grpc/v1beta/submit.rs": "519c0dded5fa4817b8d415c5370361d2225d2db003c7e782e0d3d3904e0c02cc",
+    "crates/core/src/builtin/mempool.rs": "293897b9b81407fead97112568e1d8d0f83f9a6da34fe80e408daed95bda67f1"
+  },
+  "environment": {
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0",
+    "separate_build_outputs": [
+      "target/musashi-s07-baseline",
+      "target/musashi-s07-fixed"
+    ],
+    "sockets": "isolated loopback only"
+  },
+  "checks": [
+    {
+      "name": "baseline",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dolos",
+        "--lib",
+        "recovery_",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 101,
+      "counts": {
+        "passed": 0,
+        "failed": 8,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "fixed",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dolos",
+        "--lib",
+        "sync::submit::tests",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 1,
+      "counts": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "build",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "workspace-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "passed": 1846,
+        "failed": 0,
+        "ignored": 36
+      }
+    },
+    {
+      "name": "strict-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--exclude",
+        "dolos-minibf",
+        "--exclude",
+        "dolos-minikupo",
+        "--exclude",
+        "dolos-trp"
+      ],
+      "exit_code": 101,
+      "counts": {
+        "passed": 139,
+        "failed": 2,
+        "ignored": 4
+      }
+    },
+    {
+      "name": "strict-complete",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--exclude",
+        "dolos-minibf",
+        "--exclude",
+        "dolos-minikupo",
+        "--exclude",
+        "dolos-trp",
+        "--no-fail-fast"
+      ],
+      "exit_code": 101,
+      "counts": {
+        "passed": 1278,
+        "failed": 14,
+        "ignored": 41
+      },
+      "failed_tests": [
+        "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+        "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+        "every_lookup_by_hash_finds_each_sub_transaction",
+        "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+        "minibf_address_routes_count_each_sub_transaction",
+        "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+        "minibf_block_routes_count_each_sub_transaction",
+        "minibf_resolves_an_input_a_sub_transaction_made",
+        "minibf_serves_each_sub_transaction_by_its_own_hash",
+        "minikupo_matches_the_outputs_of_a_sub_transaction",
+        "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+        "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+        "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+        "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+      ]
+    },
+    {
+      "name": "final-clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "failed_tests": []
+    },
+    {
+      "name": "final-build",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "failed_tests": []
+    },
+    {
+      "name": "final-lib",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dolos",
+        "--lib"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "passed": 141,
+        "failed": 0,
+        "ignored": 4
+      },
+      "failed_tests": []
+    }
+  ],
+  "limitations": {
+    "format_baseline_exit": 1,
+    "format_baseline_files": [
+      "crates/cardano/src/forks.rs",
+      "crates/cardano/src/roll/batch.rs",
+      "crates/cardano/src/roll/proposals.rs",
+      "crates/cardano/tests/genesis_stake_pools.rs",
+      "crates/core/src/sync.rs",
+      "crates/minibf/src/routes/scripts.rs",
+      "src/bin/dolos/daemon.rs",
+      "src/sync/leios.rs",
+      "src/sync/pull.rs"
+    ],
+    "format_fixed_files": [
+      "crates/cardano/src/forks.rs",
+      "crates/cardano/src/roll/batch.rs",
+      "crates/cardano/src/roll/proposals.rs",
+      "crates/cardano/tests/genesis_stake_pools.rs",
+      "crates/core/src/sync.rs",
+      "crates/minibf/src/routes/scripts.rs",
+      "src/bin/dolos/daemon.rs",
+      "src/sync/leios.rs",
+      "src/sync/pull.rs"
+    ],
+    "format_same": true,
+    "clippy_baseline_locations": [
+      "crates/cardano/src/roll/dreps.rs:178:27",
+      "crates/cardano/src/utxoset.rs:601:30",
+      "crates/cardano/src/utxoset.rs:605:30",
+      "crates/cardano/src/utxoset.rs:635:14",
+      "crates/core/src/crawl.rs:50:57",
+      "crates/core/tests/crawl_gap.rs:39:80",
+      "crates/core/tests/crawl_gap.rs:60:60",
+      "crates/fjall/src/archive/mod.rs:1087:25",
+      "crates/fjall/src/archive/mod.rs:1150:25",
+      "crates/minibf/src/routes/accounts.rs:601:23",
+      "crates/minibf/src/routes/accounts.rs:602:24",
+      "crates/redb3/src/state/mod.rs:136:27",
+      "crates/redb3/src/state/utxoset.rs:88:23",
+      "crates/redb3/src/state/utxoset.rs:93:23",
+      "src/prelude.rs:165:46",
+      "tests/archive_segments.rs:599:5",
+      "tests/musashi_pipeline_replay.rs:1300:19",
+      "xtask/src/perf/storage/codec.rs:679:9",
+      "xtask/src/perf/storage/node.rs:415:29"
+    ],
+    "clippy_fixed_locations": [
+      "crates/cardano/src/roll/dreps.rs:178:27",
+      "crates/cardano/src/utxoset.rs:601:30",
+      "crates/cardano/src/utxoset.rs:605:30",
+      "crates/cardano/src/utxoset.rs:635:14",
+      "crates/core/src/crawl.rs:50:57",
+      "crates/core/tests/crawl_gap.rs:39:80",
+      "crates/core/tests/crawl_gap.rs:60:60",
+      "crates/fjall/src/archive/mod.rs:1087:25",
+      "crates/fjall/src/archive/mod.rs:1150:25",
+      "crates/minibf/src/routes/accounts.rs:601:23",
+      "crates/minibf/src/routes/accounts.rs:602:24",
+      "crates/redb3/src/state/mod.rs:136:27",
+      "crates/redb3/src/state/utxoset.rs:88:23",
+      "crates/redb3/src/state/utxoset.rs:93:23",
+      "src/prelude.rs:165:46",
+      "tests/archive_segments.rs:599:5",
+      "tests/musashi_pipeline_replay.rs:1300:19",
+      "xtask/src/perf/storage/codec.rs:679:9",
+      "xtask/src/perf/storage/node.rs:415:29"
+    ],
+    "clippy_added": [],
+    "clippy_removed": [],
+    "strict_previous_failures": [
+      "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+      "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+      "every_lookup_by_hash_finds_each_sub_transaction",
+      "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+      "minibf_address_routes_count_each_sub_transaction",
+      "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+      "minibf_block_routes_count_each_sub_transaction",
+      "minibf_resolves_an_input_a_sub_transaction_made",
+      "minibf_serves_each_sub_transaction_by_its_own_hash",
+      "minikupo_matches_the_outputs_of_a_sub_transaction",
+      "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+      "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+      "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+      "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+    ],
+    "strict_current_failures": [
+      "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+      "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+      "every_lookup_by_hash_finds_each_sub_transaction",
+      "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+      "minibf_address_routes_count_each_sub_transaction",
+      "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+      "minibf_block_routes_count_each_sub_transaction",
+      "minibf_resolves_an_input_a_sub_transaction_made",
+      "minibf_serves_each_sub_transaction_by_its_own_hash",
+      "minikupo_matches_the_outputs_of_a_sub_transaction",
+      "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+      "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+      "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+      "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+    ],
+    "strict_new_failures": []
+  },
+  "final_logging_followup": "v1beta hash-only logging was added after initial build/default-workspace compilation; final-clippy, final-build, strict-complete and final-lib verify final source",
+  "changed_files_format": "rustfmt --edition 2021 --check on all four changed Rust files passed",
+  "fixture_checks": "both copies equal original signed bytes and decoded-byte SHA-256 in provenance.json",
+  "dependency_warning": "pre-existing proc-macro-error2 2.0.1 future incompatibility notice",
+  "operational_actions": "no live instance/database changes, submissions, worker enablement, Pallas edits, or remote writes"
+}

@@ -10,7 +10,7 @@ use pallas::interop::utxorpc::LedgerContext;
 use std::collections::HashSet;
 use std::pin::Pin;
 use tonic::{Request, Response, Status};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::prelude::*;
 
@@ -147,7 +147,7 @@ where
     ) -> Result<Response<SubmitTxResponse>, Status> {
         let message = request.into_inner();
 
-        info!("received new grpc submit tx request: {:?}", message);
+        debug!("received new grpc submit tx request");
 
         let chain = self.domain.read_chain();
 
@@ -164,6 +164,7 @@ where
             .receive_tx("grpc", &chain, tx_bytes.as_ref())
             .map_err(|e| Status::invalid_argument(format!("could not process tx: {e}")))?;
 
+        info!(tx.hash = %hash, "accepted grpc transaction into mempool");
         Ok(Response::new(SubmitTxResponse {
             r#ref: hash.to_vec().into(),
         }))
