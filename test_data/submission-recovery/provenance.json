@@ -1,0 +1,28 @@
+{
+  "network": "Musashi",
+  "magic": 164,
+  "era": "Dijkstra",
+  "kind": "representative original signed captures; not the failed execution",
+  "reported_failed_transaction": "76bd98f395fee95c8897d5877191e6a2ccbc997d6c5b78c8ee81dde1bb6b67f7",
+  "reported_signed_bytes": "unavailable in supplied logs and documented worker artifacts; terminal scrollback not available",
+  "faults": "synthetic local muxer cancellation at ID/body send; local peer disconnect before/after acknowledgement",
+  "source_revision": "b0c772d84923a62b62dda5154c7327d8f56c733d",
+  "files": [
+    {
+      "file": "control.mempool.hex",
+      "sha256": "99208f4643d309383001aaa406d5c6cd7cd8fde8be030aa538a859f69eb85672",
+      "source": "test_data/musashi-native-submission/control.mempool.hex",
+      "provenance": "../musashi-native-submission/control-provenance.json",
+      "transaction_id": "f4ed3784097149431498b0df6ceaf13b3a531df88838d1f8f39df1269eb54b20"
+    },
+    {
+      "file": "settings-registration.mempool.hex",
+      "sha256": "2242087ec49516077a202bee6c139ebfc7b6f54fe1eb5ed8731a8e291e1ecad7",
+      "source": "test_data/musashi-native-submission/settings-registration.mempool.hex",
+      "provenance": "../musashi-native-submission/registration-provenance.json",
+      "transaction_id": "da910a9bfbe657724d64b505099010dd47f86fb573aa1d20b4da0367163e94c6"
+    }
+  ],
+  "historical_node_version": "unknown; see original capture provenance",
+  "historical_state": "original source fixture parameters/inputs/certificate state; synthetic block observations for transport recovery"
+}

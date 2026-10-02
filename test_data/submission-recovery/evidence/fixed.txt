@@ -1,0 +1,12 @@
+running 9 tests
+test sync::submit::tests::recovery_ephemeral_before_ack ... ok
+test sync::submit::tests::recovery_ephemeral_id_send ... ok
+test sync::submit::tests::recovery_ephemeral_body_send ... ok
+test sync::submit::tests::recovery_ephemeral_after_ack ... ok
+test sync::submit::tests::recovery_redb_id_send ... ok
+test sync::submit::tests::recovery_redb_before_ack ... ok
+test sync::submit::tests::recovery_redb_after_ack ... ok
+test sync::submit::tests::recovery_redb_body_send ... ok
+test sync::submit::tests::musashi_recording_peer_receives_original_signed_bytes ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 136 filtered out; finished in 0.55s

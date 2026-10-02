@@ -1,0 +1,66 @@
+running 8 tests
+
+thread 'sync::submit::tests::recovery_ephemeral_body_send' (2094978) panicked at src/sync/submit.rs:450:13:
+assertion `left == right` failed: replacement must recover inflight IDs: persistent=false, fault=1
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test sync::submit::tests::recovery_ephemeral_body_send ... FAILED
+
+thread 'sync::submit::tests::recovery_ephemeral_id_send' (2094979) panicked at src/sync/submit.rs:450:13:
+assertion `left == right` failed: replacement must recover inflight IDs: persistent=false, fault=0
+  left: 0
+ right: 1
+test sync::submit::tests::recovery_ephemeral_id_send ... FAILED
+
+thread 'sync::submit::tests::recovery_redb_id_send' (2094983) panicked at src/sync/submit.rs:450:13:
+assertion `left == right` failed: replacement must recover inflight IDs: persistent=true, fault=0
+  left: 0
+ right: 1
+test sync::submit::tests::recovery_redb_id_send ... FAILED
+
+thread 'sync::submit::tests::recovery_ephemeral_after_ack' (2094976) panicked at src/sync/submit.rs:450:13:
+assertion `left == right` failed: replacement must recover inflight IDs: persistent=false, fault=3
+  left: 0
+ right: 1
+test sync::submit::tests::recovery_ephemeral_after_ack ... FAILED
+
+thread 'sync::submit::tests::recovery_ephemeral_before_ack' (2094977) panicked at src/sync/submit.rs:450:13:
+assertion `left == right` failed: replacement must recover inflight IDs: persistent=false, fault=2
+  left: 0
+ right: 1
+
+thread 'sync::submit::tests::recovery_redb_body_send' (2094982) panicked at src/sync/submit.rs:450:13:
+assertion `left == right` failed: replacement must recover inflight IDs: persistent=true, fault=1
+  left: 0
+ right: 1
+test sync::submit::tests::recovery_ephemeral_before_ack ... FAILED
+test sync::submit::tests::recovery_redb_body_send ... FAILED
+
+thread 'sync::submit::tests::recovery_redb_before_ack' (2094981) panicked at src/sync/submit.rs:450:13:
+assertion `left == right` failed: replacement must recover inflight IDs: persistent=true, fault=2
+  left: 0
+ right: 1
+test sync::submit::tests::recovery_redb_before_ack ... FAILED
+
+thread 'sync::submit::tests::recovery_redb_after_ack' (2094980) panicked at src/sync/submit.rs:450:13:
+assertion `left == right` failed: replacement must recover inflight IDs: persistent=true, fault=3
+  left: 0
+ right: 1
+test sync::submit::tests::recovery_redb_after_ack ... FAILED
+
+failures:
+
+failures:
+    sync::submit::tests::recovery_ephemeral_after_ack
+    sync::submit::tests::recovery_ephemeral_before_ack
+    sync::submit::tests::recovery_ephemeral_body_send
+    sync::submit::tests::recovery_ephemeral_id_send
+    sync::submit::tests::recovery_redb_after_ack
+    sync::submit::tests::recovery_redb_before_ack
+    sync::submit::tests::recovery_redb_body_send
+    sync::submit::tests::recovery_redb_id_send
+
+test result: FAILED. 0 passed; 8 failed; 0 ignored; 0 measured; 137 filtered out; finished in 0.23s
+
+error: test failed, to rerun pass `-p dolos --lib`
