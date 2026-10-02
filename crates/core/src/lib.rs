@@ -684,6 +684,15 @@ pub trait ChainLogic: Sized + Send + Sync {
         tip.saturating_sub(Self::mutable_slots(domain))
     }
 
+    /// Estimate script execution costs without requiring admission validation.
+    /// A successful report does not establish that the transaction can be submitted.
+    fn estimate_tx<D: Domain>(
+        &self,
+        cbor: &[u8],
+        utxos: &MempoolAwareUtxoStore<D>,
+        genesis: &Genesis,
+    ) -> Result<mempool::EvalReport, ChainError>;
+
     /// Validate a transaction against the current ledger state.
     fn validate_tx<D: Domain>(
         &self,

@@ -219,8 +219,8 @@ authors = ["TxPipe <hello@txpipe.io>"]
 
 [workspace.dependencies]
 # The Pallas umbrella does not forward unstable to its validator.
-pallas-validate = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "952167c57fff4433dbdc0fac40e145e8dae32795", features = ["phase2", "unstable"] }
-pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "952167c57fff4433dbdc0fac40e145e8dae32795", features = ["hardano", "phase2", "unstable", "network2"] }
+pallas-validate = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "3b85c27dd665474e49adcbd328364e39c26bf27f", features = ["phase2", "unstable"] }
+pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "3b85c27dd665474e49adcbd328364e39c26bf27f", features = ["hardano", "phase2", "unstable", "network2"] }
 # pallas = { version = "1.3.0", features = ["hardano", "phase2", "unstable"] }
 # pallas = { git = "https://github.com/txpipe/pallas.git", rev = "a7b5a86", features = ["hardano", "phase2", "unstable"] }
 # pallas = { path = "../pallas/pallas", features = ["hardano", "phase2", "unstable"] }

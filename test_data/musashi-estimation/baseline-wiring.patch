@@ -1,0 +1,22 @@
+--- a/src/serve/grpc/v1alpha/submit.rs
++++ b/src/serve/grpc/v1alpha/submit.rs
+@@ -218,3 +218,8 @@
+         }))
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    include!("../submit_tests.rs");
++}
+--- a/src/serve/grpc/v1beta/submit.rs
++++ b/src/serve/grpc/v1beta/submit.rs
+@@ -218,3 +218,8 @@
+         }))
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    include!("../submit_tests.rs");
++}

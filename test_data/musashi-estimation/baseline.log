@@ -1,0 +1,94 @@
+running 20 tests
+
+thread 'serve::grpc::v1alpha::submit::tests::estimation_rpc_exhaustion_retains_failure_and_units' (70) panicked at src/serve/grpc/v1alpha/../submit_tests.rs:155:5:
+assertion `left == right` failed: TxEval { fee: None, ex_units: None, errors: [EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            TxExUnitsExceeded,\n        ),\n    ),\n)" }], traces: [], redeemers: [] }
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_exhaustion_retains_failure_and_units ... FAILED
+
+thread 'serve::grpc::v1alpha::submit::tests::estimation_rpc_unsigned_zero_budget' (77) panicked at src/serve/grpc/v1alpha/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            ScriptIntegrityHash,\n        ),\n    ),\n)" }]
+test serve::grpc::v1beta::submit::tests::estimation_rpc_missing_input_and_malformed_bytes ... ok
+
+thread 'serve::grpc::v1alpha::submit::tests::estimation_rpc_placeholder_budgets' (72) panicked at src/serve/grpc/v1alpha/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            ScriptIntegrityHash,\n        ),\n    ),\n)" }]
+
+thread 'serve::grpc::v1beta::submit::tests::estimation_rpc_placeholder_budgets' (82) panicked at src/serve/grpc/v1beta/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            ScriptIntegrityHash,\n        ),\n    ),\n)" }]
+
+thread 'serve::grpc::v1alpha::submit::tests::estimation_rpc_unsigned' (76) panicked at src/serve/grpc/v1alpha/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            VKWitnessMissing,\n        ),\n    ),\n)" }]
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_unsigned_zero_budget ... FAILED
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_placeholder_budgets ... FAILED
+test serve::grpc::v1beta::submit::tests::estimation_rpc_placeholder_budgets ... FAILED
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_unsigned ... FAILED
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_request_errors_and_submission_validation ... ok
+
+thread 'serve::grpc::v1alpha::submit::tests::estimation_rpc_captured_registration' (68) panicked at src/serve/grpc/v1alpha/../submit_tests.rs:49:5:
+assertion `left == right` failed
+  left: (2, 0)
+ right: (3, 0)
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_captured_registration ... FAILED
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_missing_input_and_malformed_bytes ... ok
+
+thread 'serve::grpc::v1alpha::submit::tests::estimation_rpc_submission_still_enforces_phase_two' (75) panicked at src/serve/grpc/v1alpha/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase2ValidationRejected(\n        [],\n    ),\n)" }]
+
+thread 'serve::grpc::v1beta::submit::tests::estimation_rpc_captured_registration' (78) panicked at src/serve/grpc/v1beta/../submit_tests.rs:49:5:
+assertion `left == right` failed
+  left: (2, 0)
+ right: (3, 0)
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_submission_still_enforces_phase_two ... FAILED
+test serve::grpc::v1beta::submit::tests::estimation_rpc_captured_registration ... FAILED
+
+thread 'serve::grpc::v1alpha::submit::tests::estimation_rpc_resolves_pending_and_inflight_outputs_without_mutation' (74) panicked at src/serve/grpc/v1alpha/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            ScriptIntegrityHash,\n        ),\n    ),\n)" }]
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_resolves_pending_and_inflight_outputs_without_mutation ... FAILED
+
+thread 'serve::grpc::v1beta::submit::tests::estimation_rpc_exhaustion_retains_failure_and_units' (80) panicked at src/serve/grpc/v1beta/../submit_tests.rs:155:5:
+assertion `left == right` failed: TxEval { fee: None, ex_units: None, errors: [EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            TxExUnitsExceeded,\n        ),\n    ),\n)" }], traces: [], redeemers: [] }
+  left: 0
+ right: 1
+test serve::grpc::v1beta::submit::tests::estimation_rpc_request_errors_and_submission_validation ... ok
+test serve::grpc::v1beta::submit::tests::estimation_rpc_exhaustion_retains_failure_and_units ... FAILED
+
+thread 'serve::grpc::v1beta::submit::tests::estimation_rpc_resolves_pending_and_inflight_outputs_without_mutation' (84) panicked at src/serve/grpc/v1beta/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            ScriptIntegrityHash,\n        ),\n    ),\n)" }]
+test serve::grpc::v1beta::submit::tests::estimation_rpc_resolves_pending_and_inflight_outputs_without_mutation ... FAILED
+
+thread 'serve::grpc::v1beta::submit::tests::estimation_rpc_unsigned' (86) panicked at src/serve/grpc/v1beta/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            VKWitnessMissing,\n        ),\n    ),\n)" }]
+test serve::grpc::v1beta::submit::tests::estimation_rpc_unsigned ... FAILED
+
+thread 'serve::grpc::v1beta::submit::tests::estimation_rpc_unsigned_zero_budget' (87) panicked at src/serve/grpc/v1beta/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase1ValidationRejected(\n        PostAlonzo(\n            ScriptIntegrityHash,\n        ),\n    ),\n)" }]
+test serve::grpc::v1beta::submit::tests::estimation_rpc_unsigned_zero_budget ... FAILED
+
+thread 'serve::grpc::v1beta::submit::tests::estimation_rpc_submission_still_enforces_phase_two' (85) panicked at src/serve/grpc/v1beta/../submit_tests.rs:44:5:
+[EvalError { msg: "ChainError(\n    Phase2ValidationRejected(\n        [],\n    ),\n)" }]
+test serve::grpc::v1beta::submit::tests::estimation_rpc_submission_still_enforces_phase_two ... FAILED
+test serve::grpc::v1alpha::submit::tests::estimation_rpc_earlier_conway ... ok
+test serve::grpc::v1beta::submit::tests::estimation_rpc_earlier_conway ... ok
+
+failures:
+
+failures:
+    serve::grpc::v1alpha::submit::tests::estimation_rpc_captured_registration
+    serve::grpc::v1alpha::submit::tests::estimation_rpc_exhaustion_retains_failure_and_units
+    serve::grpc::v1alpha::submit::tests::estimation_rpc_placeholder_budgets
+    serve::grpc::v1alpha::submit::tests::estimation_rpc_resolves_pending_and_inflight_outputs_without_mutation
+    serve::grpc::v1alpha::submit::tests::estimation_rpc_submission_still_enforces_phase_two
+    serve::grpc::v1alpha::submit::tests::estimation_rpc_unsigned
+    serve::grpc::v1alpha::submit::tests::estimation_rpc_unsigned_zero_budget
+    serve::grpc::v1beta::submit::tests::estimation_rpc_captured_registration
+    serve::grpc::v1beta::submit::tests::estimation_rpc_exhaustion_retains_failure_and_units
+    serve::grpc::v1beta::submit::tests::estimation_rpc_placeholder_budgets
+    serve::grpc::v1beta::submit::tests::estimation_rpc_resolves_pending_and_inflight_outputs_without_mutation
+    serve::grpc::v1beta::submit::tests::estimation_rpc_submission_still_enforces_phase_two
+    serve::grpc::v1beta::submit::tests::estimation_rpc_unsigned
+    serve::grpc::v1beta::submit::tests::estimation_rpc_unsigned_zero_budget
+
+test result: FAILED. 6 passed; 14 failed; 0 ignored; 0 measured; 101 filtered out; finished in 3.96s
+
+error: test failed, to rerun pass `-p dolos --lib`
