@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use dolos_cardano::CardanoLogic;
 use dolos_core::{
-    archive::ArchiveStore as _,
     config::{StorageConfig, SyncConfig},
     *,
 };
@@ -154,41 +153,12 @@ impl pallas::interop::utxorpc::LedgerContext for DomainAdapter {
                 })
                 .collect();
 
-        let missing: Vec<_> = refs.iter().filter(|r| !result.contains_key(r)).collect();
-        if missing.is_empty() {
-            return Some(result);
-        }
-
-        let mut by_tx: HashMap<Vec<u8>, Vec<&pallas::interop::utxorpc::TxoRef>> = HashMap::new();
-        for txo_ref in &missing {
-            by_tx.entry(txo_ref.0.to_vec()).or_default().push(txo_ref);
-        }
-
-        for (tx_hash_bytes, txo_refs) in by_tx {
-            let Ok(Some(slot)) = self.archive().slot_by_tx_hash(&tx_hash_bytes) else {
-                continue;
-            };
-            let Ok(Some(block_bytes)) = self.archive().get_block_by_slot(&slot) else {
-                continue;
-            };
-            let Ok(block) = MultiEraBlock::decode(&block_bytes) else {
-                continue;
-            };
-
-            let Some((_, tx)) = dolos_core::tx_by_hash(&block, &tx_hash_bytes) else {
-                continue;
-            };
-
-            let outputs = tx.outputs();
-            let era = block.era();
-
-            for txo_ref in txo_refs {
-                let Some(output) = outputs.get(txo_ref.1 as usize) else {
-                    continue;
-                };
-                result.insert(*txo_ref, (era, output.encode()));
-            }
-        }
+        let missing: Vec<_> = refs
+            .iter()
+            .filter(|r| !result.contains_key(r))
+            .copied()
+            .collect();
+        result.extend(resolve_archive_inputs(self.archive(), &missing));
 
         Some(result)
     }
@@ -199,5 +169,195 @@ impl pallas::interop::utxorpc::LedgerContext for DomainAdapter {
             .slot_time(slot);
 
         Some(time)
+    }
+}
+
+/// Resolve spent inputs in batches: each historical block is loaded and decoded
+/// once per call, even when many producing transactions share the same block.
+fn resolve_archive_inputs<A: dolos_core::ArchiveStore>(
+    archive: &A,
+    refs: &[pallas::interop::utxorpc::TxoRef],
+) -> pallas::interop::utxorpc::UtxoMap {
+    use pallas::interop::utxorpc::{TxHash, TxoRef, UtxoMap};
+    let start = std::time::Instant::now();
+    let mut by_tx: HashMap<TxHash, Vec<TxoRef>> = HashMap::new();
+    for r in refs {
+        by_tx.entry(r.0).or_default().push(*r);
+    }
+    let mut by_slot: HashMap<u64, HashMap<TxHash, Vec<TxoRef>>> = HashMap::new();
+    for (hash, refs) in by_tx {
+        if let Ok(Some(slot)) = archive.slot_by_tx_hash(hash.as_ref()) {
+            by_slot.entry(slot).or_default().insert(hash, refs);
+        }
+    }
+    let source_blocks = by_slot.len();
+    let mut result = UtxoMap::new();
+    for (slot, mut wanted) in by_slot {
+        let Ok(Some(bytes)) = archive.get_block_by_slot(&slot) else {
+            continue;
+        };
+        let Ok(block) = MultiEraBlock::decode(&bytes) else {
+            continue;
+        };
+        for (_, tx) in dolos_core::applied_txs(&block) {
+            let Some(refs) = wanted.remove(&tx.hash()) else {
+                continue;
+            };
+            let outputs = tx.outputs();
+            for r in refs {
+                if let Some(output) = outputs.get(r.1 as usize) {
+                    result.insert(r, (block.era(), output.encode()));
+                }
+            }
+            if wanted.is_empty() {
+                break;
+            }
+        }
+    }
+    tracing::trace!(requested = refs.len(), resolved = result.len(), source_blocks,
+        elapsed = ?start.elapsed(), "Resolved archived inputs");
+    result
+}
+
+#[cfg(test)]
+mod input_resolution_tests {
+    use super::*;
+    use dolos_core::{indexes::ArchiveIndexDelta, ArchiveWriter};
+    use dolos_testing::{
+        measured::MeasuredStores,
+        synthetic::{build_synthetic_blocks, SyntheticBlockConfig},
+        toy_domain::{MemoryStores, ToyStores},
+    };
+
+    fn store_block<A: ArchiveStore>(
+        archive: &A,
+        bytes: &[u8],
+    ) -> pallas::interop::utxorpc::UtxoMap {
+        let block = MultiEraBlock::decode(bytes).unwrap();
+        let txs = dolos_core::applied_txs(&block);
+        let writer = archive.start_writer().unwrap();
+        writer
+            .apply(
+                &ChainPoint::Specific(block.slot(), block.hash()),
+                &Arc::new(bytes.to_vec()),
+            )
+            .unwrap();
+        writer
+            .apply_index(&[ArchiveIndexDelta {
+                slot: block.slot(),
+                block_hash: block.hash().to_vec(),
+                block_number: Some(block.number()),
+                tx_hashes: txs.iter().map(|(_, tx)| tx.hash().to_vec()).collect(),
+                tags: vec![],
+            }])
+            .unwrap();
+        writer.commit().unwrap();
+        txs.iter()
+            .flat_map(|(_, tx)| {
+                tx.outputs()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, o)| ((tx.hash(), i as u32), (block.era(), o.encode())))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn resolves_multiple_transactions_with_one_source_block_read() {
+        let stores = MeasuredStores::new(MemoryStores::open());
+        let archive = stores.archive();
+        let (blocks, _, _) = build_synthetic_blocks(SyntheticBlockConfig {
+            block_count: 1,
+            txs_per_block: 4,
+            ..Default::default()
+        });
+        let block = MultiEraBlock::decode(&blocks[0]).unwrap();
+        let txs = block.txs();
+        let expected = store_block(archive, &blocks[0]);
+        let mut refs: Vec<_> = expected.keys().copied().collect();
+        refs.push(refs[0]);
+        refs.push((txs[0].hash(), u32::MAX));
+        refs.push(([99u8; 32].into(), 0));
+        archive.counters.reset();
+        assert_eq!(resolve_archive_inputs(archive, &refs), expected);
+        assert_eq!(archive.counters.snapshot().block_reads, 1);
+        // Every successful read feeds exactly one MultiEraBlock::decode call.
+        assert_eq!(
+            archive.counters.snapshot().decoded_bytes,
+            blocks[0].len() as u64
+        );
+        assert_eq!(
+            archive.counters.snapshot().exact_lookups,
+            txs.len() as u64 + 1
+        );
+    }
+
+    #[test]
+    fn resolves_across_blocks_and_skips_missing_or_malformed_history() {
+        let stores = MeasuredStores::new(MemoryStores::open());
+        let archive = stores.archive();
+        let (blocks, _, _) = build_synthetic_blocks(SyntheticBlockConfig {
+            block_count: 2,
+            txs_per_block: 4,
+            ..Default::default()
+        });
+        let expected: pallas::interop::utxorpc::UtxoMap = blocks
+            .iter()
+            .flat_map(|bytes| store_block(archive, bytes))
+            .collect();
+        let writer = archive.start_writer().unwrap();
+        for (slot, hash) in [(100, [97; 32]), (101, [98; 32]), (1, [99; 32])] {
+            writer
+                .apply_index(&[ArchiveIndexDelta {
+                    slot,
+                    tx_hashes: vec![hash.to_vec()],
+                    ..Default::default()
+                }])
+                .unwrap();
+        }
+        writer
+            .apply(
+                &ChainPoint::Specific(100, [97; 32].into()),
+                &Arc::new(vec![0xff]),
+            )
+            .unwrap();
+        writer.commit().unwrap();
+        let mut refs: Vec<_> = expected.keys().copied().collect();
+        refs.extend([
+            ([97; 32].into(), 0),
+            ([98; 32].into(), 0),
+            ([99; 32].into(), 0),
+        ]);
+        archive.counters.reset();
+        assert_eq!(resolve_archive_inputs(archive, &refs), expected);
+        assert_eq!(archive.counters.snapshot().block_reads, 3);
+        archive.counters.reset();
+        assert!(resolve_archive_inputs(archive, &[]).is_empty());
+        assert_eq!(archive.counters.snapshot().block_reads, 0);
+        assert_eq!(archive.counters.snapshot().exact_lookups, 0);
+    }
+
+    #[test]
+    fn preserves_archived_dijkstra_subtransaction_outputs() {
+        // Reuse an existing unchanged capture; no new fixture is required.
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test_data/musashi-w36/ranking-sub-transaction.block"
+        ))
+        .unwrap();
+        let bytes = hex::decode(text.trim()).unwrap();
+        let block = MultiEraBlock::decode(&bytes).unwrap();
+        assert!(dolos_core::applied_txs(&block).iter().any(|(_, tx)| {
+            matches!(tx, pallas::ledger::traverse::MultiEraTx::DijkstraSub(..))
+                && !tx.outputs().is_empty()
+        }));
+        let stores = MeasuredStores::new(MemoryStores::open());
+        let archive = stores.archive();
+        let expected = store_block(archive, &bytes);
+        archive.counters.reset();
+        let refs: Vec<_> = expected.keys().copied().collect();
+        assert_eq!(resolve_archive_inputs(archive, &refs), expected);
+        assert_eq!(archive.counters.snapshot().block_reads, 1);
     }
 }

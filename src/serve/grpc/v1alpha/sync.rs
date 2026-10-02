@@ -1,7 +1,6 @@
 use futures_core::Stream;
 use futures_util::StreamExt;
 use itertools::Itertools;
-use pallas::interop::utxorpc::v1alpha as interop;
 use pallas::interop::utxorpc::v1alpha::spec::sync::BlockRef;
 use pallas::interop::utxorpc::v1alpha::{spec as u5c, Mapper};
 use pallas::interop::utxorpc::LedgerContext;
@@ -9,7 +8,9 @@ use std::pin::Pin;
 use tonic::{Request, Response, Status};
 
 use crate::prelude::*;
+use crate::serve::grpc::block_context::BlockContext;
 use crate::serve::grpc::masking::BlockMask;
+use pallas::ledger::traverse::MultiEraBlock;
 
 const MAX_DUMP_HISTORY_ITEMS: u32 = 100;
 
@@ -21,7 +22,7 @@ fn u5c_to_chain_point(block_ref: u5c::sync::BlockRef) -> Result<ChainPoint, Stat
 }
 
 fn raw_to_anychain<C: LedgerContext>(
-    mapper: &Mapper<C>,
+    context: &C,
     body: &BlockBody,
     mask: BlockMask,
 ) -> u5c::sync::AnyChainBlock {
@@ -32,25 +33,27 @@ fn raw_to_anychain<C: LedgerContext>(
             Default::default()
         },
         chain: if mask.chain {
-            u5c::sync::any_chain_block::Chain::Cardano(mapper.map_block_cbor(body)).into()
+            let block = MultiEraBlock::decode(body).unwrap();
+            let prepared = BlockContext::new(context.clone(), &block);
+            u5c::sync::any_chain_block::Chain::Cardano(Mapper::new(prepared).map_block(&block))
+                .into()
         } else {
             None
         },
     }
 }
 
-fn raw_to_blockref<C: LedgerContext>(
-    mapper: &Mapper<C>,
-    body: &BlockBody,
-) -> Option<u5c::sync::BlockRef> {
-    let block = mapper.map_block_cbor(body);
-    let header = block.header?;
-
+fn raw_to_blockref<C: LedgerContext>(context: &C, body: &BlockBody) -> Option<u5c::sync::BlockRef> {
+    // A tip reference needs no transaction mapping or input resolution.
+    let block = MultiEraBlock::decode(body).unwrap();
     Some(u5c::sync::BlockRef {
-        slot: header.slot,
-        hash: header.hash,
-        height: header.height,
-        timestamp: block.timestamp,
+        slot: block.slot(),
+        hash: block.hash().to_vec().into(),
+        height: block.number(),
+        timestamp: context
+            .get_slot_timestamp(block.slot())
+            .map(|s| s * 1000)
+            .unwrap_or(0),
     })
 }
 
@@ -64,23 +67,23 @@ fn point_to_blockref(point: &ChainPoint, timestamp: u64) -> u5c::sync::BlockRef 
 }
 
 fn tip_event_to_response<C: LedgerContext>(
-    mapper: &Mapper<C>,
+    context: &C,
     event: &TipEvent,
     mask: BlockMask,
 ) -> u5c::sync::FollowTipResponse {
     match event {
         TipEvent::Apply(_, block) => {
-            let block_ref = raw_to_blockref(mapper, block);
+            let block_ref = raw_to_blockref(context, block);
             u5c::sync::FollowTipResponse {
                 action: Some(u5c::sync::follow_tip_response::Action::Apply(
-                    raw_to_anychain(mapper, block, mask),
+                    raw_to_anychain(context, block, mask),
                 )),
                 tip: block_ref,
             }
         }
         TipEvent::Undo(_, block) => u5c::sync::FollowTipResponse {
             action: Some(u5c::sync::follow_tip_response::Action::Undo(
-                raw_to_anychain(mapper, block, mask),
+                raw_to_anychain(context, block, mask),
             )),
             tip: None, // TODO: we don't have easy access to the new tip here
         },
@@ -99,7 +102,6 @@ where
     C: CancelToken,
 {
     domain: D,
-    mapper: interop::Mapper<D>,
     cancel: C,
 }
 
@@ -109,13 +111,7 @@ where
     C: CancelToken,
 {
     pub fn new(domain: D, cancel: C) -> Self {
-        let mapper = Mapper::new(domain.clone());
-
-        Self {
-            domain,
-            mapper,
-            cancel,
-        }
+        Self { domain, cancel }
     }
 }
 
@@ -173,7 +169,7 @@ where
                 return Err(Status::not_found(format!("Failed to find block: {br:?}")));
             };
 
-            out.push(raw_to_anychain(&self.mapper, &body, mask));
+            out.push(raw_to_anychain(&self.domain, &body, mask));
         }
 
         let response = u5c::sync::FetchBlockResponse { block: out };
@@ -247,12 +243,12 @@ where
         let items = range
             .by_ref()
             .take(len)
-            .map(|(_, body)| raw_to_anychain(&self.mapper, &body, mask))
+            .map(|(_, body)| raw_to_anychain(&self.domain, &body, mask))
             .collect();
 
         let next_token = range
             .next()
-            .and_then(|(_, body)| raw_to_blockref(&self.mapper, &body));
+            .and_then(|(_, body)| raw_to_blockref(&self.domain, &body));
 
         let response = u5c::sync::DumpHistoryResponse {
             block: items,
@@ -294,11 +290,11 @@ where
             ))
         })?;
 
-        let mapper = self.mapper.clone();
+        let context = self.domain.clone();
 
         let stream = stream.map(move |log| {
             let log = log.map_err(|e| Status::internal(format!("chain stream failed: {e}")))?;
-            Ok(tip_event_to_response(&mapper, &log, mask))
+            Ok(tip_event_to_response(&context, &log, mask))
         });
 
         Ok(Response::new(Box::pin(stream)))
@@ -334,6 +330,111 @@ mod tests {
     use pallas::interop::utxorpc::v1alpha::spec::sync::sync_service_server::SyncService as _;
 
     use super::*;
+
+    #[derive(Clone)]
+    struct HeaderOnlyContext;
+
+    impl LedgerContext for HeaderOnlyContext {
+        fn get_utxos(
+            &self,
+            _: &[pallas::interop::utxorpc::TxoRef],
+        ) -> Option<pallas::interop::utxorpc::UtxoMap> {
+            panic!("native-only responses and tip references must not resolve inputs");
+        }
+        fn get_slot_timestamp(&self, _: u64) -> Option<u64> {
+            Some(42)
+        }
+    }
+
+    #[test]
+    fn native_only_follow_tip_skips_input_resolution() {
+        let (blocks, _, _) = dolos_testing::synthetic::build_synthetic_blocks(
+            dolos_testing::synthetic::SyntheticBlockConfig {
+                block_count: 2,
+                txs_per_block: 4,
+                spend_previous_outputs: true,
+                ..Default::default()
+            },
+        );
+        let raw = blocks[1].clone();
+        let block = MultiEraBlock::decode(&raw).unwrap();
+        let point = ChainPoint::Specific(block.slot(), block.hash());
+        let response = tip_event_to_response(
+            &HeaderOnlyContext,
+            &TipEvent::Apply(point.clone(), raw.clone()),
+            BlockMask::from_paths(&["native_bytes".to_owned()]),
+        );
+        let tip = response.tip.unwrap();
+        assert_eq!(tip.slot, point.slot());
+        assert_eq!(tip.timestamp, 42_000);
+        match response.action.unwrap() {
+            u5c::sync::follow_tip_response::Action::Apply(block) => {
+                assert_eq!(block.native_bytes.as_ref(), raw.as_slice());
+                assert!(block.chain.is_none());
+            }
+            _ => panic!("expected apply"),
+        }
+    }
+    #[test]
+    fn structured_follow_tip_resolves_once_and_preserves_output() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        #[derive(Clone, Default)]
+        struct CountingContext(Arc<AtomicUsize>);
+        impl LedgerContext for CountingContext {
+            fn get_utxos(
+                &self,
+                _: &[pallas::interop::utxorpc::TxoRef],
+            ) -> Option<pallas::interop::utxorpc::UtxoMap> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                Some(Default::default())
+            }
+            fn get_slot_timestamp(&self, _: u64) -> Option<u64> {
+                Some(42)
+            }
+        }
+        let (blocks, _, _) = dolos_testing::synthetic::build_synthetic_blocks(
+            dolos_testing::synthetic::SyntheticBlockConfig {
+                block_count: 2,
+                txs_per_block: 4,
+                spend_previous_outputs: true,
+                ..Default::default()
+            },
+        );
+        let raw = blocks[1].clone();
+        let block = MultiEraBlock::decode(&raw).unwrap();
+        let point = ChainPoint::Specific(block.slot(), block.hash());
+        let context = CountingContext::default();
+        let expected = Mapper::new(context.clone()).map_block(&block);
+        let header = expected.header.clone().unwrap();
+        context.0.store(0, Ordering::Relaxed);
+        let response = tip_event_to_response(
+            &context,
+            &TipEvent::Apply(point, raw.clone()),
+            BlockMask::from_paths(&[]),
+        );
+        let tip = response.tip.unwrap();
+        assert_eq!(
+            (tip.slot, tip.hash, tip.height, tip.timestamp),
+            (header.slot, header.hash, header.height, expected.timestamp)
+        );
+        match response.action.unwrap() {
+            u5c::sync::follow_tip_response::Action::Apply(result) => {
+                assert_eq!(result.native_bytes.as_ref(), raw.as_slice());
+                assert_eq!(
+                    result.chain,
+                    Some(u5c::sync::any_chain_block::Chain::Cardano(expected))
+                );
+            }
+            _ => panic!("expected apply"),
+        }
+        assert_eq!(context.0.load(Ordering::Relaxed), 1);
+        // Pagination's next token takes the same cheap header-only path.
+        let _ = raw_to_blockref(&context, &raw).unwrap();
+        assert_eq!(context.0.load(Ordering::Relaxed), 1);
+    }
 
     #[tokio::test]
     async fn test_dump_history_pagination() {

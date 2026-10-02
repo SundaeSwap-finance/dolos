@@ -6,6 +6,7 @@ use tracing::{info, warn};
 
 use crate::prelude::*;
 
+mod block_context;
 pub(crate) mod block_refs;
 mod convert;
 mod masking;
