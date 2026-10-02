@@ -137,6 +137,10 @@ fn evaluate_decoded<D: Domain>(
     pparams: &MultiEraProtocolParameters,
     estimate: bool,
 ) -> Result<pallas_validate::phase2::EvalReport, ChainError> {
+    if !requests_scripts(tx) {
+        return Ok(vec![]);
+    }
+
     use dolos_core::TxoRef;
 
     let eras = crate::eras::load_era_summary::<D>(utxos.state())?;
@@ -168,6 +172,20 @@ fn evaluate_decoded<D: Domain>(
     .map_err(|e| ChainError::Phase2EvaluationError(e.to_string()))?;
 
     Ok(report)
+}
+
+/// Whether phase two has anything to run: a redeemer at the top level or in a
+/// sub-transaction. Pallas's Dijkstra evaluator refuses every batch, so a
+/// key-only batch must not reach it.
+fn requests_scripts(tx: &MultiEraTx<'_>) -> bool {
+    !tx.redeemers().is_empty()
+        || tx.as_dijkstra().is_some_and(|tx| {
+            tx.transaction_body
+                .sub_transactions
+                .iter()
+                .flat_map(|subs| subs.iter())
+                .any(|sub| sub.transaction_witness_set.redeemer.is_some())
+        })
 }
 
 /// Submission has no era tag in its signed envelope. Only known protocol
@@ -455,4 +473,23 @@ fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError
         }
     }
     Ok(MultiEraTx::decode_for_era(era, cbor)?)
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    /// A key-only batch carrying one sub-transaction, in the mempool form it was
+    /// submitted in. Musashi included it as tx
+    /// 9582ee5f1c8f9bb023d687bf36ba22d694c435c01f87ef8958b8f6c81d02c942.
+    const KEY_ONLY_BATCH: &str = "83a500d9010281825820c88a71fd0cfaa30e320c737ac064b0fe30de68e9e6d25d922d64488806b80e4401018182581d60a776e47e31d0da1fc98f734cbc036cf9c216aae1b191f35754369f371b0000000252d82085021a0002a9e517d901028183a200d9010281825820c88a71fd0cfaa30e320c737ac064b0fe30de68e9e6d25d922d64488806b80e4400018182581d6021f213394ce9e6ddec232aa9821f6ae9c144d0fdac2853219450a3cd1a003d0900a100d90102818258200f89ac07c0ead276c043938fa4941579cee1ac298d69bdd99c2fbe7e36426375584094c1f7af30f7bb4a233d23e06f8d97cddea6f49bd0462928a10a3b1756623976a5144438ae01f8b34c7d754e6712b22efa3891e9ad3ef211c1fc45be48f7630af612d9010281825820c88a71fd0cfaa30e320c737ac064b0fe30de68e9e6d25d922d64488806b80e4400a100d90102818258206a37d23da740e3246ccdc1ba100e13c5d24d0f7d773effff507c7cb0d647f01f58405c8ba9c49e97b93624183a6a10f909888f25a7764f50044bf78c1ed872febba4e39a526471f0f263fe88167ddaea9e9600d9f349bd3917367a5ff8df272c7206f6";
+
+    #[test]
+    fn a_key_only_batch_requests_no_scripts() {
+        let cbor = hex::decode(KEY_ONLY_BATCH).unwrap();
+        let tx = decode_submission(Era::Dijkstra, &cbor).unwrap();
+        let native = tx.as_dijkstra().unwrap();
+        assert!(native.transaction_body.sub_transactions.is_some());
+        assert!(!requests_scripts(&tx));
+    }
 }
