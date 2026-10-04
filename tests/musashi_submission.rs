@@ -65,7 +65,6 @@ fn evaluate(
     dolos_cardano::validate::evaluate_tx(
         bytes,
         &MempoolAwareUtxoStore::<ToyDomain>::new(domain.state(), domain.mempool()),
-        &domain.genesis(),
     )
 }
 

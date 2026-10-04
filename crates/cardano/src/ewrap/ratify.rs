@@ -247,12 +247,32 @@ pub fn pparam_drep_group(kind: PParamKind) -> Option<DRepGroup> {
         | MinPoolCost
         | AdaPerUtxoByte
         | ExecutionCosts
-        | MinFeeRefScriptCostPerByte => Some(DRepGroup::Economic),
-        MaxBlockBodySize | MaxTransactionSize | MaxBlockHeaderSize | MaxValueSize
-        | MaxTxExUnits | MaxBlockExUnits | MaxCollateralInputs => Some(DRepGroup::Network),
+        | MinFeeRefScriptCostPerByte
+        | MinPoolMargin => Some(DRepGroup::Economic),
+        MaxBlockBodySize
+        | MaxTransactionSize
+        | MaxBlockHeaderSize
+        | MaxValueSize
+        | MaxTxExUnits
+        | MaxBlockExUnits
+        | MaxCollateralInputs
+        | MaxRefScriptSizePerBlock
+        | MaxRefScriptSizePerTx
+        | RefScriptCostStride
+        | RefScriptCostMultiplier
+        | LeiosAnnouncementPeriodLength
+        | LeiosVotePeriodLength
+        | LeiosDiffusionPeriodLength
+        | LeiosCommitteeSize
+        | LeiosQuorumStakeThreshold
+        | MaxEndorserBlockReferencesSize
+        | MaxEndorserBlockTxsSize
+        | MaxEndorserBlockExUnits
+        | MaxRefScriptSizePerEndorserBlock => Some(DRepGroup::Network),
         MaximumEpoch
         | DesiredNumberOfStakePools
         | PoolPledgeInfluence
+        | MaxPledgeLeverage
         | CollateralPercentage
         | CostModelsPlutusV1
         | CostModelsPlutusV2
@@ -293,6 +313,19 @@ pub fn pparam_is_security(kind: PParamKind) -> bool {
             | MaxValueSize
             | GovernanceActionDeposit
             | MinFeeRefScriptCostPerByte
+            | MaxRefScriptSizePerBlock
+            | MaxRefScriptSizePerTx
+            | RefScriptCostStride
+            | RefScriptCostMultiplier
+            | LeiosAnnouncementPeriodLength
+            | LeiosVotePeriodLength
+            | LeiosDiffusionPeriodLength
+            | LeiosCommitteeSize
+            | LeiosQuorumStakeThreshold
+            | MaxEndorserBlockReferencesSize
+            | MaxEndorserBlockTxsSize
+            | MaxEndorserBlockExUnits
+            | MaxRefScriptSizePerEndorserBlock
     )
 }
 
@@ -1062,6 +1095,53 @@ mod tests {
         }
         assert!(!pparam_is_security(PParamKind::MaxTxExUnits));
         assert!(!pparam_is_security(PParamKind::KeyDeposit));
+    }
+
+    /// The Dijkstra keys take the groups the ledger tags them with.
+    #[test]
+    fn the_dijkstra_keys_take_their_ledger_groups() {
+        use PParamKind::*;
+
+        let network_and_security = [
+            MaxRefScriptSizePerBlock,
+            MaxRefScriptSizePerTx,
+            RefScriptCostStride,
+            RefScriptCostMultiplier,
+            LeiosAnnouncementPeriodLength,
+            LeiosVotePeriodLength,
+            LeiosDiffusionPeriodLength,
+            LeiosCommitteeSize,
+            LeiosQuorumStakeThreshold,
+            MaxEndorserBlockReferencesSize,
+            MaxEndorserBlockTxsSize,
+            MaxEndorserBlockExUnits,
+            MaxRefScriptSizePerEndorserBlock,
+        ];
+
+        let classified: Vec<_> = network_and_security
+            .iter()
+            .map(|kind| (*kind, pparam_drep_group(*kind), pparam_is_security(*kind)))
+            .collect();
+        let expected: Vec<_> = network_and_security
+            .iter()
+            .map(|kind| (*kind, Some(DRepGroup::Network), true))
+            .collect();
+        assert_eq!(classified, expected);
+
+        assert_eq!(
+            (
+                pparam_drep_group(MaxPledgeLeverage),
+                pparam_is_security(MaxPledgeLeverage)
+            ),
+            (Some(DRepGroup::Technical), false)
+        );
+        assert_eq!(
+            (
+                pparam_drep_group(MinPoolMargin),
+                pparam_is_security(MinPoolMargin)
+            ),
+            (Some(DRepGroup::Economic), false)
+        );
     }
 
     /// CC thresholds: no say on committee-purpose actions, none on Info,

@@ -11,7 +11,6 @@ use pallas::{
         },
     },
 };
-use tracing::warn;
 
 use super::WorkDeltas;
 use crate::{
@@ -52,41 +51,38 @@ fn parse_treasury_withdrawals(
     Ok(ProposalAction::TreasuryWithdrawal(items))
 }
 
-/// The parameter keys an update proposes that the parameter set has no place
-/// for. A key the update leaves alone and a key the update's era does not have
-/// are both absent from this answer.
-fn params_with_no_field(update: &MultiEraParamUpdate) -> Vec<&'static str> {
-    let mut named = Vec::new();
-
+/// Records the keys only the Dijkstra era carries that an update proposes.
+fn set_dijkstra_pparams(update: &MultiEraParamUpdate, set: &mut PParamsSet) {
     macro_rules! each_proposed {
-        ($($getter:ident),*) => {
+        ($($getter:ident => $variant:ident),*) => {
             $(
-                if matches!(update.$getter(), ParamRead::Proposed(_)) {
-                    named.push(stringify!($getter));
+                if let ParamRead::Proposed(value) = update.$getter() {
+                    set.set(PParamValue::$variant(value));
                 }
             )*
         };
     }
 
     each_proposed!(
-        max_ref_script_size_per_block,
-        max_ref_script_size_per_tx,
-        ref_script_cost_stride,
-        ref_script_cost_multiplier,
-        max_pledge_leverage,
-        min_pool_margin,
-        leios_announcement_period_length,
-        leios_vote_period_length,
-        leios_diffusion_period_length,
-        leios_committee_size,
-        leios_quorum_stake_threshold,
-        max_endorser_block_references_size,
-        max_endorser_block_txs_size,
-        max_endorser_block_execution_units,
-        max_ref_script_size_per_endorser_block
+        max_ref_script_size_per_block => MaxRefScriptSizePerBlock,
+        max_ref_script_size_per_tx => MaxRefScriptSizePerTx,
+        ref_script_cost_stride => RefScriptCostStride,
+        ref_script_cost_multiplier => RefScriptCostMultiplier,
+        min_pool_margin => MinPoolMargin,
+        leios_announcement_period_length => LeiosAnnouncementPeriodLength,
+        leios_vote_period_length => LeiosVotePeriodLength,
+        leios_diffusion_period_length => LeiosDiffusionPeriodLength,
+        leios_committee_size => LeiosCommitteeSize,
+        leios_quorum_stake_threshold => LeiosQuorumStakeThreshold,
+        max_endorser_block_references_size => MaxEndorserBlockReferencesSize,
+        max_endorser_block_txs_size => MaxEndorserBlockTxsSize,
+        max_endorser_block_execution_units => MaxEndorserBlockExUnits,
+        max_ref_script_size_per_endorser_block => MaxRefScriptSizePerEndorserBlock
     );
 
-    named
+    if let ParamRead::Proposed(cap) = update.max_pledge_leverage() {
+        set.set(PParamValue::MaxPledgeLeverage(cap.into()));
+    }
 }
 
 /// The cost models an update proposes under the keys no field names. The era
@@ -118,20 +114,9 @@ fn wildcard_cost_models(
 }
 
 fn param_update_to_pparamset(update: &MultiEraParamUpdate) -> Result<PParamsSet, ChainError> {
-    // Anyone able to pay a deposit can name any key, so refusing here would
-    // hand every follower on the network a block it cannot apply. The keys go
-    // unrecorded and the proposal is kept, which leaves the rest of it
-    // readable and the loss named.
-    let with_no_field = params_with_no_field(update);
-
-    if !with_no_field.is_empty() {
-        warn!(
-            keys = with_no_field.join(", "),
-            "recording a parameter change without the keys the parameter set has no field for"
-        );
-    }
-
     let mut set = PParamsSet::default();
+
+    set_dijkstra_pparams(update, &mut set);
 
     check_shared_pparams! {
         update,
@@ -526,6 +511,7 @@ mod dijkstra_governance_tests {
     use pallas::ledger::primitives::{dijkstra, ExUnits};
 
     use super::*;
+    use crate::PParamKind;
 
     /// A Dijkstra update proposing the key given, decoded from a one entry
     /// CBOR map because the type has no Default.
@@ -554,48 +540,74 @@ mod dijkstra_governance_tests {
         dijkstra::GovAction::ParameterChange(None, Box::new(update), None)
     }
 
-    /// The keys with no field in the update a parameter change carries, read
-    /// through the same accessor `parse_gov_action` reads it through.
-    fn names_with_no_field(action: &MultiEraGovAction) -> Vec<&'static str> {
-        let MultiEraGovActionKind::ParameterChange(_, update, _) = action.kind() else {
-            panic!("the action is not a parameter change");
+    /// The parameter set a parameter change records.
+    fn recorded_set(action: &MultiEraGovAction) -> PParamsSet {
+        let (recorded, _, _) = parse_gov_action(action).unwrap();
+
+        let ProposalAction::ParamChange(set) = recorded else {
+            panic!("a parameter change was recorded as {recorded:?}");
         };
 
-        params_with_no_field(&update)
+        set
     }
 
     /// Every key the Dijkstra era added, with a value of its own type and the
-    /// name the refusal has to carry.
-    fn dijkstra_only_keys() -> Vec<(u64, &'static str, Vec<u8>)> {
+    /// parameter the set has to record it as.
+    fn dijkstra_only_keys() -> Vec<(u64, PParamValue, Vec<u8>)> {
+        let half = RationalNumber {
+            numerator: 1,
+            denominator: 2,
+        };
         let count = minicbor::to_vec(500u64).unwrap();
-        let ratio = minicbor::to_vec(RationalNumber {
-            numerator: 1,
-            denominator: 2,
-        })
-        .unwrap();
-        let nullable_ratio = minicbor::to_vec(Nullable::Some(RationalNumber {
-            numerator: 1,
-            denominator: 2,
-        }))
-        .unwrap();
-        let units = minicbor::to_vec(ExUnits { mem: 10, steps: 10 }).unwrap();
+        let ratio = minicbor::to_vec(half.clone()).unwrap();
+        let nullable_ratio = minicbor::to_vec(Nullable::Some(half.clone())).unwrap();
+        let units = ExUnits { mem: 10, steps: 20 };
+        let units_bytes = minicbor::to_vec(units).unwrap();
 
         vec![
-            (34, "max_ref_script_size_per_block", count.clone()),
-            (35, "max_ref_script_size_per_tx", count.clone()),
-            (36, "ref_script_cost_stride", count.clone()),
-            (37, "ref_script_cost_multiplier", ratio.clone()),
-            (38, "max_pledge_leverage", nullable_ratio),
-            (39, "min_pool_margin", ratio.clone()),
-            (40, "leios_announcement_period_length", count.clone()),
-            (41, "leios_vote_period_length", count.clone()),
-            (42, "leios_diffusion_period_length", count.clone()),
-            (43, "leios_committee_size", count.clone()),
-            (44, "leios_quorum_stake_threshold", ratio),
-            (45, "max_endorser_block_references_size", count.clone()),
-            (46, "max_endorser_block_txs_size", count.clone()),
-            (47, "max_endorser_block_execution_units", units),
-            (48, "max_ref_script_size_per_endorser_block", count),
+            (
+                34,
+                PParamValue::MaxRefScriptSizePerBlock(500),
+                count.clone(),
+            ),
+            (35, PParamValue::MaxRefScriptSizePerTx(500), count.clone()),
+            (36, PParamValue::RefScriptCostStride(500), count.clone()),
+            (
+                37,
+                PParamValue::RefScriptCostMultiplier(half.clone()),
+                ratio.clone(),
+            ),
+            (
+                38,
+                PParamValue::MaxPledgeLeverage(Some(half.clone())),
+                nullable_ratio,
+            ),
+            (39, PParamValue::MinPoolMargin(half.clone()), ratio.clone()),
+            (
+                40,
+                PParamValue::LeiosAnnouncementPeriodLength(500),
+                count.clone(),
+            ),
+            (41, PParamValue::LeiosVotePeriodLength(500), count.clone()),
+            (
+                42,
+                PParamValue::LeiosDiffusionPeriodLength(500),
+                count.clone(),
+            ),
+            (43, PParamValue::LeiosCommitteeSize(500), count.clone()),
+            (44, PParamValue::LeiosQuorumStakeThreshold(half), ratio),
+            (
+                45,
+                PParamValue::MaxEndorserBlockReferencesSize(500),
+                count.clone(),
+            ),
+            (46, PParamValue::MaxEndorserBlockTxsSize(500), count.clone()),
+            (47, PParamValue::MaxEndorserBlockExUnits(units), units_bytes),
+            (
+                48,
+                PParamValue::MaxRefScriptSizePerEndorserBlock(500),
+                count,
+            ),
         ]
     }
 
@@ -619,45 +631,60 @@ mod dijkstra_governance_tests {
         }
     }
 
-    /// The must-fire case for the name. A key the parameter set has no field
-    /// for is left out of what is recorded, so the name this answer carries is
-    /// the only account of it, and the warn is built from the same answer.
+    /// The must-fire case. Each Dijkstra key is recorded with the value
+    /// proposed, and the set holds that one parameter and no other.
     #[test]
-    fn every_dijkstra_only_parameter_key_is_named_as_having_no_field() {
-        for (key, name, value) in dijkstra_only_keys() {
+    fn every_dijkstra_only_parameter_key_is_recorded_with_its_value() {
+        for (key, expected, value) in dijkstra_only_keys() {
             let action = parameter_change(dijkstra_update(key, &value));
             let action = MultiEraGovAction::from_dijkstra(&action);
 
             assert_eq!(
-                names_with_no_field(&action),
-                vec![name],
-                "key {key} was not named"
+                recorded_set(&action),
+                PParamsSet::default().with(expected),
+                "key {key}"
             );
         }
     }
 
-    /// The must-not case. A key the parameter set holds is recorded, so naming
-    /// it would report a loss that did not happen.
+    /// A nil key 38 removes the pledge leverage cap, so it is recorded as a
+    /// change to no cap.
     #[test]
-    fn a_key_the_parameter_set_holds_is_named_by_nothing() {
+    fn a_nil_pledge_leverage_is_recorded_as_no_cap() {
+        let mut update: dijkstra::ProtocolParamUpdate = minicbor::decode(&[0xa0]).unwrap();
+        update.max_pledge_leverage = Some(Nullable::Null);
+
+        let action = parameter_change(update);
+        let action = MultiEraGovAction::from_dijkstra(&action);
+
+        assert_eq!(
+            recorded_set(&action),
+            PParamsSet::default().with(PParamValue::MaxPledgeLeverage(None))
+        );
+    }
+
+    /// The must-not case. An update of a shared key records no Dijkstra key.
+    #[test]
+    fn an_update_of_a_shared_key_records_no_dijkstra_key() {
         let value = minicbor::to_vec(500u64).unwrap();
         let action = parameter_change(dijkstra_update(0, &value));
         let action = MultiEraGovAction::from_dijkstra(&action);
 
-        assert!(names_with_no_field(&action).is_empty());
+        assert_eq!(
+            recorded_set(&action),
+            PParamsSet::default().with(PParamValue::MinFeeA(500))
+        );
     }
 
-    /// A proposal setting a key the set holds and a key it does not keeps the
-    /// first and names the second, because dropping both would lose a change
-    /// the set has a field for.
+    /// A proposal of a shared key and a Dijkstra key records both.
     #[test]
-    fn a_key_with_no_field_does_not_take_the_rest_of_the_update_with_it() {
-        // Key 0 reading minfee_a 500 and key 43 reading leios_committee_size 500.
+    fn a_shared_key_and_a_dijkstra_key_are_recorded_together() {
+        // Key 0 reading minfee_a 500 and key 46 reading max_endorser_block_txs_size 1500000.
         let mut bytes = vec![0xa2];
         bytes.extend(minicbor::to_vec(0u64).unwrap());
         bytes.extend(minicbor::to_vec(500u64).unwrap());
-        bytes.extend(minicbor::to_vec(43u64).unwrap());
-        bytes.extend(minicbor::to_vec(500u64).unwrap());
+        bytes.extend(minicbor::to_vec(46u64).unwrap());
+        bytes.extend(minicbor::to_vec(1500000u64).unwrap());
 
         let update: dijkstra::ProtocolParamUpdate =
             minicbor::decode(&bytes).expect("the two key update does not decode");
@@ -665,16 +692,18 @@ mod dijkstra_governance_tests {
         let action = parameter_change(update);
         let action = MultiEraGovAction::from_dijkstra(&action);
 
-        let (recorded, _, _) = parse_gov_action(&action).unwrap();
+        let recorded = recorded_set(&action);
 
-        let ProposalAction::ParamChange(set) = recorded else {
-            panic!("a parameter change was recorded as {recorded:?}");
-        };
-
-        assert_eq!(set.min_fee_a(), Some(500));
-        assert_eq!(names_with_no_field(&action), vec!["leios_committee_size"]);
+        assert_eq!(recorded.len(), 2);
+        assert_eq!(
+            recorded.get(PParamKind::MinFeeA),
+            Some(&PParamValue::MinFeeA(500))
+        );
+        assert_eq!(
+            recorded.get(PParamKind::MaxEndorserBlockTxsSize),
+            Some(&PParamValue::MaxEndorserBlockTxsSize(1500000))
+        );
     }
-
 
     /// The must-not case. A Dijkstra update of a key every era carries has to
     /// be recorded, or a parameter change on a Dijkstra chain would stop the

@@ -61,6 +61,21 @@ pub enum PParamKind {
     CostModelsPlutusV2 = 37,
     CostModelsPlutusV3 = 38,
     CostModelsUnknown = 39,
+    MaxRefScriptSizePerBlock = 40,
+    MaxRefScriptSizePerTx = 41,
+    RefScriptCostStride = 42,
+    RefScriptCostMultiplier = 43,
+    MaxPledgeLeverage = 44,
+    MinPoolMargin = 45,
+    LeiosAnnouncementPeriodLength = 46,
+    LeiosVotePeriodLength = 47,
+    LeiosDiffusionPeriodLength = 48,
+    LeiosCommitteeSize = 49,
+    LeiosQuorumStakeThreshold = 50,
+    MaxEndorserBlockReferencesSize = 51,
+    MaxEndorserBlockTxsSize = 52,
+    MaxEndorserBlockExUnits = 53,
+    MaxRefScriptSizePerEndorserBlock = 54,
 }
 
 impl PParamKind {
@@ -123,6 +138,29 @@ impl PParamKind {
             }
             Self::CostModelsUnknown => {
                 PParamValue::CostModelsUnknown(default_cost_models().unknown)
+            }
+            Self::MaxRefScriptSizePerBlock => PParamValue::MaxRefScriptSizePerBlock(0),
+            Self::MaxRefScriptSizePerTx => PParamValue::MaxRefScriptSizePerTx(0),
+            Self::RefScriptCostStride => PParamValue::RefScriptCostStride(0),
+            Self::RefScriptCostMultiplier => {
+                PParamValue::RefScriptCostMultiplier(default_rational_number())
+            }
+            Self::MaxPledgeLeverage => PParamValue::MaxPledgeLeverage(None),
+            Self::MinPoolMargin => PParamValue::MinPoolMargin(default_rational_number()),
+            Self::LeiosAnnouncementPeriodLength => PParamValue::LeiosAnnouncementPeriodLength(0),
+            Self::LeiosVotePeriodLength => PParamValue::LeiosVotePeriodLength(0),
+            Self::LeiosDiffusionPeriodLength => PParamValue::LeiosDiffusionPeriodLength(0),
+            Self::LeiosCommitteeSize => PParamValue::LeiosCommitteeSize(0),
+            Self::LeiosQuorumStakeThreshold => {
+                PParamValue::LeiosQuorumStakeThreshold(default_rational_number())
+            }
+            Self::MaxEndorserBlockReferencesSize => PParamValue::MaxEndorserBlockReferencesSize(0),
+            Self::MaxEndorserBlockTxsSize => PParamValue::MaxEndorserBlockTxsSize(0),
+            Self::MaxEndorserBlockExUnits => {
+                PParamValue::MaxEndorserBlockExUnits(default_ex_units())
+            }
+            Self::MaxRefScriptSizePerEndorserBlock => {
+                PParamValue::MaxRefScriptSizePerEndorserBlock(0)
             }
         }
     }
@@ -211,6 +249,37 @@ pub enum PParamValue {
     CostModelsPlutusV3(#[n(0)] Vec<i64>),
     #[n(39)]
     CostModelsUnknown(#[n(0)] BTreeMap<u64, Vec<i64>>),
+    #[n(40)]
+    MaxRefScriptSizePerBlock(#[n(0)] u64),
+    #[n(41)]
+    MaxRefScriptSizePerTx(#[n(0)] u64),
+    #[n(42)]
+    RefScriptCostStride(#[n(0)] u64),
+    #[n(43)]
+    RefScriptCostMultiplier(#[n(0)] RationalNumber),
+    /// The pledge leverage cap, where None is a network with no cap.
+    #[n(44)]
+    MaxPledgeLeverage(#[n(0)] Option<RationalNumber>),
+    #[n(45)]
+    MinPoolMargin(#[n(0)] UnitInterval),
+    #[n(46)]
+    LeiosAnnouncementPeriodLength(#[n(0)] u64),
+    #[n(47)]
+    LeiosVotePeriodLength(#[n(0)] u64),
+    #[n(48)]
+    LeiosDiffusionPeriodLength(#[n(0)] u64),
+    #[n(49)]
+    LeiosCommitteeSize(#[n(0)] u64),
+    #[n(50)]
+    LeiosQuorumStakeThreshold(#[n(0)] UnitInterval),
+    #[n(51)]
+    MaxEndorserBlockReferencesSize(#[n(0)] u64),
+    #[n(52)]
+    MaxEndorserBlockTxsSize(#[n(0)] u64),
+    #[n(53)]
+    MaxEndorserBlockExUnits(#[n(0)] ExUnits),
+    #[n(54)]
+    MaxRefScriptSizePerEndorserBlock(#[n(0)] u64),
 }
 
 impl PParamValue {
@@ -256,6 +325,23 @@ impl PParamValue {
             Self::CostModelsPlutusV2(_) => PParamKind::CostModelsPlutusV2,
             Self::CostModelsPlutusV3(_) => PParamKind::CostModelsPlutusV3,
             Self::CostModelsUnknown(_) => PParamKind::CostModelsUnknown,
+            Self::MaxRefScriptSizePerBlock(_) => PParamKind::MaxRefScriptSizePerBlock,
+            Self::MaxRefScriptSizePerTx(_) => PParamKind::MaxRefScriptSizePerTx,
+            Self::RefScriptCostStride(_) => PParamKind::RefScriptCostStride,
+            Self::RefScriptCostMultiplier(_) => PParamKind::RefScriptCostMultiplier,
+            Self::MaxPledgeLeverage(_) => PParamKind::MaxPledgeLeverage,
+            Self::MinPoolMargin(_) => PParamKind::MinPoolMargin,
+            Self::LeiosAnnouncementPeriodLength(_) => PParamKind::LeiosAnnouncementPeriodLength,
+            Self::LeiosVotePeriodLength(_) => PParamKind::LeiosVotePeriodLength,
+            Self::LeiosDiffusionPeriodLength(_) => PParamKind::LeiosDiffusionPeriodLength,
+            Self::LeiosCommitteeSize(_) => PParamKind::LeiosCommitteeSize,
+            Self::LeiosQuorumStakeThreshold(_) => PParamKind::LeiosQuorumStakeThreshold,
+            Self::MaxEndorserBlockReferencesSize(_) => PParamKind::MaxEndorserBlockReferencesSize,
+            Self::MaxEndorserBlockTxsSize(_) => PParamKind::MaxEndorserBlockTxsSize,
+            Self::MaxEndorserBlockExUnits(_) => PParamKind::MaxEndorserBlockExUnits,
+            Self::MaxRefScriptSizePerEndorserBlock(_) => {
+                PParamKind::MaxRefScriptSizePerEndorserBlock
+            }
         }
     }
 }
@@ -479,6 +565,21 @@ impl PParamsSet {
     pgetter!(DrepDeposit, u64);
     pgetter!(DrepInactivityPeriod, u64);
     pgetter!(MinFeeRefScriptCostPerByte, RationalNumber);
+    pgetter!(MaxRefScriptSizePerBlock, u64);
+    pgetter!(MaxRefScriptSizePerTx, u64);
+    pgetter!(RefScriptCostStride, u64);
+    pgetter!(RefScriptCostMultiplier, RationalNumber);
+    pgetter!(MaxPledgeLeverage, Option<RationalNumber>);
+    pgetter!(MinPoolMargin, RationalNumber);
+    pgetter!(LeiosAnnouncementPeriodLength, u64);
+    pgetter!(LeiosVotePeriodLength, u64);
+    pgetter!(LeiosDiffusionPeriodLength, u64);
+    pgetter!(LeiosCommitteeSize, u64);
+    pgetter!(LeiosQuorumStakeThreshold, RationalNumber);
+    pgetter!(MaxEndorserBlockReferencesSize, u64);
+    pgetter!(MaxEndorserBlockTxsSize, u64);
+    pgetter!(MaxEndorserBlockExUnits, ExUnits);
+    pgetter!(MaxRefScriptSizePerEndorserBlock, u64);
 }
 
 #[cfg(test)]
