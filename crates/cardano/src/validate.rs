@@ -25,7 +25,7 @@ pub fn validate_tx<D: Domain>(
     let era = submission_era(active.ensure_protocol_version()?)?;
     let tx = decode_submission(era, cbor)?;
     let hash = tx.hash();
-    let pparams = validation_parameters(&active, genesis)?;
+    let pparams = validation_parameters(&active)?;
 
     let network_id = match genesis.shelley.network_id.as_ref() {
         Some(network) => match network.as_str() {
@@ -107,11 +107,10 @@ pub fn validate_tx<D: Domain>(
 pub fn evaluate_tx<D: Domain>(
     cbor: &[u8],
     utxos: &MempoolAwareUtxoStore<D>,
-    genesis: &Genesis,
 ) -> Result<pallas_validate::phase2::EvalReport, ChainError> {
     let active = crate::load_effective_pparams::<D>(utxos.state())?;
     let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
-    let pparams = validation_parameters(&active, genesis)?;
+    let pparams = validation_parameters(&active)?;
     evaluate_decoded::<D>(&tx, utxos, &pparams, false)
 }
 
@@ -122,11 +121,10 @@ pub fn evaluate_tx<D: Domain>(
 pub fn estimate_tx<D: Domain>(
     cbor: &[u8],
     utxos: &MempoolAwareUtxoStore<D>,
-    genesis: &Genesis,
 ) -> Result<pallas_validate::phase2::EvalReport, ChainError> {
     let active = crate::load_effective_pparams::<D>(utxos.state())?;
     let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
-    let pparams = validation_parameters(&active, genesis)?;
+    let pparams = validation_parameters(&active)?;
     evaluate_decoded::<D>(&tx, utxos, &pparams, true)
 }
 
@@ -207,12 +205,10 @@ pub fn submission_era(protocol: (u64, u64)) -> Result<Era, ChainError> {
     }
 }
 
-/// Native validation consumes the actual active parameters and Dijkstra
-/// genesis. This does not extend the supported ledger/evaluator subset in
-/// Pallas.
+/// The protocol parameters of the active set in the era its protocol version
+/// names.
 pub fn validation_parameters(
     pp: &crate::model::PParamsSet,
-    genesis: &Genesis,
 ) -> Result<MultiEraProtocolParameters, ChainError> {
     let protocol = pp.ensure_protocol_version()?;
     if submission_era(protocol)? != Era::Dijkstra {
@@ -223,25 +219,9 @@ pub fn validation_parameters(
     let u32_param = |x: u64, name: &str| {
         u32::try_from(x).map_err(|_| ChainError::InvalidConfig(format!("{name} exceeds u32")))
     };
-    let g = genesis
-        .dijkstra
-        .as_ref()
-        .ok_or_else(|| ChainError::GenesisFieldMissing("dijkstra".into()))?;
-    let multiplier = num_rational::Ratio::<i64>::approximate_float(g.ref_script_cost_multiplier)
-        .filter(|x| *x.numer() > 0 && *x.denom() > 0)
-        .ok_or_else(|| {
-            ChainError::InvalidConfig("invalid reference-script cost multiplier".into())
-        })?;
-    let ratio = |x: f64, name: &str| {
-        num_rational::Ratio::<i64>::approximate_float(x)
-            .filter(|x| *x.numer() >= 0 && *x.denom() > 0)
-            .map(|x| pallas::ledger::primitives::RationalNumber {
-                numerator: *x.numer() as u64,
-                denominator: *x.denom() as u64,
-            })
-            .ok_or_else(|| ChainError::InvalidConfig(format!("invalid {name}")))
-    };
     let cost_models = pp.cost_models_for_script_languages();
+    let mut unknown = cost_models.unknown;
+    let plutus_v4 = unknown.remove(&crate::pallas_extras::PLUTUS_V4_COST_MODEL_KEY);
     Ok(MultiEraProtocolParameters::Dijkstra(DijkstraProtParams {
         protocol_version: protocol,
         system_start: chrono::DateTime::from_timestamp(pp.ensure_system_start()? as i64, 0)
@@ -281,8 +261,8 @@ pub fn validation_parameters(
             plutus_v1: cost_models.plutus_v1,
             plutus_v2: cost_models.plutus_v2,
             plutus_v3: cost_models.plutus_v3,
-            plutus_v4: Some(g.plutus_v4_cost_model.clone()),
-            unknown: cost_models.unknown.into_iter().collect(),
+            plutus_v4,
+            unknown: unknown.into_iter().collect(),
         },
         execution_costs: pp
             .execution_costs()
@@ -313,58 +293,68 @@ pub fn validation_parameters(
             .min_fee_ref_script_cost_per_byte()
             .ok_or_else(|| missing("reference script cost"))?,
         max_ref_script_size_per_block: u32_param(
-            g.max_ref_script_size_per_block,
+            pp.max_ref_script_size_per_block()
+                .ok_or_else(|| missing("max reference script size per block"))?,
             "max reference script size per block",
         )?,
         max_ref_script_size_per_tx: u32_param(
-            g.max_ref_script_size_per_tx,
+            pp.max_ref_script_size_per_tx()
+                .ok_or_else(|| missing("max reference script size"))?,
             "max reference script size",
         )?,
         ref_script_cost_stride: u32_param(
-            g.ref_script_cost_stride,
+            pp.ref_script_cost_stride()
+                .ok_or_else(|| missing("reference script cost stride"))?,
             "reference script cost stride",
         )?,
-        ref_script_cost_multiplier: pallas::ledger::primitives::RationalNumber {
-            numerator: *multiplier.numer() as u64,
-            denominator: *multiplier.denom() as u64,
-        },
-        max_pledge_leverage: g
-            .max_pledge_leverage
-            .map(|x| ratio(x, "max pledge leverage"))
-            .transpose()?,
-        min_pool_margin: ratio(g.min_pool_margin, "min pool margin")?,
+        ref_script_cost_multiplier: pp
+            .ref_script_cost_multiplier()
+            .ok_or_else(|| missing("reference script cost multiplier"))?,
+        max_pledge_leverage: pp
+            .max_pledge_leverage()
+            .ok_or_else(|| missing("max pledge leverage"))?,
+        min_pool_margin: pp
+            .min_pool_margin()
+            .ok_or_else(|| missing("min pool margin"))?,
         leios_announcement_period_length: u32_param(
-            g.leios_announcement_period_length,
+            pp.leios_announcement_period_length()
+                .ok_or_else(|| missing("leios announcement period length"))?,
             "leios announcement period length",
         )?,
         leios_vote_period_length: u32_param(
-            g.leios_vote_period_length,
+            pp.leios_vote_period_length()
+                .ok_or_else(|| missing("leios vote period length"))?,
             "leios vote period length",
         )?,
         leios_diffusion_period_length: u32_param(
-            g.leios_diffusion_period_length,
+            pp.leios_diffusion_period_length()
+                .ok_or_else(|| missing("leios diffusion period length"))?,
             "leios diffusion period length",
         )?,
-        leios_committee_size: u16::try_from(g.leios_committee_size)
-            .map_err(|_| ChainError::InvalidConfig("leios committee size exceeds u16".into()))?,
-        leios_quorum_stake_threshold: ratio(
-            g.leios_quorum_stake_threshold,
-            "leios quorum stake threshold",
-        )?,
+        leios_committee_size: u16::try_from(
+            pp.leios_committee_size()
+                .ok_or_else(|| missing("leios committee size"))?,
+        )
+        .map_err(|_| ChainError::InvalidConfig("leios committee size exceeds u16".into()))?,
+        leios_quorum_stake_threshold: pp
+            .leios_quorum_stake_threshold()
+            .ok_or_else(|| missing("leios quorum stake threshold"))?,
         max_endorser_block_references_size: u32_param(
-            g.max_endorser_block_references_size,
+            pp.max_endorser_block_references_size()
+                .ok_or_else(|| missing("max endorser block references size"))?,
             "max endorser block references size",
         )?,
         max_endorser_block_txs_size: u32_param(
-            g.max_endorser_block_txs_size,
+            pp.max_endorser_block_txs_size()
+                .ok_or_else(|| missing("max endorser block txs size"))?,
             "max endorser block txs size",
         )?,
-        max_endorser_block_ex_units: pallas::ledger::primitives::ExUnits {
-            mem: g.max_endorser_block_execution_units.memory,
-            steps: g.max_endorser_block_execution_units.steps,
-        },
+        max_endorser_block_ex_units: pp
+            .max_endorser_block_ex_units()
+            .ok_or_else(|| missing("max endorser block ex units"))?,
         max_ref_script_size_per_endorser_block: u32_param(
-            g.max_ref_script_size_per_endorser_block,
+            pp.max_ref_script_size_per_endorser_block()
+                .ok_or_else(|| missing("max reference script size per endorser block"))?,
             "max reference script size per endorser block",
         )?,
     }))
@@ -659,46 +649,38 @@ mod parameter_tests {
             P::CostModelsPlutusV1(vec![101, 102]),
             P::CostModelsPlutusV2(vec![201, 202]),
             P::CostModelsPlutusV3(vec![301, 302]),
+            P::CostModelsUnknown(std::collections::BTreeMap::from([(
+                crate::pallas_extras::PLUTUS_V4_COST_MODEL_KEY,
+                vec![411, -412],
+            )])),
+            P::MaxRefScriptSizePerBlock(1048577),
+            P::MaxRefScriptSizePerTx(204801),
+            P::RefScriptCostStride(25601),
+            P::RefScriptCostMultiplier(r(5, 4)),
+            P::MaxPledgeLeverage(Some(r(39, 1))),
+            P::MinPoolMargin(r(1, 50)),
+            P::LeiosAnnouncementPeriodLength(1001),
+            P::LeiosVotePeriodLength(4001),
+            P::LeiosDiffusionPeriodLength(7001),
+            P::LeiosCommitteeSize(901),
+            P::LeiosQuorumStakeThreshold(r(4, 5)),
+            P::MaxEndorserBlockReferencesSize(150000),
+            P::MaxEndorserBlockTxsSize(1500000),
+            P::MaxEndorserBlockExUnits(ExUnits {
+                mem: 465000000,
+                steps: 100000000001,
+            }),
+            P::MaxRefScriptSizePerEndorserBlock(6000000),
         ] {
             pp.set(value);
         }
         pp
     }
 
-    fn genesis(committee: u64) -> Genesis {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("test_data")
-            .join("mainnet")
-            .join("genesis");
-        let mut genesis = crate::utils::load_genesis(&path);
-        genesis.dijkstra = Some(dolos_core::dijkstra::GenesisFile {
-            leios_announcement_period_length: 1000,
-            leios_committee_size: committee,
-            leios_diffusion_period_length: 7000,
-            leios_quorum_stake_threshold: 0.75,
-            leios_vote_period_length: 4000,
-            max_endorser_block_execution_units: dolos_core::dijkstra::ExUnits {
-                memory: 310000000,
-                steps: 100000000000,
-            },
-            max_endorser_block_references_size: 100000,
-            max_endorser_block_txs_size: 1000000,
-            max_pledge_leverage: Some(38.0),
-            max_ref_script_size_per_block: 1048576,
-            max_ref_script_size_per_endorser_block: 4000000,
-            max_ref_script_size_per_tx: 204800,
-            min_pool_margin: 0.015,
-            plutus_v4_cost_model: vec![401, -402],
-            ref_script_cost_multiplier: 1.2,
-            ref_script_cost_stride: 25600,
-        });
-        genesis
-    }
-
     #[test]
-    fn every_dijkstra_parameter_comes_from_the_active_set_or_the_genesis() {
+    fn every_dijkstra_parameter_comes_from_the_active_set() {
         let MultiEraProtocolParameters::Dijkstra(params) =
-            validation_parameters(&active(), &genesis(900)).unwrap()
+            validation_parameters(&active()).unwrap()
         else {
             panic!("a Dijkstra parameter set");
         };
@@ -723,7 +705,7 @@ mod parameter_tests {
                 plutus_v1: Some(vec![101, 102]),
                 plutus_v2: Some(vec![201, 202]),
                 plutus_v3: Some(vec![301, 302]),
-                plutus_v4: Some(vec![401, -402]),
+                plutus_v4: Some(vec![411, -412]),
                 unknown: Default::default(),
             },
             execution_costs: prices(),
@@ -751,43 +733,55 @@ mod parameter_tests {
             drep_deposit: 500000001,
             drep_inactivity_period: 20,
             minfee_refscript_cost_per_byte: r(15, 1),
-            max_ref_script_size_per_block: 1048576,
-            max_ref_script_size_per_tx: 204800,
-            ref_script_cost_stride: 25600,
-            ref_script_cost_multiplier: r(6, 5),
-            max_pledge_leverage: Some(r(38, 1)),
-            min_pool_margin: r(3, 200),
-            leios_announcement_period_length: 1000,
-            leios_vote_period_length: 4000,
-            leios_diffusion_period_length: 7000,
-            leios_committee_size: 900,
-            leios_quorum_stake_threshold: r(3, 4),
-            max_endorser_block_references_size: 100000,
-            max_endorser_block_txs_size: 1000000,
+            max_ref_script_size_per_block: 1048577,
+            max_ref_script_size_per_tx: 204801,
+            ref_script_cost_stride: 25601,
+            ref_script_cost_multiplier: r(5, 4),
+            max_pledge_leverage: Some(r(39, 1)),
+            min_pool_margin: r(1, 50),
+            leios_announcement_period_length: 1001,
+            leios_vote_period_length: 4001,
+            leios_diffusion_period_length: 7001,
+            leios_committee_size: 901,
+            leios_quorum_stake_threshold: r(4, 5),
+            max_endorser_block_references_size: 150000,
+            max_endorser_block_txs_size: 1500000,
             max_endorser_block_ex_units: ExUnits {
-                mem: 310000000,
-                steps: 100000000000,
+                mem: 465000000,
+                steps: 100000000001,
             },
-            max_ref_script_size_per_endorser_block: 4000000,
+            max_ref_script_size_per_endorser_block: 6000000,
         };
         assert_eq!(format!("{params:?}"), format!("{expected:?}"));
     }
 
     #[test]
-    fn a_genesis_without_a_pledge_leverage_cap_leaves_it_absent() {
-        let mut genesis = genesis(900);
-        genesis.dijkstra.as_mut().unwrap().max_pledge_leverage = None;
-        let MultiEraProtocolParameters::Dijkstra(params) =
-            validation_parameters(&active(), &genesis).unwrap()
+    fn a_set_with_no_pledge_leverage_cap_leaves_it_absent() {
+        let set = active().with(P::MaxPledgeLeverage(None));
+        let MultiEraProtocolParameters::Dijkstra(params) = validation_parameters(&set).unwrap()
         else {
             panic!("a Dijkstra parameter set");
         };
         assert_eq!(params.max_pledge_leverage, None);
     }
 
+    /// A set without one of the Dijkstra parameters is refused with that
+    /// parameter named.
+    #[test]
+    fn a_set_missing_a_dijkstra_parameter_is_refused() {
+        let mut set = active();
+        set.clear(crate::model::PParamKind::MaxEndorserBlockTxsSize);
+        let refused = validation_parameters(&set).unwrap_err();
+        assert!(
+            matches!(&refused, ChainError::PParamsNotFound(x) if x == "max endorser block txs size"),
+            "{refused:?}"
+        );
+    }
+
     #[test]
     fn a_committee_size_beyond_u16_is_refused() {
-        let refused = validation_parameters(&active(), &genesis(65536)).unwrap_err();
+        let set = active().with(P::LeiosCommitteeSize(65536));
+        let refused = validation_parameters(&set).unwrap_err();
         assert!(matches!(
             refused,
             ChainError::InvalidConfig(x) if x == "leios committee size exceeds u16"

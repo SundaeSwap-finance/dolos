@@ -203,14 +203,8 @@ pub fn into_conway(previous: &PParamsSet, genesis: &conway::GenesisFile) -> PPar
         ))
 }
 
-/// Moves a Conway parameter set to Dijkstra.
-///
-/// Dijkstra keeps every Conway parameter with the same meaning and names a cost
-/// model for PlutusV4, which the Conway cost model type reads under a wildcard
-/// key. That model is declared by the Dijkstra genesis file and by nothing on
-/// the chain, so a configuration with no path to that file has no cost model
-/// for a language the network is already running, and this stops rather than
-/// producing a set that is missing one.
+/// Moves a Conway parameter set to Dijkstra, adding the PlutusV4 cost model and
+/// the parameters the Dijkstra genesis file declares.
 pub fn into_dijkstra(previous: &PParamsSet, genesis: &Genesis) -> PParamsSet {
     let Some(dijkstra) = genesis.dijkstra.as_ref() else {
         panic!("reaching protocol version 12 needs a dijkstra genesis file and this configuration has no path to one")
@@ -226,6 +220,58 @@ pub fn into_dijkstra(previous: &PParamsSet, genesis: &Genesis) -> PParamsSet {
         .clone()
         .with(Val::ProtocolVersion((12, 0)))
         .with(Val::CostModelsUnknown(unknown))
+        .with(Val::MaxRefScriptSizePerBlock(
+            dijkstra.max_ref_script_size_per_block,
+        ))
+        .with(Val::MaxRefScriptSizePerTx(
+            dijkstra.max_ref_script_size_per_tx,
+        ))
+        .with(Val::RefScriptCostStride(dijkstra.ref_script_cost_stride))
+        .with(Val::RefScriptCostMultiplier(f64_to_rational(
+            dijkstra.ref_script_cost_multiplier,
+        )))
+        .with(Val::MaxPledgeLeverage(
+            dijkstra.max_pledge_leverage.map(f64_to_rational),
+        ))
+        .with(Val::MinPoolMargin(f64_to_rational(
+            dijkstra.min_pool_margin,
+        )))
+        .with(Val::LeiosAnnouncementPeriodLength(
+            dijkstra.leios_announcement_period_length,
+        ))
+        .with(Val::LeiosVotePeriodLength(
+            dijkstra.leios_vote_period_length,
+        ))
+        .with(Val::LeiosDiffusionPeriodLength(
+            dijkstra.leios_diffusion_period_length,
+        ))
+        .with(Val::LeiosCommitteeSize(dijkstra.leios_committee_size))
+        .with(Val::LeiosQuorumStakeThreshold(f64_to_rational(
+            dijkstra.leios_quorum_stake_threshold,
+        )))
+        .with(Val::MaxEndorserBlockReferencesSize(
+            dijkstra.max_endorser_block_references_size,
+        ))
+        .with(Val::MaxEndorserBlockTxsSize(
+            dijkstra.max_endorser_block_txs_size,
+        ))
+        .with(Val::MaxEndorserBlockExUnits(ExUnits {
+            mem: dijkstra.max_endorser_block_execution_units.memory,
+            steps: dijkstra.max_endorser_block_execution_units.steps,
+        }))
+        .with(Val::MaxRefScriptSizePerEndorserBlock(
+            dijkstra.max_ref_script_size_per_endorser_block,
+        ))
+}
+
+/// The rational nearest a decimal the Dijkstra genesis file writes.
+fn f64_to_rational(x: f64) -> pallas::ledger::primitives::RationalNumber {
+    let ratio: num_rational::Ratio<i64> = num_rational::Ratio::approximate_float(x).unwrap();
+
+    pallas::ledger::primitives::RationalNumber {
+        numerator: *ratio.numer() as u64,
+        denominator: *ratio.denom() as u64,
+    }
 }
 
 /// Increments the protocol version by 1 without changing any other fields
@@ -268,11 +314,7 @@ pub fn migrate_pparams_version(
         (9, 10) => intra_era_hardfork(current, to),
         // Van Rossem: intra-era hard-fork to protocol version 11
         (10, 11) => intra_era_hardfork(current, to),
-        // Protocol version 12 transitions from Conway to Dijkstra. The other
-        // parameters the Dijkstra genesis declares, the Leios periods and
-        // committee, the endorser block limits, and the reference script
-        // sizing and cost, have no member in PParamsSet and a consumer that
-        // needs one of them needs a set that can hold it first.
+        // Protocol version 12 transitions from Conway to Dijkstra
         (11, 12) => into_dijkstra(current, genesis),
         (from, to) => {
             unimplemented!("don't know how to bump from version {from} to {to} (#1033)",)
@@ -362,10 +404,8 @@ mod tests {
         mainnet_genesis().with_dijkstra(path).unwrap()
     }
 
-    /// The Musashi testnet runs at protocol major 12, so the ladder has to
-    /// reach it. Dijkstra keeps every parameter Conway had, and the one it adds
-    /// that the set can hold is the PlutusV4 cost model, so the step must
-    /// change the version, add that model, and nothing else.
+    /// The step to version 12 changes the version and adds the PlutusV4 cost
+    /// model and the Dijkstra parameters, keeping every Conway parameter.
     #[test]
     fn force_pparams_to_dijkstra() {
         let genesis = genesis_with_dijkstra();
@@ -387,9 +427,12 @@ mod tests {
                 .clone(),
         );
 
-        let expected = at_eleven
-            .with(PParamValue::ProtocolVersion((12, 0)))
-            .with(PParamValue::CostModelsUnknown(unknown));
+        let expected = genesis_dijkstra_parameters().into_iter().fold(
+            at_eleven
+                .with(PParamValue::ProtocolVersion((12, 0)))
+                .with(PParamValue::CostModelsUnknown(unknown)),
+            |set, value| set.with(value),
+        );
 
         assert_eq!(at_twelve, expected);
     }
@@ -490,70 +533,71 @@ mod tests {
         let _ = force_pparams_version(&initial, &genesis, 0, 12);
     }
 
-    /// The parameters the Musashi node's Dijkstra genesis declares that no
-    /// member of `PParamsSet` can hold, as that file spells them.
-    ///
-    /// The file's sixteenth parameter, the PlutusV4 cost model, is not here
-    /// because the set does hold it, under the cost model key that names that
-    /// language. The list is what says the rest are missing out loud: the day
-    /// the set grows one and the version 12 step starts emitting it, the
-    /// assertion fails.
-    const DIJKSTRA_GENESIS_PARAMETERS: &[&str] = &[
-        "leiosAnnouncementPeriodLength",
-        "leiosCommitteeSize",
-        "leiosDiffusionPeriodLength",
-        "leiosQuorumStakeThreshold",
-        "leiosVotePeriodLength",
-        "maxEndorserBlockExecutionUnits",
-        "maxEndorserBlockReferencesSize",
-        "maxEndorserBlockTxsSize",
-        "maxPledgeLeverage",
-        "maxRefScriptSizePerBlock",
-        "maxRefScriptSizePerEndorserBlock",
-        "maxRefScriptSizePerTx",
-        "minPoolMargin",
-        "refScriptCostMultiplier",
-        "refScriptCostStride",
-    ];
+    /// The values the test Dijkstra genesis file declares for the parameters
+    /// the Dijkstra era added.
+    fn genesis_dijkstra_parameters() -> Vec<Val> {
+        let ratio = |numerator, denominator| pallas::ledger::primitives::RationalNumber {
+            numerator,
+            denominator,
+        };
 
-    /// Case and separators removed, so a parameter is compared by its name and
-    /// not by the spelling two files chose for it.
-    fn flatten(name: &str) -> String {
-        name.chars()
-            .filter(|c| c.is_ascii_alphanumeric())
-            .map(|c| c.to_ascii_lowercase())
-            .collect()
+        vec![
+            Val::MaxRefScriptSizePerBlock(1048576),
+            Val::MaxRefScriptSizePerTx(204800),
+            Val::RefScriptCostStride(25600),
+            Val::RefScriptCostMultiplier(ratio(6, 5)),
+            Val::MaxPledgeLeverage(None),
+            Val::MinPoolMargin(ratio(3, 200)),
+            Val::LeiosAnnouncementPeriodLength(1000),
+            Val::LeiosVotePeriodLength(4000),
+            Val::LeiosDiffusionPeriodLength(7000),
+            Val::LeiosCommitteeSize(900),
+            Val::LeiosQuorumStakeThreshold(ratio(3, 4)),
+            Val::MaxEndorserBlockReferencesSize(100000),
+            Val::MaxEndorserBlockTxsSize(1000000),
+            Val::MaxEndorserBlockExUnits(ExUnits {
+                mem: 310000000,
+                steps: 100000000000,
+            }),
+            Val::MaxRefScriptSizePerEndorserBlock(4000000),
+        ]
     }
 
-    /// MUST NOT FIRE: the set the version 12 step produces carries no Dijkstra
-    /// parameter, because nothing can hold one yet.
-    ///
-    /// MUST FIRE: the same comparison finds a parameter the set does carry, so
-    /// an absence here is a measured absence and not a comparison that never
-    /// matches anything.
+    /// MUST FIRE: the step to version 12 seeds each Dijkstra parameter with
+    /// the value the genesis file declares.
     #[test]
-    fn the_dijkstra_parameters_are_absent_from_the_transitioned_set() {
+    fn the_dijkstra_step_seeds_every_dijkstra_parameter_from_the_genesis_file() {
         let genesis = genesis_with_dijkstra();
         let initial = from_byron_genesis(&genesis.byron);
 
         let at_twelve = force_pparams_version(&initial, &genesis, 0, 12).unwrap();
 
-        let carried: Vec<String> = at_twelve
+        let seeded: Vec<Option<Val>> = genesis_dijkstra_parameters()
             .iter()
-            .map(|value| flatten(&format!("{:?}", value.kind())))
+            .map(|expected| at_twelve.get(expected.kind()).cloned())
+            .collect();
+        let expected: Vec<Option<Val>> = genesis_dijkstra_parameters()
+            .into_iter()
+            .map(Some)
             .collect();
 
-        for name in DIJKSTRA_GENESIS_PARAMETERS {
-            assert!(
-                !carried.contains(&flatten(name)),
-                "{name} reached the version 12 set, so the transition now has to source it",
-            );
-        }
+        assert_eq!(seeded, expected);
+    }
 
-        assert!(
-            carried.contains(&flatten("protocolVersion")),
-            "the comparison matches nothing at all, so the absences above mean nothing",
-        );
+    /// MUST NOT FIRE: the step to version 11 holds no Dijkstra parameter.
+    #[test]
+    fn the_step_before_dijkstra_holds_no_dijkstra_parameter() {
+        let genesis = genesis_with_dijkstra();
+        let initial = from_byron_genesis(&genesis.byron);
+
+        let at_eleven = force_pparams_version(&initial, &genesis, 0, 11).unwrap();
+
+        let held: Vec<Val> = genesis_dijkstra_parameters()
+            .iter()
+            .filter_map(|expected| at_eleven.get(expected.kind()).cloned())
+            .collect();
+
+        assert_eq!(held, vec![]);
     }
 
     /// The must-not case for the one above. Adding a rule for 12 must not turn
