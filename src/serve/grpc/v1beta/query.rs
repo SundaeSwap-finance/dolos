@@ -59,35 +59,15 @@ fn map_live_params<C: LedgerContext>(
     mapper: &interop::Mapper<C>,
     pparams: &dolos_cardano::PParamsSet,
 ) -> Result<u5c::cardano::PParams, ChainError> {
-    // The era mapping sets no retirement epoch bound, so the reply would carry a
-    // zero that a client cannot tell from a bound of zero epochs.
-    let bound = pparams
+    // A set with no retirement epoch bound would be served a zero that a client
+    // cannot tell from a bound of zero epochs.
+    pparams
         .maximum_epoch()
         .ok_or_else(|| ChainError::PParamsNotFound("MaximumEpoch".to_string()))?;
 
-    let mut mapped = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(pparams));
+    let era_params = dolos_cardano::validate::validation_parameters(pparams)?;
 
-    mapped.pool_retirement_epoch_bound = bound;
-
-    // The Conway cost model type names three languages and reads the PlutusV4
-    // vector into a wildcard map, which the era mapping drops, so a client
-    // pricing a PlutusV4 script would be served no model for it.
-    if let Some(values) = plutus_v4_cost_model(pparams) {
-        mapped
-            .cost_models
-            .get_or_insert_with(Default::default)
-            .plutus_v4 = Some(u5c::cardano::CostModel { values });
-    }
-
-    Ok(mapped)
-}
-
-/// The PlutusV4 cost model the parameters carry, at key 3 of the wildcard map.
-fn plutus_v4_cost_model(pparams: &dolos_cardano::PParamsSet) -> Option<Vec<i64>> {
-    pparams
-        .cost_models_unknown()?
-        .get(&dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY)
-        .cloned()
+    Ok(mapper.map_pparams(era_params))
 }
 
 trait IntoSet {
@@ -1798,6 +1778,14 @@ mod live_params_tests {
         float_to_rational(decimal(node, key) as f32)
     }
 
+    fn optional_ratio(node: &Value, key: &str) -> Option<RationalNumber> {
+        match node.get(key) {
+            Some(Value::Null) => None,
+            Some(_) => Some(ratio(node, key)),
+            None => panic!("the node parameters name no {key}"),
+        }
+    }
+
     fn model(node: &Value, language: &str) -> Vec<i64> {
         nested(node, "costModels", language)
             .as_array()
@@ -1820,7 +1808,12 @@ mod live_params_tests {
     /// The parameter set the ledger holds for the chain the node is running,
     /// with every value taken from the node's own answer.
     fn live_set(node: &Value) -> PParamsSet {
+        // The node answers no system start, epoch length or slot length, and
+        // the Dijkstra projection requires all three.
         PParamsSet::default()
+            .with(Val::SystemStart(1))
+            .with(Val::EpochLength(432000))
+            .with(Val::SlotLength(1))
             .with(Val::MinFeeA(whole(node, "txFeePerByte")))
             .with(Val::MinFeeB(whole(node, "txFeeFixed")))
             .with(Val::MaxBlockBodySize(whole(node, "maxBlockBodySize")))
@@ -1942,6 +1935,57 @@ mod live_params_tests {
                     model(node, "PlutusV4"),
                 ),
             ])))
+            .with(Val::MaxRefScriptSizePerBlock(whole(
+                node,
+                "maxRefScriptSizePerBlock",
+            )))
+            .with(Val::MaxRefScriptSizePerTx(whole(
+                node,
+                "maxRefScriptSizePerTx",
+            )))
+            .with(Val::RefScriptCostStride(whole(node, "refScriptCostStride")))
+            .with(Val::RefScriptCostMultiplier(ratio(
+                node,
+                "refScriptCostMultiplier",
+            )))
+            .with(Val::MaxPledgeLeverage(optional_ratio(
+                node,
+                "maxPledgeLeverage",
+            )))
+            .with(Val::MinPoolMargin(ratio(node, "minPoolMargin")))
+            .with(Val::LeiosAnnouncementPeriodLength(whole(
+                node,
+                "leiosAnnouncementPeriodLength",
+            )))
+            .with(Val::LeiosVotePeriodLength(whole(
+                node,
+                "leiosVotePeriodLength",
+            )))
+            .with(Val::LeiosDiffusionPeriodLength(whole(
+                node,
+                "leiosDiffusionPeriodLength",
+            )))
+            .with(Val::LeiosCommitteeSize(whole(node, "leiosCommitteeSize")))
+            .with(Val::LeiosQuorumStakeThreshold(ratio(
+                node,
+                "leiosQuorumStakeThreshold",
+            )))
+            .with(Val::MaxEndorserBlockReferencesSize(whole(
+                node,
+                "maxEndorserBlockReferencesSize",
+            )))
+            .with(Val::MaxEndorserBlockTxsSize(whole(
+                node,
+                "maxEndorserBlockTxsSize",
+            )))
+            .with(Val::MaxEndorserBlockExUnits(ex_units(
+                node,
+                "maxEndorserBlockExecutionUnits",
+            )))
+            .with(Val::MaxRefScriptSizePerEndorserBlock(whole(
+                node,
+                "maxRefScriptSizePerEndorserBlock",
+            )))
     }
 
     fn serve(set: &PParamsSet) -> u5c::cardano::PParams {
@@ -2018,8 +2062,7 @@ mod live_params_tests {
     }
 
     /// Every served parameter, rendered so a mismatch names the field and both
-    /// values. The PlutusV4 cost model the node also reports is left out, since
-    /// no path puts it in the parameter set this reads.
+    /// values.
     fn served_fields(p: &u5c::cardano::PParams) -> Vec<(&'static str, String)> {
         let models = p.cost_models.clone().unwrap_or_default();
 
@@ -2127,6 +2170,60 @@ mod live_params_tests {
             (
                 "drep_inactivity_period",
                 p.drep_inactivity_period.to_string(),
+            ),
+            (
+                "max_ref_script_size_per_block",
+                p.max_ref_script_size_per_block.to_string(),
+            ),
+            (
+                "max_ref_script_size_per_tx",
+                p.max_ref_script_size_per_tx.to_string(),
+            ),
+            (
+                "ref_script_cost_stride",
+                p.ref_script_cost_stride.to_string(),
+            ),
+            (
+                "ref_script_cost_multiplier",
+                show_served_ratio(&p.ref_script_cost_multiplier),
+            ),
+            (
+                "max_pledge_leverage",
+                show_served_ratio(&p.max_pledge_leverage),
+            ),
+            ("min_pool_margin", show_served_ratio(&p.min_pool_margin)),
+            (
+                "leios_announcement_period_length",
+                p.leios_announcement_period_length.to_string(),
+            ),
+            (
+                "leios_vote_period_length",
+                p.leios_vote_period_length.to_string(),
+            ),
+            (
+                "leios_diffusion_period_length",
+                p.leios_diffusion_period_length.to_string(),
+            ),
+            ("leios_committee_size", p.leios_committee_size.to_string()),
+            (
+                "leios_quorum_stake_threshold",
+                show_served_ratio(&p.leios_quorum_stake_threshold),
+            ),
+            (
+                "max_endorser_block_references_size",
+                p.max_endorser_block_references_size.to_string(),
+            ),
+            (
+                "max_endorser_block_txs_size",
+                p.max_endorser_block_txs_size.to_string(),
+            ),
+            (
+                "max_endorser_block_execution_units",
+                show_served_units(&p.max_endorser_block_execution_units),
+            ),
+            (
+                "max_ref_script_size_per_endorser_block",
+                p.max_ref_script_size_per_endorser_block.to_string(),
             ),
         ]
     }
@@ -2277,6 +2374,65 @@ mod live_params_tests {
                 "drep_inactivity_period",
                 whole(node, "dRepActivity").to_string(),
             ),
+            (
+                "max_ref_script_size_per_block",
+                whole(node, "maxRefScriptSizePerBlock").to_string(),
+            ),
+            (
+                "max_ref_script_size_per_tx",
+                whole(node, "maxRefScriptSizePerTx").to_string(),
+            ),
+            (
+                "ref_script_cost_stride",
+                whole(node, "refScriptCostStride").to_string(),
+            ),
+            (
+                "ref_script_cost_multiplier",
+                show_ratio(&ratio(node, "refScriptCostMultiplier")),
+            ),
+            (
+                "max_pledge_leverage",
+                optional_ratio(node, "maxPledgeLeverage")
+                    .map(|x| show_ratio(&x))
+                    .unwrap_or_else(|| "no value".to_string()),
+            ),
+            ("min_pool_margin", show_ratio(&ratio(node, "minPoolMargin"))),
+            (
+                "leios_announcement_period_length",
+                whole(node, "leiosAnnouncementPeriodLength").to_string(),
+            ),
+            (
+                "leios_vote_period_length",
+                whole(node, "leiosVotePeriodLength").to_string(),
+            ),
+            (
+                "leios_diffusion_period_length",
+                whole(node, "leiosDiffusionPeriodLength").to_string(),
+            ),
+            (
+                "leios_committee_size",
+                whole(node, "leiosCommitteeSize").to_string(),
+            ),
+            (
+                "leios_quorum_stake_threshold",
+                show_ratio(&ratio(node, "leiosQuorumStakeThreshold")),
+            ),
+            (
+                "max_endorser_block_references_size",
+                whole(node, "maxEndorserBlockReferencesSize").to_string(),
+            ),
+            (
+                "max_endorser_block_txs_size",
+                whole(node, "maxEndorserBlockTxsSize").to_string(),
+            ),
+            (
+                "max_endorser_block_execution_units",
+                show_units(&ex_units(node, "maxEndorserBlockExecutionUnits")),
+            ),
+            (
+                "max_ref_script_size_per_endorser_block",
+                whole(node, "maxRefScriptSizePerEndorserBlock").to_string(),
+            ),
         ]
     }
 
@@ -2336,25 +2492,25 @@ mod live_params_tests {
         );
     }
 
+    /// The must-not case. A set at a Conway protocol version is served no
+    /// Dijkstra parameter, though the set holds every one.
     #[test]
-    fn the_retirement_bound_and_the_plutus_v4_model_are_the_fields_the_era_mapping_leaves_behind() {
+    fn a_conway_set_serves_no_dijkstra_parameter() {
         let node = node();
-        let set = live_set(&node);
+        let set = live_set(&node).with(Val::ProtocolVersion((10, 0)));
 
-        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
-        let era_only = mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(&set));
-        let served = map_live_params(&mapper, &set).unwrap();
-
-        let differing: Vec<&'static str> = served_fields(&served)
+        let served = serve(&set);
+        let dijkstra_fields: Vec<(&'static str, String)> = served_fields(&served)
             .into_iter()
-            .zip(served_fields(&era_only))
-            .filter(|((_, a), (_, b))| a != b)
-            .map(|((name, _), _)| name)
+            .skip_while(|(name, _)| *name != "max_ref_script_size_per_block")
             .collect();
 
-        assert_eq!(
-            differing,
-            vec!["pool_retirement_epoch_bound", "cost_models.plutus_v4"]
+        assert_eq!(dijkstra_fields.len(), 15);
+        assert!(
+            dijkstra_fields
+                .iter()
+                .all(|(_, value)| value == "0" || value == "no value"),
+            "a Conway set was served {dijkstra_fields:?}"
         );
     }
 }
