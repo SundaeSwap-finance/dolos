@@ -17,8 +17,8 @@
 //!
 //! Two refusals here are the point of the module rather than defensive extras.
 //! leios-fetch has no not-found reply, so an endorser block the peer does not
-//! hold arrives as a well formed empty body, and only the size the announcement
-//! committed to separates that from an endorser block that really is empty.
+//! hold arrives as a well formed empty body, and only the hash the announcement
+//! committed to tells that body apart from an endorser block that really is empty.
 //! And a payload is attached to a block by slot, never by arrival order, so a
 //! short or reordered block batch cannot silently move one block's transactions
 //! onto another.
@@ -30,8 +30,7 @@ use dolos_cardano::pallas_extras::inline_endorser_transactions;
 use pallas::codec::minicbor::{self, bytes::ByteSlice};
 use pallas::codec::utils::AnyCbor;
 use pallas::crypto::hash::Hash;
-use pallas::ledger::traverse::leios::EndorserBlockBody;
-use pallas::ledger::traverse::MultiEraBlock;
+use pallas::ledger::traverse::{Era, MultiEraBlock, MultiEraTx};
 use pallas::network2::behavior::initiator::{
     Config as HandshakeConfig, DisconnectReason, HandshakeBehavior, InitiatorBehavior,
     InitiatorCommand, InitiatorEvent,
@@ -45,6 +44,8 @@ use tokio::time::interval;
 use tracing::{debug, info, warn};
 
 use dolos_core::BlockBody;
+
+use crate::sync::endorser::{self, EndorserBlockBody};
 
 /// Transactions asked for in one leios-fetch request.
 ///
@@ -111,7 +112,7 @@ pub enum Error {
     },
 
     #[error(transparent)]
-    Endorser(#[from] pallas::ledger::traverse::leios::Error),
+    Endorser(#[from] endorser::Error),
 
     #[error("block cbor from the peer does not decode: {0}")]
     BadBlock(String),
@@ -398,9 +399,9 @@ impl<T: LeiosTransport> LeiosClient<T> {
     /// Fetches one endorser block whole and returns its transactions, in
     /// endorser block order, unwrapped from their byte string envelopes.
     ///
-    /// The body is checked against the size its announcement committed to, and
-    /// every transaction is checked against the body entry that names it, on
-    /// count, length and hash, before any of them is returned. So the answer is
+    /// The body is checked against the hash its announcement committed to, and
+    /// every transaction against the hash its body entry names, before any of
+    /// them is returned. So the answer is
     /// either the whole endorser block or an error saying what was wrong with
     /// it, never a prefix and never an empty list standing in for a failure.
     pub async fn fetch(&mut self, eb: &AnnouncedEndorserBlock) -> Result<Vec<Vec<u8>>, Error> {
@@ -452,7 +453,7 @@ impl<T: LeiosTransport> LeiosClient<T> {
                                 "endorser block fetched whole"
                             );
 
-                            return finish(decoded, wire);
+                            return finish(wire);
                         }
 
                         inflight = want.clone();
@@ -506,7 +507,7 @@ impl<T: LeiosTransport> LeiosClient<T> {
                     match response {
                         leiosfetch::Response::Block(raw) => {
                             // An endorser block the peer does not hold comes
-                            // back as a well formed empty body, so the size
+                            // back as a well formed empty body, so the hash
                             // the announcement committed to is the only thing
                             // that tells the two apart.
                             let decoded =
@@ -590,20 +591,24 @@ impl<T: LeiosTransport> LeiosClient<T> {
     }
 }
 
-/// Checks a whole delivery against the body that named it, then strips the
-/// envelopes.
-///
-/// The verification runs before anything is returned, so a caller cannot be
-/// handed a transaction the endorser block did not name or one delivered in the
-/// wrong place.
-fn finish(body: &EndorserBlockBody, wire: Vec<AnyCbor>) -> Result<Vec<Vec<u8>>, Error> {
-    let verified = body.transactions(&wire)?;
-    debug!(txs = verified.len(), "endorser block verified whole");
-
+/// The transactions of a whole delivery with their envelopes stripped, each
+/// decoded as a Dijkstra transaction before any is returned.
+fn finish(wire: Vec<AnyCbor>) -> Result<Vec<Vec<u8>>, Error> {
     let mut out = Vec::with_capacity(wire.len());
     for (index, w) in wire.iter().enumerate() {
-        out.push(strip_envelope(index, w.raw_bytes())?.to_vec());
+        let inner = strip_envelope(index, w.raw_bytes())?;
+
+        MultiEraTx::decode_for_era(Era::Dijkstra, inner).map_err(|e| {
+            endorser::Error::TxDecode {
+                index,
+                reason: e.to_string(),
+            }
+        })?;
+
+        out.push(inner.to_vec());
     }
+
+    debug!(txs = out.len(), "endorser block verified whole");
 
     Ok(out)
 }
@@ -611,11 +616,12 @@ fn finish(body: &EndorserBlockBody, wire: Vec<AnyCbor>) -> Result<Vec<Vec<u8>>, 
 /// The transaction inside the byte string envelope a leios-fetch transaction
 /// arrives in.
 fn strip_envelope(index: usize, wire: &[u8]) -> Result<&[u8], Error> {
-    let inner: &ByteSlice =
-        minicbor::decode(wire).map_err(|e| pallas::ledger::traverse::leios::Error::TxDecode {
-            index,
-            reason: e.to_string(),
-        })?;
+    let tx_decode = |e: minicbor::decode::Error| endorser::Error::TxDecode {
+        index,
+        reason: e.to_string(),
+    };
+
+    let inner: &ByteSlice = minicbor::decode(wire).map_err(tx_decode)?;
 
     Ok(&**inner)
 }
@@ -1049,7 +1055,7 @@ mod tests {
             .expect_err("a body that is not the announced one must be refused");
 
         match err {
-            Error::Endorser(pallas::ledger::traverse::leios::Error::BodyHash {
+            Error::Endorser(endorser::Error::BodyHash {
                 announced: named,
                 found,
             }) => {
@@ -1057,6 +1063,108 @@ mod tests {
                 assert_eq!(found, real, "the refusal names what the peer served");
             }
             other => panic!("wrong refusal: {other}"),
+        }
+    }
+
+    /// MUST FIRE: a transaction delivered without its byte string envelope is
+    /// refused at its position.
+    #[tokio::test]
+    async fn a_transaction_delivered_without_its_envelope_is_refused() {
+        let (body, wire_txs, announced) = real_eb();
+        let point: EbId = Point::Specific(announced.slot, announced.hash.to_vec());
+
+        let unwrapped: Vec<Vec<u8>> = wire_txs
+            .iter()
+            .map(|wire| {
+                let inner: &ByteSlice = minicbor::decode(wire).unwrap();
+                inner.to_vec()
+            })
+            .collect();
+        assert_ne!(
+            unwrapped[0].len(),
+            wire_txs[0].len(),
+            "the envelope is real"
+        );
+
+        let mut client = client(FakeRelay::new(point, body, unwrapped, usize::MAX), 64);
+
+        match client.fetch(&announced).await.map(|txs| txs.len()) {
+            Err(Error::Endorser(endorser::Error::TxDecode { index, .. })) => {
+                assert_eq!(index, 0);
+            }
+            other => panic!("wrong answer: {other:?}"),
+        }
+    }
+
+    /// MUST NOT FIRE: a transaction is accepted whatever size its body entry
+    /// names.
+    #[tokio::test]
+    async fn a_transaction_is_accepted_whatever_size_its_entry_names() {
+        let (body, wire_txs, announced) = real_eb();
+        let own = pallas::ledger::primitives::dijkstra::EbAnnouncement {
+            eb_hash: announced.hash,
+            eb_size: announced.size,
+        };
+        let entries = EndorserBlockBody::decode_announced(&body, &own).unwrap()[..].to_vec();
+
+        type Resize = fn(u32) -> u32;
+
+        let resizes: [(&str, Resize); 3] = [
+            ("zero", |_| 0),
+            ("one more", |named| named + 1),
+            ("largest", |_| u32::MAX),
+        ];
+
+        for (label, resize) in resizes {
+            let mut e = minicbor::Encoder::new(Vec::new());
+            e.map(entries.len() as u64).unwrap();
+            for (hash, size) in &entries {
+                e.bytes(hash.as_ref()).unwrap().u32(resize(*size)).unwrap();
+            }
+            let resized = e.into_writer();
+
+            let announced = AnnouncedEndorserBlock {
+                slot: announced.slot,
+                hash: pallas::crypto::hash::Hasher::<256>::hash(&resized),
+                size: resized.len() as u32,
+            };
+            let point: EbId = Point::Specific(announced.slot, announced.hash.to_vec());
+
+            let relay = FakeRelay::new(point, resized, wire_txs.clone(), usize::MAX);
+            let mut client = client(relay, 64);
+
+            let txs = client
+                .fetch(&announced)
+                .await
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
+            assert_eq!(txs.len(), 425, "{label}");
+        }
+    }
+
+    /// MUST NOT FIRE: every transaction of a real endorser block decodes.
+    #[test]
+    fn a_delivery_of_dijkstra_transactions_is_finished() {
+        let (_, wire_txs, _) = real_eb();
+        let wire = wire_txs.into_iter().map(AnyCbor::from_raw_bytes).collect();
+
+        let finished = finish(wire).expect("every transaction decodes");
+
+        assert_eq!(finished.len(), 425);
+    }
+
+    /// MUST FIRE: a delivered byte string that holds no Dijkstra transaction is
+    /// refused at its position.
+    #[test]
+    fn a_delivery_holding_something_other_than_a_transaction_is_refused() {
+        let (_, mut wire_txs, _) = real_eb();
+        wire_txs[3] = minicbor::to_vec(minicbor::bytes::ByteVec::from(vec![0x01])).unwrap();
+        let wire = wire_txs.into_iter().map(AnyCbor::from_raw_bytes).collect();
+
+        match finish(wire) {
+            Err(Error::Endorser(endorser::Error::TxDecode { index, .. })) => {
+                assert_eq!(index, 3);
+            }
+            other => panic!("wrong answer: {other:?}"),
         }
     }
 

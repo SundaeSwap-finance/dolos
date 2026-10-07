@@ -1,6 +1,6 @@
 use dolos_core::BlockSlot;
 use pallas::codec::minicbor;
-use pallas::codec::utils::MaybeIndefArray;
+use pallas::codec::utils::{MaybeIndefArray, Nullable};
 use pallas::crypto::hash::Hash;
 use pallas::ledger::addresses::{
     Address, Network, ShelleyAddress, ShelleyDelegationPart, StakeAddress, StakePayload,
@@ -12,7 +12,6 @@ use pallas::ledger::primitives::conway::{
 use pallas::ledger::primitives::dijkstra;
 use pallas::ledger::primitives::{Epoch, ExUnitPrices, ExUnits, Nonce, NonceVariant};
 use pallas::ledger::primitives::{PoolMetadata, RationalNumber, Relay, StakeCredential};
-use pallas::ledger::traverse::cert::BlsKeySlot;
 use pallas::ledger::traverse::{MultiEraCert, MultiEraCertKind, MultiEraScriptRef, MultiEraTx};
 use serde::{Deserialize, Serialize};
 
@@ -34,21 +33,28 @@ pub enum MultiEraBlsKey {
         pubkey: Vec<u8>,
         possession_proof: Vec<u8>,
     },
-    /// A slot state this build has no name for, which is what a state added to
-    /// the era neutral view after this was written reads as.
+    /// What a certificate that is not a pool registration reads as.
     Unrecognized,
 }
 
-impl From<BlsKeySlot<'_>> for MultiEraBlsKey {
-    fn from(slot: BlsKeySlot<'_>) -> Self {
-        match slot {
-            BlsKeySlot::NoSlot => MultiEraBlsKey::NoSlot,
-            BlsKeySlot::Null => MultiEraBlsKey::Null,
-            BlsKeySlot::Key(key) => MultiEraBlsKey::Key {
+impl From<&MultiEraCert<'_>> for MultiEraBlsKey {
+    fn from(cert: &MultiEraCert<'_>) -> Self {
+        let Some(MultiEraCertKind::PoolRegistration(_)) = cert.kind() else {
+            return MultiEraBlsKey::Unrecognized;
+        };
+
+        let Some(dijkstra::Certificate::PoolRegistration { bls_key, .. }) = cert.as_dijkstra()
+        else {
+            return MultiEraBlsKey::NoSlot;
+        };
+
+        match bls_key {
+            None => MultiEraBlsKey::NoSlot,
+            Some(Nullable::Null | Nullable::Undefined) => MultiEraBlsKey::Null,
+            Some(Nullable::Some(key)) => MultiEraBlsKey::Key {
                 pubkey: key.bls_pubkey.to_vec(),
                 possession_proof: key.bls_possession_proof.to_vec(),
             },
-            _ => MultiEraBlsKey::Unrecognized,
         }
     }
 }
@@ -79,7 +85,7 @@ pub fn cert_as_pool_registration(cert: &MultiEraCert) -> Option<MultiEraPoolRegi
             pool_owners: params.pool_owners.to_vec(),
             relays: params.relays.to_vec(),
             pool_metadata: params.pool_metadata.cloned(),
-            bls_key: cert.bls_key().into(),
+            bls_key: cert.into(),
         }),
         _ => None,
     }
@@ -840,6 +846,7 @@ mod dijkstra_certificate_tests {
     #[test]
     fn the_three_states_of_the_key_slot_stay_three_answers() {
         let nil = wrap(pool_registration_with(Some(Nullable::Null)));
+        let undefined = wrap(pool_registration_with(Some(Nullable::Undefined)));
         let omitted = wrap(pool_registration_with(None));
         let written = wrap(pool_registration_with(Some(Nullable::Some(
             DijkstraBlsKey {
@@ -855,6 +862,7 @@ mod dijkstra_certificate_tests {
         };
 
         assert_eq!(read(&nil), MultiEraBlsKey::Null);
+        assert_eq!(read(&undefined), MultiEraBlsKey::Null);
         assert_eq!(read(&omitted), MultiEraBlsKey::NoSlot);
         assert!(matches!(read(&written), MultiEraBlsKey::Key { .. }));
     }
@@ -978,6 +986,52 @@ mod earlier_era_certificate_tests {
         StakeCredential::AddrKeyhash(CRED.parse().unwrap())
     }
 
+    fn conway_pool_registration() -> MultiEraCert<'static> {
+        conway(ConwayCert::PoolRegistration {
+            operator: POOL.parse().unwrap(),
+            vrf_keyhash: VRF.parse().unwrap(),
+            pledge: 1_000_000,
+            cost: 340_000_000,
+            margin: RationalNumber {
+                numerator: 3,
+                denominator: 100,
+            },
+            reward_account: vec![0xe0].into(),
+            pool_owners: vec![CRED.parse::<Hash<28>>().unwrap()].into(),
+            relays: vec![],
+            pool_metadata: None,
+        })
+    }
+
+    /// A certificate that is not a pool registration reads as `Unrecognized`
+    /// in every era, and a pool registration of an era with no key slot reads
+    /// as `NoSlot`.
+    #[test]
+    fn a_certificate_that_is_not_a_pool_registration_has_an_unrecognized_key() {
+        let not_pool_registrations = [
+            alonzo(AlonzoCert::StakeRegistration(cred())),
+            conway(ConwayCert::Reg(cred(), 2_000_000)),
+            MultiEraCert::Dijkstra(Box::new(Cow::Owned(dijkstra::Certificate::PoolRetirement(
+                POOL.parse().unwrap(),
+                42,
+            )))),
+            MultiEraCert::NotApplicable,
+        ];
+
+        for cert in &not_pool_registrations {
+            assert_eq!(
+                MultiEraBlsKey::from(cert),
+                MultiEraBlsKey::Unrecognized,
+                "{cert:?}"
+            );
+        }
+
+        assert_eq!(
+            MultiEraBlsKey::from(&conway_pool_registration()),
+            MultiEraBlsKey::NoSlot
+        );
+    }
+
     /// A move instantaneous rewards certificate is named by the type serving
     /// Shelley through Babbage and by no later era's, so it is the one kind
     /// whose reader has to keep answering for an early era and for no other.
@@ -1028,20 +1082,7 @@ mod earlier_era_certificate_tests {
     /// and every other parameter still arrives.
     #[test]
     fn a_conway_pool_registration_has_no_key_slot_and_keeps_its_parameters() {
-        let cert = conway(ConwayCert::PoolRegistration {
-            operator: POOL.parse().unwrap(),
-            vrf_keyhash: VRF.parse().unwrap(),
-            pledge: 1_000_000,
-            cost: 340_000_000,
-            margin: RationalNumber {
-                numerator: 3,
-                denominator: 100,
-            },
-            reward_account: vec![0xe0].into(),
-            pool_owners: vec![CRED.parse::<Hash<28>>().unwrap()].into(),
-            relays: vec![],
-            pool_metadata: None,
-        });
+        let cert = conway_pool_registration();
 
         let read = cert_as_pool_registration(&cert).expect("must be read");
 

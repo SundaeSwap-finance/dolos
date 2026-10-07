@@ -6,7 +6,6 @@ use dolos_core::config::{PeerConfig, SyncConfig, SyncLimit};
 use dolos_core::ChainPoint;
 use gasket::framework::*;
 use itertools::Itertools;
-use pallas::ledger::traverse::leios;
 use pallas::ledger::traverse::{MultiEraBlock, MultiEraHeader};
 use pallas::network::facades::PeerClient;
 use pallas::network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
@@ -15,6 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::adapters::WalAdapter;
 use crate::prelude::*;
+use crate::sync::endorser;
 use crate::sync::leios::{AnnouncedEndorserBlock, CertifiedPayload, LeiosClient, PendingPayloads};
 
 /// A header kept in the bytes it arrived in, for a later header to name as its
@@ -50,8 +50,8 @@ fn held_at(
 fn announced_by(
     parent: Option<&MultiEraHeader<'_>>,
     header: &MultiEraHeader<'_>,
-) -> Result<Option<AnnouncedEndorserBlock>, leios::Error> {
-    let certified = leios::certification(parent, header)?;
+) -> Result<Option<AnnouncedEndorserBlock>, endorser::Error> {
+    let certified = endorser::certification(parent, header)?;
 
     Ok(certified
         .zip(parent)
@@ -67,7 +67,7 @@ fn announced_by(
 fn certified_by(
     held: &[(BlockHash, HeldHeader)],
     header: &MultiEraHeader<'_>,
-) -> Result<Option<AnnouncedEndorserBlock>, leios::Error> {
+) -> Result<Option<AnnouncedEndorserBlock>, endorser::Error> {
     let parent = held
         .iter()
         .rev()
@@ -305,10 +305,9 @@ impl Worker {
     /// certifying block's body arrives.
     ///
     /// A peer that does not hold the endorser block answers with a well formed
-    /// empty body rather than an error, and that answer is refused by the size
-    /// the announcement committed to, several layers down in
-    /// `EndorserBlockBody::decode_announced`. It surfaces here as a retry rather
-    /// than as a block with no transactions.
+    /// empty body rather than an error, and `EndorserBlockBody::decode_announced`
+    /// refuses that answer by the hash the announcement committed to. It
+    /// surfaces here as a retry rather than as a block with no transactions.
     ///
     /// A failed fetch drops the Leios connection and builds a new one, because
     /// a session that has ended cannot serve the next request either. The
@@ -763,7 +762,7 @@ mod tests {
     fn certified_after(
         held: &[(BlockHash, HeldHeader)],
         child: &[u8],
-    ) -> Result<Option<AnnouncedEndorserBlock>, leios::Error> {
+    ) -> Result<Option<AnnouncedEndorserBlock>, endorser::Error> {
         let decoded = MultiEraBlock::decode(child).unwrap();
         certified_by(held, &decoded.header())
     }
@@ -839,7 +838,7 @@ mod tests {
         assert!(
             matches!(
                 refused,
-                Err(leios::Error::NotParent {
+                Err(endorser::Error::NotParent {
                     slot: 1_202_752,
                     ..
                 })
