@@ -11,12 +11,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use pallas::codec::utils::AnyCbor;
-use pallas::crypto::hash::Hash;
+use dolos::sync::endorser::EndorserBlockBody;
+use pallas::codec::minicbor::{self, bytes::ByteSlice};
+use pallas::crypto::hash::{Hash, Hasher};
 use pallas::ledger::primitives::dijkstra::EbAnnouncement;
-use pallas::ledger::traverse::cert::BlsKeySlot;
-use pallas::ledger::traverse::leios::EndorserBlockBody;
-use pallas::ledger::traverse::MultiEraBlock;
+use pallas::ledger::traverse::{Era, MultiEraBlock, MultiEraTx};
 use serde::Deserialize;
 
 const DIR: &str = "test_data/musashi-w36";
@@ -295,19 +294,25 @@ fn every_endorser_block_verifies_against_its_announcement() {
             f.name
         );
 
-        let wire: Vec<AnyCbor> = read_wire_txs(txs_file)
-            .into_iter()
-            .map(AnyCbor::from_raw_bytes)
-            .collect();
-        let txs = body
-            .transactions(&wire)
-            .unwrap_or_else(|e| panic!("{} transactions do not verify: {e}", f.name));
+        let wire = read_wire_txs(txs_file);
         assert_eq!(
-            txs.len(),
+            wire.len(),
             f.transactions,
             "{} serves a different number of transactions than it commits to",
             f.name
         );
+        for (index, ((named, _), delivered)) in body.iter().zip(&wire).enumerate() {
+            let inner: &ByteSlice = minicbor::decode(delivered)
+                .unwrap_or_else(|e| panic!("{} transaction {index} has no envelope: {e}", f.name));
+            assert_eq!(
+                Hasher::<256>::hash(inner),
+                *named,
+                "{} transaction {index} is not the one its entry names",
+                f.name
+            );
+            MultiEraTx::decode_for_era(Era::Dijkstra, inner)
+                .unwrap_or_else(|e| panic!("{} transaction {index} does not decode: {e}", f.name));
+        }
         assert!(
             f.block_hash.is_none(),
             "{} is an endorser block and records a block hash",
@@ -356,7 +361,7 @@ fn each_fixture_shows_the_shape_it_was_cut_for() {
         .txs()
         .iter()
         .flat_map(|tx| tx.certs())
-        .filter(|cert| matches!(cert.bls_key(), BlsKeySlot::Key(_)))
+        .filter(|cert| cert.bls_key().is_some())
         .count();
     assert!(
         keys > 0,
