@@ -9,6 +9,7 @@ use pallas::{
 use std::pin::Pin;
 use tonic::{Request, Response, Status};
 
+use super::criterion;
 use crate::prelude::*;
 use crate::serve::grpc::stream::ChainStream;
 
@@ -16,25 +17,27 @@ fn outputs_match_address(
     pattern: &u5c::cardano::AddressPattern,
     outputs: &[u5c::cardano::TxOutput],
 ) -> bool {
-    let exact_matches = pattern.exact_address.is_empty()
-        || outputs.iter().any(|o| o.address == pattern.exact_address);
+    let exact_matches = criterion(&pattern.exact_address)
+        .is_none_or(|exact| outputs.iter().any(|o| o.address == *exact));
 
-    let delegation_matches = pattern.delegation_part.is_empty()
-        || outputs.iter().any(|o| {
+    let delegation_matches = criterion(&pattern.delegation_part).is_none_or(|delegation| {
+        outputs.iter().any(|o| {
             let addr = Address::from_bytes(&o.address).unwrap();
             match addr {
-                Address::Shelley(s) => s.delegation().to_vec().eq(&pattern.delegation_part),
+                Address::Shelley(s) => s.delegation().to_vec().eq(delegation),
                 _ => false,
             }
-        });
-    let payment_matches = pattern.payment_part.is_empty()
-        || outputs.iter().any(|o| {
+        })
+    });
+    let payment_matches = criterion(&pattern.payment_part).is_none_or(|payment| {
+        outputs.iter().any(|o| {
             let addr = Address::from_bytes(&o.address).unwrap();
             match addr {
-                Address::Shelley(s) => s.payment().to_vec().eq(&pattern.payment_part),
+                Address::Shelley(s) => s.payment().to_vec().eq(payment),
                 _ => false,
             }
-        });
+        })
+    });
 
     exact_matches && delegation_matches && payment_matches
 }
@@ -53,15 +56,13 @@ fn matches_asset(
     assets: &[u5c::cardano::Multiasset],
 ) -> bool {
     assets.iter().any(|ma| {
-        if !asset_pattern.policy_id.is_empty() && asset_pattern.policy_id.ne(&ma.policy_id) {
+        if criterion(&asset_pattern.policy_id).is_some_and(|policy| policy.ne(&ma.policy_id)) {
             return false;
         }
-        if asset_pattern.asset_name.is_empty() {
+        let Some(name) = criterion(&asset_pattern.asset_name) else {
             return true;
-        }
-        ma.assets
-            .iter()
-            .any(|ma| asset_pattern.asset_name.eq(&ma.name))
+        };
+        ma.assets.iter().any(|ma| name.eq(&ma.name))
     })
 }
 
@@ -281,51 +282,58 @@ fn matches_certificate_pattern(
 }
 
 fn matches_cardano_pattern(tx_pattern: &u5c::cardano::TxPattern, tx: &u5c::cardano::Tx) -> bool {
-    let has_address_match = tx_pattern.has_address.as_ref().is_none_or(|addr_pattern| {
-        let outputs: Vec<_> = tx.outputs.to_vec();
-        let inputs: Vec<_> = tx
-            .inputs
-            .iter()
-            .filter_map(|x| x.as_output.as_ref().cloned())
-            .collect();
+    // Each pattern field is checked against the transaction together with its
+    // sub transactions.
+    let members: Vec<&u5c::cardano::Tx> = std::iter::once(tx)
+        .chain(tx.sub_transactions.iter())
+        .collect();
 
+    let inputs: Vec<_> = members
+        .iter()
+        .flat_map(|x| x.inputs.iter())
+        .filter_map(|x| x.as_output.as_ref().cloned())
+        .collect();
+    let outputs: Vec<_> = members
+        .iter()
+        .flat_map(|x| x.outputs.iter().cloned())
+        .collect();
+    let mint: Vec<_> = members
+        .iter()
+        .flat_map(|x| x.mint.iter().cloned())
+        .collect();
+    let certificates: Vec<_> = members
+        .iter()
+        .flat_map(|x| x.certificates.iter().cloned())
+        .collect();
+
+    let has_address_match = tx_pattern.has_address.as_ref().is_none_or(|addr_pattern| {
         outputs_match_address(addr_pattern, &inputs)
             || outputs_match_address(addr_pattern, &outputs)
     });
 
-    let consumes_match = tx_pattern.consumes.as_ref().is_none_or(|out_pattern| {
-        let inputs: Vec<_> = tx
-            .inputs
-            .iter()
-            .filter_map(|x| x.as_output.as_ref().cloned())
-            .collect();
-        matches_output(out_pattern, &inputs)
-    });
+    let consumes_match = tx_pattern
+        .consumes
+        .as_ref()
+        .is_none_or(|out_pattern| matches_output(out_pattern, &inputs));
 
     let mints_asset_match = tx_pattern
         .mints_asset
         .as_ref()
-        .is_none_or(|asset_pattern| matches_asset(asset_pattern, &tx.mint));
+        .is_none_or(|asset_pattern| matches_asset(asset_pattern, &mint));
 
     let moves_asset_match = tx_pattern.moves_asset.as_ref().is_none_or(|asset_pattern| {
-        let inputs: Vec<_> = tx
-            .inputs
-            .iter()
-            .filter_map(|x| x.as_output.as_ref().cloned())
-            .collect();
-        outputs_match_asset(asset_pattern, &inputs)
-            || outputs_match_asset(asset_pattern, &tx.outputs)
+        outputs_match_asset(asset_pattern, &inputs) || outputs_match_asset(asset_pattern, &outputs)
     });
 
     let produces_match = tx_pattern
         .produces
         .as_ref()
-        .is_none_or(|out_pattern| matches_output(out_pattern, &tx.outputs));
+        .is_none_or(|out_pattern| matches_output(out_pattern, &outputs));
 
     let has_certificate_match = tx_pattern
         .has_certificate
         .as_ref()
-        .is_none_or(|cert_pattern| matches_certificate_pattern(cert_pattern, &tx.certificates));
+        .is_none_or(|cert_pattern| matches_certificate_pattern(cert_pattern, &certificates));
 
     has_address_match
         && consumes_match
@@ -702,5 +710,207 @@ mod tests {
             ..Default::default()
         };
         assert!(matches_cardano_pattern(&tx_pattern, &tx));
+    }
+
+    /// A transaction whose only content is one sub transaction, the delegation
+    /// transaction.
+    fn parent_of_delegation() -> u5c::cardano::Tx {
+        u5c::cardano::Tx {
+            sub_transactions: vec![decoded_tx()],
+            ..Default::default()
+        }
+    }
+
+    fn delegation_to(pool: Vec<u8>) -> u5c::cardano::CertificatePattern {
+        u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::StakeDelegation(
+                    u5c::cardano::StakeDelegationPattern {
+                        stake_credential: None,
+                        pool_keyhash: pool.into(),
+                    },
+                ),
+            ),
+        }
+    }
+
+    fn delegating_address() -> u5c::cardano::AddressPattern {
+        u5c::cardano::AddressPattern {
+            delegation_part: Some(stake_cred_bytes().into()),
+            ..Default::default()
+        }
+    }
+
+    /// The must-not case. A sub transaction certificate that differs from the
+    /// pattern matches nothing.
+    #[test]
+    fn a_sub_transaction_delegation_to_another_pool_does_not_match() {
+        let tx_pattern = u5c::cardano::TxPattern {
+            has_certificate: Some(delegation_to(vec![0xaa; 28])),
+            ..Default::default()
+        };
+
+        assert!(!matches_cardano_pattern(
+            &tx_pattern,
+            &parent_of_delegation()
+        ));
+    }
+
+    #[test]
+    fn a_certificate_in_a_sub_transaction_matches() {
+        let tx_pattern = u5c::cardano::TxPattern {
+            has_certificate: Some(delegation_to(pool_hash_bytes())),
+            ..Default::default()
+        };
+
+        assert!(matches_cardano_pattern(
+            &tx_pattern,
+            &parent_of_delegation()
+        ));
+    }
+
+    #[test]
+    fn an_output_of_a_sub_transaction_matches_produces_and_has_address() {
+        let produces = u5c::cardano::TxPattern {
+            produces: Some(u5c::cardano::TxOutputPattern {
+                address: Some(delegating_address()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let has_address = u5c::cardano::TxPattern {
+            has_address: Some(delegating_address()),
+            ..Default::default()
+        };
+
+        assert!(matches_cardano_pattern(&produces, &parent_of_delegation()));
+        assert!(matches_cardano_pattern(
+            &has_address,
+            &parent_of_delegation()
+        ));
+    }
+
+    /// Each field is checked on its own, so one field matching the parent and
+    /// another matching a sub transaction match together.
+    #[test]
+    fn fields_matched_by_the_parent_and_by_a_sub_transaction_match_together() {
+        let mut tx = parent_of_delegation();
+        tx.certificates = decoded_tx().certificates;
+        tx.sub_transactions[0].certificates.clear();
+
+        let tx_pattern = u5c::cardano::TxPattern {
+            has_certificate: Some(delegation_to(pool_hash_bytes())),
+            produces: Some(u5c::cardano::TxOutputPattern {
+                address: Some(delegating_address()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert!(tx.outputs.is_empty());
+        assert!(matches_cardano_pattern(&tx_pattern, &tx));
+    }
+
+    fn token(policy: u8, name: &[u8]) -> Vec<u5c::cardano::TxOutput> {
+        vec![u5c::cardano::TxOutput {
+            assets: vec![u5c::cardano::Multiasset {
+                policy_id: vec![policy; 28].into(),
+                assets: vec![u5c::cardano::Asset {
+                    name: name.to_vec().into(),
+                    ..Default::default()
+                }],
+            }],
+            ..Default::default()
+        }]
+    }
+
+    #[test]
+    fn an_address_field_set_to_another_value_does_not_match() {
+        let outputs = decoded_tx().outputs;
+        let other = || Some(bytes::Bytes::from(vec![0xaa; 28]));
+
+        for pattern in [
+            u5c::cardano::AddressPattern {
+                exact_address: other(),
+                ..Default::default()
+            },
+            u5c::cardano::AddressPattern {
+                payment_part: other(),
+                ..Default::default()
+            },
+            u5c::cardano::AddressPattern {
+                delegation_part: other(),
+                ..Default::default()
+            },
+        ] {
+            assert!(!outputs_match_address(&pattern, &outputs), "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn an_asset_field_set_to_another_value_does_not_match() {
+        let outputs = token(1, b"coin");
+
+        for pattern in [
+            u5c::cardano::AssetPattern {
+                policy_id: Some(vec![2; 28].into()),
+                ..Default::default()
+            },
+            u5c::cardano::AssetPattern {
+                asset_name: Some(b"other".to_vec().into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(!outputs_match_asset(&pattern, &outputs), "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn address_fields_unset_or_empty_match_any_output() {
+        let outputs = decoded_tx().outputs;
+        let empty = || Some(bytes::Bytes::new());
+
+        for pattern in [
+            u5c::cardano::AddressPattern::default(),
+            u5c::cardano::AddressPattern {
+                exact_address: empty(),
+                payment_part: empty(),
+                delegation_part: empty(),
+            },
+        ] {
+            assert!(outputs_match_address(&pattern, &outputs), "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn asset_fields_unset_or_empty_match_any_asset() {
+        let outputs = token(1, b"coin");
+
+        for pattern in [
+            u5c::cardano::AssetPattern::default(),
+            u5c::cardano::AssetPattern {
+                policy_id: Some(bytes::Bytes::new()),
+                asset_name: Some(bytes::Bytes::new()),
+            },
+        ] {
+            assert!(outputs_match_asset(&pattern, &outputs), "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn set_address_and_asset_fields_match_their_values() {
+        let outputs = decoded_tx().outputs;
+        let address = u5c::cardano::AddressPattern {
+            exact_address: Some(outputs[0].address.clone()),
+            delegation_part: Some(stake_cred_bytes().into()),
+            ..Default::default()
+        };
+        let asset = u5c::cardano::AssetPattern {
+            policy_id: Some(vec![1; 28].into()),
+            asset_name: Some(b"coin".to_vec().into()),
+        };
+
+        assert!(outputs_match_address(&address, &outputs));
+        assert!(outputs_match_asset(&asset, &token(1, b"coin")));
     }
 }

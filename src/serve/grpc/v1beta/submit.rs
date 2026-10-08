@@ -66,8 +66,9 @@ fn tx_eval_to_u5c(
         Ok(report) => report,
         Err(e) => {
             return u5c::cardano::TxEval {
-                errors: vec![u5c::cardano::EvalError {
+                errors: vec![u5c::cardano::EvalReport {
                     msg: format!("{e:#?}"),
+                    ..Default::default()
                 }],
                 ..Default::default()
             }
@@ -83,8 +84,9 @@ fn tx_eval_to_u5c(
         ..Default::default()
     };
     if result.ex_units.is_none() {
-        result.errors.push(u5c::cardano::EvalError {
+        result.errors.push(u5c::cardano::EvalReport {
             msg: "total execution units overflow".into(),
+            ..Default::default()
         });
     }
     for entry in report {
@@ -98,25 +100,23 @@ fn tx_eval_to_u5c(
             RedeemerTag::Vote => RedeemerPurpose::Vote,
             RedeemerTag::Propose => RedeemerPurpose::Propose,
         };
+        let named = |msg| u5c::cardano::EvalReport {
+            msg,
+            purpose: Some(purpose as i32),
+            index: Some(entry.index),
+        };
         if !entry.success {
-            result.errors.push(u5c::cardano::EvalError {
-                msg: format!(
-                    "{:?}[{}]: {}",
-                    entry.tag,
-                    entry.index,
-                    entry
-                        .failure_message
-                        .as_deref()
-                        .unwrap_or("script evaluation failed")
-                ),
-            });
+            result.errors.push(named(format!(
+                "{:?}[{}]: {}",
+                entry.tag,
+                entry.index,
+                entry
+                    .failure_message
+                    .as_deref()
+                    .unwrap_or("script evaluation failed")
+            )));
         }
-        result.traces.extend(
-            entry
-                .logs
-                .into_iter()
-                .map(|msg| u5c::cardano::EvalTrace { msg }),
-        );
+        result.traces.extend(entry.logs.into_iter().map(named));
         result.redeemers.push(u5c::cardano::Redeemer {
             purpose: purpose as i32,
             index: entry.index,
@@ -260,4 +260,40 @@ mod tests {
 #[cfg(test)]
 mod mapping_tests {
     include!("../submit_mapping_tests.rs");
+
+    #[test]
+    fn a_transaction_level_error_names_no_redeemer() {
+        let failed = tx_eval_to_u5c(Err(DomainError::Internal("unbalanced".into())));
+        let mut huge = entry(RedeemerTag::Spend, 0, true);
+        huge.units.mem = u64::MAX;
+        let overflow = tx_eval_to_u5c(Ok(vec![huge, entry(RedeemerTag::Mint, 0, true)]));
+
+        for report in [&failed.errors[0], &overflow.errors[0]] {
+            assert_eq!((report.purpose, report.index), (None, None), "{report:?}");
+        }
+    }
+
+    #[test]
+    fn redeemer_errors_and_traces_name_their_redeemer() {
+        use u5c::cardano::RedeemerPurpose as P;
+        let mut failed = entry(RedeemerTag::Spend, 3, false);
+        failed.logs = vec!["before failure".into()];
+        let mut success = entry(RedeemerTag::Cert, 2, true);
+        success.logs = vec!["completed".into()];
+
+        let report = tx_eval_to_u5c(Ok(vec![failed, success]));
+        let named = |x: &u5c::cardano::EvalReport| (x.purpose, x.index);
+
+        assert_eq!(
+            report.errors.iter().map(named).collect::<Vec<_>>(),
+            [(Some(P::Spend as i32), Some(3))]
+        );
+        assert_eq!(
+            report.traces.iter().map(named).collect::<Vec<_>>(),
+            [
+                (Some(P::Spend as i32), Some(3)),
+                (Some(P::Cert as i32), Some(2))
+            ]
+        );
+    }
 }
