@@ -31,6 +31,7 @@ pub mod hacks;
 pub mod indexes;
 pub mod model;
 pub mod owned;
+pub mod pool_stakes;
 pub mod pots;
 pub mod rewards;
 pub mod shard;
