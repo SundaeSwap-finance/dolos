@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 
+use super::criterion;
 use crate::prelude::*;
 use crate::serve::grpc::block_refs::BlockRefData;
 use crate::serve::grpc::masking::apply_mask;
@@ -107,12 +108,8 @@ fn intersect<S: CardanoStateIndexExt>(
 struct ByAddressQuery(bytes::Bytes);
 
 impl ByAddressQuery {
-    fn maybe_from(data: bytes::Bytes) -> Option<Self> {
-        if data.is_empty() {
-            return None;
-        }
-
-        Some(Self(data))
+    fn maybe_from(data: Option<bytes::Bytes>) -> Option<Self> {
+        criterion(&data).cloned().map(Self)
     }
 }
 
@@ -125,12 +122,8 @@ impl IntoSet for ByAddressQuery {
 struct ByPaymentQuery(bytes::Bytes);
 
 impl ByPaymentQuery {
-    fn maybe_from(data: bytes::Bytes) -> Option<Self> {
-        if data.is_empty() {
-            return None;
-        }
-
-        Some(Self(data))
+    fn maybe_from(data: Option<bytes::Bytes>) -> Option<Self> {
+        criterion(&data).cloned().map(Self)
     }
 }
 
@@ -143,12 +136,8 @@ impl IntoSet for ByPaymentQuery {
 struct ByDelegationQuery(bytes::Bytes);
 
 impl ByDelegationQuery {
-    fn maybe_from(data: bytes::Bytes) -> Option<Self> {
-        if data.is_empty() {
-            return None;
-        }
-
-        Some(Self(data))
+    fn maybe_from(data: Option<bytes::Bytes>) -> Option<Self> {
+        criterion(&data).cloned().map(Self)
     }
 }
 
@@ -178,12 +167,8 @@ impl IntoSet for u5c::cardano::AddressPattern {
 struct ByPolicyQuery(bytes::Bytes);
 
 impl ByPolicyQuery {
-    fn maybe_from(data: bytes::Bytes) -> Option<Self> {
-        if data.is_empty() {
-            return None;
-        }
-
-        Some(Self(data))
+    fn maybe_from(data: Option<bytes::Bytes>) -> Option<Self> {
+        criterion(&data).cloned().map(Self)
     }
 }
 
@@ -196,12 +181,8 @@ impl IntoSet for ByPolicyQuery {
 struct ByAssetQuery(bytes::Bytes);
 
 impl ByAssetQuery {
-    fn maybe_from(data: bytes::Bytes) -> Option<Self> {
-        if data.is_empty() {
-            return None;
-        }
-
-        Some(Self(data))
+    fn maybe_from(data: Option<bytes::Bytes>) -> Option<Self> {
+        criterion(&data).cloned().map(Self)
     }
 }
 
@@ -213,13 +194,13 @@ impl IntoSet for ByAssetQuery {
 
 impl IntoSet for u5c::cardano::AssetPattern {
     fn into_set<S: CardanoStateIndexExt>(self, state: &S) -> Result<HashSet<TxoRef>, Status> {
-        let by_policy = ByPolicyQuery::maybe_from(self.policy_id.clone());
-        let by_asset = ByAssetQuery::maybe_from(self.asset_name.clone());
+        let by_policy = ByPolicyQuery::maybe_from(self.policy_id);
+        let by_asset = ByAssetQuery::maybe_from(self.asset_name);
 
         match (by_policy, by_asset) {
-            (Some(_), Some(_)) => {
-                let mut subject = self.policy_id.to_vec();
-                subject.extend_from_slice(&self.asset_name);
+            (Some(ByPolicyQuery(policy)), Some(ByAssetQuery(name))) => {
+                let mut subject = policy.to_vec();
+                subject.extend_from_slice(&name);
                 ByAssetQuery(bytes::Bytes::from(subject)).into_set(state)
             }
             (Some(x), None) => x.into_set(state),
@@ -853,6 +834,68 @@ async fn into_u5c_utxo<S: Domain + LedgerContext>(
     })
 }
 
+/// The fraction closest to `stake` over `total` whose denominator fits a signed 32 bit integer.
+fn stake_fraction(stake: u64, total: u64) -> u5c::cardano::RationalNumber {
+    const MAX: u128 = i32::MAX as u128;
+
+    let (p, q) = if total == 0 {
+        (0, 1)
+    } else {
+        let gcd = dolos_cardano::utils::gcd(stake, total);
+        let (n, d) = ((stake / gcd) as u128, (total / gcd) as u128);
+
+        if d <= MAX {
+            (n, d)
+        } else {
+            let (mut p0, mut q0, mut p1, mut q1) = (0, 1, 1, 0);
+            let (mut num, mut den) = (n, d);
+
+            loop {
+                let a = num / den;
+                let q2 = q0 + a * q1;
+                if q2 > MAX {
+                    break;
+                }
+                (p0, q0, p1, q1) = (p1, q1, p0 + a * p1, q2);
+                (num, den) = (den, num - a * den);
+            }
+
+            let k = (MAX - q0) / q1;
+            if 2 * den * (q0 + k * q1) <= d {
+                (p1, q1)
+            } else {
+                (p0 + k * p1, q0 + k * q1)
+            }
+        }
+    };
+
+    u5c::cardano::RationalNumber {
+        numerator: i32::try_from(p).unwrap_or(i32::MAX),
+        denominator: q as u32,
+    }
+}
+
+/// The stake distribution of the listed pools, or of every pool when none is listed.
+fn pool_distribution(
+    stakes: &dolos_cardano::pool_stakes::PoolStakes,
+    pool_keyhashes: &[bytes::Bytes],
+) -> u5c::cardano::StakePoolDistribution {
+    let pools = stakes
+        .pools
+        .iter()
+        .filter(|(hash, _)| {
+            pool_keyhashes.is_empty() || pool_keyhashes.iter().any(|x| x == hash.as_slice())
+        })
+        .map(|(hash, pool)| u5c::cardano::PoolStakeShare {
+            pool_keyhash: hash.to_vec().into(),
+            stake_fraction: Some(stake_fraction(pool.stake, stakes.total)),
+            vrf_keyhash: pool.vrf_keyhash.to_vec().into(),
+        })
+        .collect();
+
+    u5c::cardano::StakePoolDistribution { pools }
+}
+
 #[async_trait::async_trait]
 impl<D> u5c::query::query_service_server::QueryService for QueryServiceImpl<D>
 where
@@ -999,7 +1042,7 @@ where
         Ok(Response::new(u5c::query::SearchUtxosResponse {
             items,
             ledger_tip: cursor,
-            next_token: String::default(),
+            next_token: None,
         }))
     }
 
@@ -1126,6 +1169,68 @@ where
 
         Ok(Response::new(response))
     }
+
+    async fn read_state(
+        &self,
+        request: Request<u5c::query::ReadStateRequest>,
+    ) -> Result<Response<u5c::query::ReadStateResponse>, Status> {
+        use u5c::cardano::{state_data, state_query};
+        use u5c::query::{any_chain_state_data, any_chain_state_query};
+
+        let message = request.into_inner();
+
+        info!("received new grpc query - read_state");
+
+        let query = match message.query.and_then(|x| x.query) {
+            Some(any_chain_state_query::Query::Cardano(x)) => x.query,
+            None => None,
+        };
+
+        let Some(state_query::Query::StakePoolDistribution(query)) = query else {
+            return Err(Status::invalid_argument("missing state query"));
+        };
+
+        let state = self.domain.state();
+
+        let current_epoch = dolos_cardano::load_epoch::<D>(state)
+            .map_err(|e| Status::internal(format!("failed to load epoch: {e}")))?
+            .number;
+
+        let chain_summary = dolos_cardano::load_era_summary::<D>(state)
+            .map_err(|e| Status::internal(format!("failed to load era summary: {e}")))?;
+
+        // the distribution in force for an epoch is the snapshot taken at the end of the epoch two before it
+        let epoch = current_epoch.saturating_sub(2);
+        let protocol = chain_summary.era_for_epoch(epoch).protocol.into();
+
+        let stakes = dolos_cardano::pool_stakes::load_pool_stakes::<D>(state, epoch, protocol)
+            .map_err(|e| Status::internal(format!("failed to load pool stakes: {e}")))?;
+
+        let distribution = pool_distribution(&stakes, &query.pool_keyhashes);
+
+        let tip = state
+            .read_cursor()
+            .map_err(into_status)?
+            .ok_or(Status::internal("Failed to find ledger tip"))?;
+
+        let mut response = u5c::query::ReadStateResponse {
+            result: Some(u5c::query::AnyChainStateData {
+                result: Some(any_chain_state_data::Result::Cardano(
+                    u5c::cardano::StateData {
+                        result: Some(state_data::Result::StakePoolDistribution(distribution)),
+                    },
+                )),
+            }),
+            ledger_tip: Some(point_to_u5c(&self.domain, &tip)),
+        };
+
+        if let Some(mask) = message.field_mask {
+            response = apply_mask(response, mask.paths)
+                .map_err(|e| Status::internal(format!("failed to apply field mask: {e}")))?;
+        }
+
+        Ok(Response::new(response))
+    }
 }
 
 #[cfg(test)]
@@ -1136,6 +1241,188 @@ mod tests {
     use pallas::interop::utxorpc::v1beta::spec::query::query_service_server::QueryService;
 
     use super::*;
+
+    #[test]
+    fn an_unset_or_empty_pattern_field_queries_nothing() {
+        for data in [None, Some(bytes::Bytes::new())] {
+            assert!(ByAddressQuery::maybe_from(data.clone()).is_none());
+            assert!(ByPaymentQuery::maybe_from(data.clone()).is_none());
+            assert!(ByDelegationQuery::maybe_from(data.clone()).is_none());
+            assert!(ByPolicyQuery::maybe_from(data.clone()).is_none());
+            assert!(ByAssetQuery::maybe_from(data).is_none());
+        }
+    }
+
+    #[test]
+    fn a_set_pattern_field_queries_its_value() {
+        let value = bytes::Bytes::from(vec![0xaa; 28]);
+        let data = || Some(value.clone());
+
+        assert_eq!(ByAddressQuery::maybe_from(data()).unwrap().0, value);
+        assert_eq!(ByPaymentQuery::maybe_from(data()).unwrap().0, value);
+        assert_eq!(ByDelegationQuery::maybe_from(data()).unwrap().0, value);
+        assert_eq!(ByPolicyQuery::maybe_from(data()).unwrap().0, value);
+        assert_eq!(ByAssetQuery::maybe_from(data()).unwrap().0, value);
+    }
+
+    #[test]
+    fn an_asset_name_with_an_unset_or_empty_policy_is_refused() {
+        let domain = ToyDomain::new(None, None);
+
+        for policy_id in [None, Some(bytes::Bytes::new())] {
+            let pattern = u5c::cardano::AssetPattern {
+                policy_id,
+                asset_name: Some(b"coin".to_vec().into()),
+            };
+
+            let status = pattern.into_set(domain.state()).unwrap_err();
+            assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        }
+    }
+
+    fn ratio(numerator: i32, denominator: u32) -> u5c::cardano::RationalNumber {
+        u5c::cardano::RationalNumber {
+            numerator,
+            denominator,
+        }
+    }
+
+    #[test]
+    fn a_stake_fraction_with_a_small_denominator_is_served_reduced() {
+        assert_eq!(stake_fraction(1, 3), ratio(1, 3));
+        assert_eq!(stake_fraction(6, 4), ratio(3, 2));
+        assert_eq!(stake_fraction(0, 3), ratio(0, 1));
+        assert_eq!(stake_fraction(0, 0), ratio(0, 1));
+    }
+
+    #[test]
+    fn a_stake_fraction_with_a_large_denominator_is_served_as_its_closest_bounded_fraction() {
+        let total = 15_489_561_163_707_791;
+
+        assert_eq!(
+            stake_fraction(548_961_979_955, total),
+            ratio(70_927, 2_001_282_684)
+        );
+        assert_eq!(
+            stake_fraction(30_420_498_593_221, total),
+            ratio(963_345, 490_517_644)
+        );
+        assert_eq!(stake_fraction(total - 1, total), ratio(1, 1));
+        assert_eq!(stake_fraction(0, total), ratio(0, 1));
+        assert_eq!(stake_fraction(1, 1 << 31), ratio(1, 2_147_483_647));
+        assert_eq!(
+            stake_fraction((1 << 31) - 2, 1 << 31),
+            ratio(1_073_741_823, 1_073_741_824)
+        );
+    }
+
+    fn distribution() -> dolos_cardano::pool_stakes::PoolStakes {
+        use dolos_cardano::pool_stakes::{PoolStake, PoolStakes};
+        use pallas::crypto::hash::Hash;
+
+        let pool = |byte: u8, stake: u64| {
+            let vrf_keyhash = Hash::new([byte; 32]);
+            (Hash::new([byte; 28]), PoolStake { stake, vrf_keyhash })
+        };
+
+        PoolStakes {
+            pools: [pool(1, 3), pool(2, 0), pool(3, 1)].into_iter().collect(),
+            total: 4,
+        }
+    }
+
+    fn shares(distribution: &u5c::cardano::StakePoolDistribution) -> Vec<(u8, u8, i32, u32)> {
+        distribution
+            .pools
+            .iter()
+            .map(|x| {
+                let fraction = x.stake_fraction.clone().unwrap();
+                (
+                    x.pool_keyhash[0],
+                    x.vrf_keyhash[0],
+                    fraction.numerator,
+                    fraction.denominator,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_pool_left_off_the_list_is_not_served() {
+        let listed = [
+            bytes::Bytes::from(vec![3; 28]),
+            bytes::Bytes::from(vec![9; 28]),
+        ];
+
+        let out = pool_distribution(&distribution(), &listed);
+
+        assert_eq!(shares(&out), [(3, 3, 1, 4)]);
+    }
+
+    #[test]
+    fn an_empty_list_serves_every_pool_including_those_without_stake() {
+        let out = pool_distribution(&distribution(), &[]);
+
+        assert_eq!(shares(&out), [(1, 1, 3, 4), (2, 2, 0, 1), (3, 3, 1, 4)]);
+    }
+
+    fn state_request(
+        query: Option<u5c::cardano::state_query::Query>,
+    ) -> u5c::query::ReadStateRequest {
+        let query = u5c::query::AnyChainStateQuery {
+            query: Some(u5c::query::any_chain_state_query::Query::Cardano(
+                u5c::cardano::StateQuery { query },
+            )),
+        };
+
+        u5c::query::ReadStateRequest {
+            query: Some(query),
+            field_mask: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stake_pool_distribution_query_is_answered() {
+        use u5c::cardano::{state_data, state_query, GetStakePoolDistribution};
+
+        let service = QueryServiceImpl::new(ToyDomain::new(None, None));
+        let query = state_query::Query::StakePoolDistribution(GetStakePoolDistribution::default());
+
+        let response = service
+            .read_state(Request::new(state_request(Some(query))))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let Some(u5c::query::any_chain_state_data::Result::Cardano(data)) =
+            response.result.and_then(|x| x.result)
+        else {
+            panic!("no cardano state data");
+        };
+        assert!(matches!(
+            data.result,
+            Some(state_data::Result::StakePoolDistribution(_))
+        ));
+        assert!(response.ledger_tip.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_state_request_without_a_query_is_refused() {
+        let service = QueryServiceImpl::new(ToyDomain::new(None, None));
+        let unset = u5c::query::ReadStateRequest {
+            query: None,
+            field_mask: None,
+        };
+        let empty = u5c::query::ReadStateRequest {
+            query: Some(u5c::query::AnyChainStateQuery { query: None }),
+            field_mask: None,
+        };
+
+        for request in [unset, empty, state_request(None)] {
+            let status = service.read_state(Request::new(request)).await.unwrap_err();
+            assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        }
+    }
 
     #[test]
     fn maps_known_networks_to_caip2() {
