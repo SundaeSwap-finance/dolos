@@ -2,12 +2,9 @@ name: Docker
 on:
   push:
     branches:
-      - "main"
-      - "demeter"
-      - "lts/v0"
-      - "adhoc/*"
+      - "leios-musashi"
     tags:
-      - "v*"
+      - "leios-musashi-*"
 
 jobs:
   build:
@@ -78,19 +75,17 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/txpipe/dolos
+          images: ghcr.io/sundaeswap-finance/dolos
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
-            type=semver,pattern=v{{major}},enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
-            type=semver,pattern=v{{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
-            type=semver,pattern=v{{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=ref,event=branch,enable=${{ github.ref == 'refs/heads/leios-musashi' }}
+            type=ref,event=tag,enable=${{ startsWith(github.ref, 'refs/tags/leios-musashi-') }}
             type=sha
 
       - name: Login to DockerHub
         uses: docker/login-action@v4
         with:
-          registry: ghcr.io/txpipe
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
