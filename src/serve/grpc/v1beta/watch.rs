@@ -282,33 +282,18 @@ fn matches_certificate_pattern(
 }
 
 fn matches_cardano_pattern(tx_pattern: &u5c::cardano::TxPattern, tx: &u5c::cardano::Tx) -> bool {
-    // Each pattern field is checked against the transaction together with its
-    // sub transactions.
-    let members: Vec<&u5c::cardano::Tx> = std::iter::once(tx)
-        .chain(tx.sub_transactions.iter())
-        .collect();
-
-    let inputs: Vec<_> = members
+    let inputs: Vec<_> = tx
+        .inputs
         .iter()
-        .flat_map(|x| x.inputs.iter())
         .filter_map(|x| x.as_output.as_ref().cloned())
         .collect();
-    let outputs: Vec<_> = members
-        .iter()
-        .flat_map(|x| x.outputs.iter().cloned())
-        .collect();
-    let mint: Vec<_> = members
-        .iter()
-        .flat_map(|x| x.mint.iter().cloned())
-        .collect();
-    let certificates: Vec<_> = members
-        .iter()
-        .flat_map(|x| x.certificates.iter().cloned())
-        .collect();
+    let outputs = &tx.outputs;
+    let mint = &tx.mint;
+    let certificates = &tx.certificates;
 
     let has_address_match = tx_pattern.has_address.as_ref().is_none_or(|addr_pattern| {
         outputs_match_address(addr_pattern, &inputs)
-            || outputs_match_address(addr_pattern, &outputs)
+            || outputs_match_address(addr_pattern, outputs)
     });
 
     let consumes_match = tx_pattern
@@ -319,21 +304,21 @@ fn matches_cardano_pattern(tx_pattern: &u5c::cardano::TxPattern, tx: &u5c::carda
     let mints_asset_match = tx_pattern
         .mints_asset
         .as_ref()
-        .is_none_or(|asset_pattern| matches_asset(asset_pattern, &mint));
+        .is_none_or(|asset_pattern| matches_asset(asset_pattern, mint));
 
     let moves_asset_match = tx_pattern.moves_asset.as_ref().is_none_or(|asset_pattern| {
-        outputs_match_asset(asset_pattern, &inputs) || outputs_match_asset(asset_pattern, &outputs)
+        outputs_match_asset(asset_pattern, &inputs) || outputs_match_asset(asset_pattern, outputs)
     });
 
     let produces_match = tx_pattern
         .produces
         .as_ref()
-        .is_none_or(|out_pattern| matches_output(out_pattern, &outputs));
+        .is_none_or(|out_pattern| matches_output(out_pattern, outputs));
 
     let has_certificate_match = tx_pattern
         .has_certificate
         .as_ref()
-        .is_none_or(|cert_pattern| matches_certificate_pattern(cert_pattern, &certificates));
+        .is_none_or(|cert_pattern| matches_certificate_pattern(cert_pattern, certificates));
 
     has_address_match
         && consumes_match
@@ -709,105 +694,6 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(matches_cardano_pattern(&tx_pattern, &tx));
-    }
-
-    /// A transaction whose only content is one sub transaction, the delegation
-    /// transaction.
-    fn parent_of_delegation() -> u5c::cardano::Tx {
-        u5c::cardano::Tx {
-            sub_transactions: vec![decoded_tx()],
-            ..Default::default()
-        }
-    }
-
-    fn delegation_to(pool: Vec<u8>) -> u5c::cardano::CertificatePattern {
-        u5c::cardano::CertificatePattern {
-            certificate_type: Some(
-                u5c::cardano::certificate_pattern::CertificateType::StakeDelegation(
-                    u5c::cardano::StakeDelegationPattern {
-                        stake_credential: None,
-                        pool_keyhash: pool.into(),
-                    },
-                ),
-            ),
-        }
-    }
-
-    fn delegating_address() -> u5c::cardano::AddressPattern {
-        u5c::cardano::AddressPattern {
-            delegation_part: Some(stake_cred_bytes().into()),
-            ..Default::default()
-        }
-    }
-
-    /// The must-not case. A sub transaction certificate that differs from the
-    /// pattern matches nothing.
-    #[test]
-    fn a_sub_transaction_delegation_to_another_pool_does_not_match() {
-        let tx_pattern = u5c::cardano::TxPattern {
-            has_certificate: Some(delegation_to(vec![0xaa; 28])),
-            ..Default::default()
-        };
-
-        assert!(!matches_cardano_pattern(
-            &tx_pattern,
-            &parent_of_delegation()
-        ));
-    }
-
-    #[test]
-    fn a_certificate_in_a_sub_transaction_matches() {
-        let tx_pattern = u5c::cardano::TxPattern {
-            has_certificate: Some(delegation_to(pool_hash_bytes())),
-            ..Default::default()
-        };
-
-        assert!(matches_cardano_pattern(
-            &tx_pattern,
-            &parent_of_delegation()
-        ));
-    }
-
-    #[test]
-    fn an_output_of_a_sub_transaction_matches_produces_and_has_address() {
-        let produces = u5c::cardano::TxPattern {
-            produces: Some(u5c::cardano::TxOutputPattern {
-                address: Some(delegating_address()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let has_address = u5c::cardano::TxPattern {
-            has_address: Some(delegating_address()),
-            ..Default::default()
-        };
-
-        assert!(matches_cardano_pattern(&produces, &parent_of_delegation()));
-        assert!(matches_cardano_pattern(
-            &has_address,
-            &parent_of_delegation()
-        ));
-    }
-
-    /// Each field is checked on its own, so one field matching the parent and
-    /// another matching a sub transaction match together.
-    #[test]
-    fn fields_matched_by_the_parent_and_by_a_sub_transaction_match_together() {
-        let mut tx = parent_of_delegation();
-        tx.certificates = decoded_tx().certificates;
-        tx.sub_transactions[0].certificates.clear();
-
-        let tx_pattern = u5c::cardano::TxPattern {
-            has_certificate: Some(delegation_to(pool_hash_bytes())),
-            produces: Some(u5c::cardano::TxOutputPattern {
-                address: Some(delegating_address()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-
-        assert!(tx.outputs.is_empty());
         assert!(matches_cardano_pattern(&tx_pattern, &tx));
     }
 

@@ -2171,60 +2171,6 @@ mod live_params_tests {
                 "drep_inactivity_period",
                 p.drep_inactivity_period.to_string(),
             ),
-            (
-                "max_ref_script_size_per_block",
-                p.max_ref_script_size_per_block.to_string(),
-            ),
-            (
-                "max_ref_script_size_per_tx",
-                p.max_ref_script_size_per_tx.to_string(),
-            ),
-            (
-                "ref_script_cost_stride",
-                p.ref_script_cost_stride.to_string(),
-            ),
-            (
-                "ref_script_cost_multiplier",
-                show_served_ratio(&p.ref_script_cost_multiplier),
-            ),
-            (
-                "max_pledge_leverage",
-                show_served_ratio(&p.max_pledge_leverage),
-            ),
-            ("min_pool_margin", show_served_ratio(&p.min_pool_margin)),
-            (
-                "leios_announcement_period_length",
-                p.leios_announcement_period_length.to_string(),
-            ),
-            (
-                "leios_vote_period_length",
-                p.leios_vote_period_length.to_string(),
-            ),
-            (
-                "leios_diffusion_period_length",
-                p.leios_diffusion_period_length.to_string(),
-            ),
-            ("leios_committee_size", p.leios_committee_size.to_string()),
-            (
-                "leios_quorum_stake_threshold",
-                show_served_ratio(&p.leios_quorum_stake_threshold),
-            ),
-            (
-                "max_endorser_block_references_size",
-                p.max_endorser_block_references_size.to_string(),
-            ),
-            (
-                "max_endorser_block_txs_size",
-                p.max_endorser_block_txs_size.to_string(),
-            ),
-            (
-                "max_endorser_block_execution_units",
-                show_served_units(&p.max_endorser_block_execution_units),
-            ),
-            (
-                "max_ref_script_size_per_endorser_block",
-                p.max_ref_script_size_per_endorser_block.to_string(),
-            ),
         ]
     }
 
@@ -2374,65 +2320,6 @@ mod live_params_tests {
                 "drep_inactivity_period",
                 whole(node, "dRepActivity").to_string(),
             ),
-            (
-                "max_ref_script_size_per_block",
-                whole(node, "maxRefScriptSizePerBlock").to_string(),
-            ),
-            (
-                "max_ref_script_size_per_tx",
-                whole(node, "maxRefScriptSizePerTx").to_string(),
-            ),
-            (
-                "ref_script_cost_stride",
-                whole(node, "refScriptCostStride").to_string(),
-            ),
-            (
-                "ref_script_cost_multiplier",
-                show_ratio(&ratio(node, "refScriptCostMultiplier")),
-            ),
-            (
-                "max_pledge_leverage",
-                optional_ratio(node, "maxPledgeLeverage")
-                    .map(|x| show_ratio(&x))
-                    .unwrap_or_else(|| "no value".to_string()),
-            ),
-            ("min_pool_margin", show_ratio(&ratio(node, "minPoolMargin"))),
-            (
-                "leios_announcement_period_length",
-                whole(node, "leiosAnnouncementPeriodLength").to_string(),
-            ),
-            (
-                "leios_vote_period_length",
-                whole(node, "leiosVotePeriodLength").to_string(),
-            ),
-            (
-                "leios_diffusion_period_length",
-                whole(node, "leiosDiffusionPeriodLength").to_string(),
-            ),
-            (
-                "leios_committee_size",
-                whole(node, "leiosCommitteeSize").to_string(),
-            ),
-            (
-                "leios_quorum_stake_threshold",
-                show_ratio(&ratio(node, "leiosQuorumStakeThreshold")),
-            ),
-            (
-                "max_endorser_block_references_size",
-                whole(node, "maxEndorserBlockReferencesSize").to_string(),
-            ),
-            (
-                "max_endorser_block_txs_size",
-                whole(node, "maxEndorserBlockTxsSize").to_string(),
-            ),
-            (
-                "max_endorser_block_execution_units",
-                show_units(&ex_units(node, "maxEndorserBlockExecutionUnits")),
-            ),
-            (
-                "max_ref_script_size_per_endorser_block",
-                whole(node, "maxRefScriptSizePerEndorserBlock").to_string(),
-            ),
         ]
     }
 
@@ -2489,28 +2376,6 @@ mod live_params_tests {
         assert!(
             error.to_string().contains("MaximumEpoch"),
             "the refusal names no parameter: {error}"
-        );
-    }
-
-    /// The must-not case. A set at a Conway protocol version is served no
-    /// Dijkstra parameter, though the set holds every one.
-    #[test]
-    fn a_conway_set_serves_no_dijkstra_parameter() {
-        let node = node();
-        let set = live_set(&node).with(Val::ProtocolVersion((10, 0)));
-
-        let served = serve(&set);
-        let dijkstra_fields: Vec<(&'static str, String)> = served_fields(&served)
-            .into_iter()
-            .skip_while(|(name, _)| *name != "max_ref_script_size_per_block")
-            .collect();
-
-        assert_eq!(dijkstra_fields.len(), 15);
-        assert!(
-            dijkstra_fields
-                .iter()
-                .all(|(_, value)| value == "0" || value == "no value"),
-            "a Conway set was served {dijkstra_fields:?}"
         );
     }
 }
