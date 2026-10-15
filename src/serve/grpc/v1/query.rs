@@ -709,7 +709,7 @@ fn map_cardano_genesis(genesis: &Genesis) -> Result<u5c::cardano::Genesis, Statu
                 genesis.conway.pool_voting_thresholds.pp_security_group,
             )),
         }),
-        ..Default::default()
+        ..map_dijkstra_genesis(genesis.dijkstra.as_ref())
     })
 }
 
@@ -721,6 +721,44 @@ fn last_including<H: AsRef<[u8]>>(
         .rev()
         .find(|(_, x)| x.as_ref() == hash)
         .map(|(index, _)| index)
+}
+
+fn map_dijkstra_genesis(
+    genesis: Option<&dolos_core::dijkstra::GenesisFile>,
+) -> u5c::cardano::Genesis {
+    let Some(genesis) = genesis else {
+        return Default::default();
+    };
+
+    u5c::cardano::Genesis {
+        max_ref_script_size_per_block: Some(genesis.max_ref_script_size_per_block),
+        max_ref_script_size_per_tx: Some(genesis.max_ref_script_size_per_tx),
+        ref_script_cost_stride: Some(genesis.ref_script_cost_stride),
+        ref_script_cost_multiplier: Some(float_to_u5c_rational(
+            genesis.ref_script_cost_multiplier as f32,
+        )),
+        max_pledge_leverage: genesis
+            .max_pledge_leverage
+            .map(|x| float_to_u5c_rational(x as f32)),
+        min_pool_margin: Some(float_to_u5c_rational(genesis.min_pool_margin as f32)),
+        leios_announcement_period_length: Some(genesis.leios_announcement_period_length),
+        leios_vote_period_length: Some(genesis.leios_vote_period_length),
+        leios_diffusion_period_length: Some(genesis.leios_diffusion_period_length),
+        leios_committee_size: Some(genesis.leios_committee_size as u32),
+        leios_quorum_stake_threshold: Some(float_to_u5c_rational(
+            genesis.leios_quorum_stake_threshold as f32,
+        )),
+        max_endorser_block_references_size: Some(genesis.max_endorser_block_references_size),
+        max_endorser_block_txs_size: Some(genesis.max_endorser_block_txs_size),
+        max_endorser_block_execution_units: Some(u5c::cardano::ExUnits {
+            steps: genesis.max_endorser_block_execution_units.steps,
+            memory: genesis.max_endorser_block_execution_units.memory,
+        }),
+        max_ref_script_size_per_endorser_block: Some(
+            genesis.max_ref_script_size_per_endorser_block,
+        ),
+        ..Default::default()
+    }
 }
 
 fn map_era_boundary(boundary: &dolos_cardano::EraBoundary) -> u5c::cardano::EraBoundary {
@@ -1626,6 +1664,55 @@ mod tests {
         assert!(
             served.iter().all(|(_, value)| value == "no value"),
             "{served:?}"
+        );
+    }
+
+    /// MUST FIRE: each Dijkstra field the Musashi genesis declares is served
+    /// with its value, and each field it does not declare is served unset.
+    #[test]
+    fn a_dijkstra_genesis_serves_the_values_it_declares() {
+        let mut genesis = dolos_cardano::include::preview::load();
+        genesis.dijkstra = Some(musashi_dijkstra());
+
+        let served = dijkstra_genesis_fields(&map_cardano_genesis(&genesis).unwrap());
+
+        let ratio = |x: f32| show(&Some(float_to_u5c_rational(x)));
+        let whole = |x: u64| show(&Some(x));
+        let none = || "no value".to_string();
+
+        assert_eq!(
+            served,
+            vec![
+                ("max_ref_script_size_per_block", whole(1048576)),
+                ("max_ref_script_size_per_tx", whole(204800)),
+                ("ref_script_cost_stride", whole(25600)),
+                ("ref_script_cost_multiplier", ratio(1.2)),
+                ("max_pledge_leverage", none()),
+                ("min_pool_margin", ratio(0.015)),
+                ("leios_announcement_period_length", whole(1000)),
+                ("leios_vote_period_length", whole(4000)),
+                ("leios_diffusion_period_length", whole(7000)),
+                ("leios_committee_size", show(&Some(900u32))),
+                ("leios_quorum_stake_threshold", ratio(0.75)),
+                ("max_endorser_block_references_size", whole(100000)),
+                ("max_endorser_block_txs_size", whole(1000000)),
+                (
+                    "max_endorser_block_execution_units",
+                    show(&Some(u5c::cardano::ExUnits {
+                        steps: 100000000000,
+                        memory: 310000000,
+                    })),
+                ),
+                ("max_ref_script_size_per_endorser_block", whole(4000000)),
+                ("peras_min_candidate_block_age", none()),
+                ("peras_healing_factor", none()),
+                ("peras_cert_boost", none()),
+                ("peras_target_committee_size", none()),
+                ("peras_bootstrap_round", none()),
+                ("peras_quorum_threshold_safety_margin", none()),
+                ("ref_inputs_cost_per_multi_asset_policy", none()),
+                ("ref_inputs_cost_per_datum_byte", none()),
+            ]
         );
     }
 
