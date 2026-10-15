@@ -218,9 +218,9 @@ readme = "README.md"
 authors = ["TxPipe <hello@txpipe.io>"]
 
 [workspace.dependencies]
-# Pallas checkpoint: musashi-fix-20261015-subtransaction-dependencies-v3.
-pallas-validate = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c", features = ["phase2", "unstable"] }
-pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c", features = ["hardano", "phase2", "unstable", "network2"] }
+# Pallas checkpoint: leios-musashi-2026-10-15-2.
+pallas-validate = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f", features = ["phase2", "unstable"] }
+pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f", features = ["hardano", "phase2", "unstable", "network2"] }
 # pallas = { version = "1.3.0", features = ["hardano", "phase2", "unstable"] }
 # pallas = { git = "https://github.com/txpipe/pallas.git", rev = "a7b5a86", features = ["hardano", "phase2", "unstable"] }
 # pallas = { path = "../pallas/pallas", features = ["hardano", "phase2", "unstable"] }
@@ -271,17 +271,17 @@ tracing-opentelemetry = "0.33"
 minicbor = { version = "0.26", features = ["std"] }
 
 [patch.crates-io]
-pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-addresses = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-codec = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-configs = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-crypto = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-network = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-primitives = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-traverse = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-txbuilder = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-utxorpc = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
-pallas-validate = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "8ad18dc5d3ac41dfc22605951cb02206e1aa705c" }
+pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-addresses = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-codec = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-configs = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-crypto = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-network = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-primitives = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-traverse = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-txbuilder = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-utxorpc = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
+pallas-validate = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "9d24650bdf90ff8a2873f9fb4c92880451825f3f" }
 utxorpc-spec = { git = "https://github.com/SundaeSwap-finance/utxorpc-spec", rev = "4bef71401bae7e9fc80b9d24379be0f9078b0ff5" }
 
 [workspace.metadata.release]
