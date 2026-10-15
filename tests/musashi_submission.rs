@@ -521,3 +521,6 @@ fn indefinite_native_envelopes_preserve_bytes_but_extra_fields_reject() {
     bytes.insert(bytes.len() - 1, 0xf6);
     assert!(evaluate(&domain, &bytes).is_err());
 }
+
+#[path = "support/musashi_batch_dependencies.rs"]
+mod batch_dependencies;

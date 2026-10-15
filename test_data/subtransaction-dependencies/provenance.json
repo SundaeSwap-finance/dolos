@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "synthetic signed admission regression",
+  "network_capture": false,
+  "network_context": {
+    "name": "Musashi test configuration",
+    "magic": 164,
+    "network_id": 0,
+    "era": "Dijkstra",
+    "protocol_version": [
+      12,
+      0
+    ],
+    "slot": 1400007,
+    "epoch": 64,
+    "source": "tests/support/musashi_submission.rs",
+    "historical_context": "reused explicit test environment; not a captured batch state"
+  },
+  "synthetic_batch": {
+    "source": "tests/support/musashi_batch_dependencies.rs",
+    "sha256": "4e5851aebff79a1b58ba9c7bcc662b6af7200ac104914adb21db8cf5fce1f859",
+    "input_transaction_id": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+    "parent_input_index": 0,
+    "child_input_indices": [
+      1,
+      2
+    ],
+    "parent_reference_indices": [],
+    "parent_input_lovelace": 10000000,
+    "child_input_lovelace": 5000000,
+    "parent_output_lovelace": 19000000,
+    "fee_lovelace": 1000000,
+    "signature_key": "deterministic public test seed [71; 32]; not a network signing key",
+    "transaction_identity": "computed from generated body and asserted unchanged after admission",
+    "missing_reference_case": "synthetic UTxO at index 3; never a child spending input"
+  },
+  "environment_files": {
+    "../musashi-native-submission/byron-genesis.json": "4620a2a14b26731467c954263eb2af9b86e5f5248aae247f1c183ca0368dde65",
+    "../musashi-native-submission/shelley-genesis.json": "da8508afc546a0b1824d93629a7a5fc8c0898d85095c2cf1b25730eb99d5a151",
+    "../musashi-native-submission/alonzo-genesis.json": "23bf365cae730137ad6868787f20ef4f58e446d22617d7b824f1c75695c760b5",
+    "../musashi-native-submission/conway-genesis.json": "51e9d92f09ea79e61811983b4b1e299926a61b352c3313aaebc7c287169ae2f0",
+    "../musashi-native-submission/registration-dijkstra-genesis.json": "e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be",
+    "../musashi-native-submission/registration-epoch64-parameters.json": "56dae0ae1d97b172225555804c621a1dc74ff58f5f4963b9118add52592acea6"
+  },
+  "baseline": {
+    "dolos": "d4f2e681167bac9739c4fb330e018047a06b9586",
+    "pallas": "00f2df7d827dca6fa4e7f7019f5a0b3f2e6e05b1"
+  },
+  "fixed_pallas": "8ad18dc5d3ac41dfc22605951cb02206e1aa705c",
+  "upstream_node": {
+    "acceptance": "not tested",
+    "live_submission": false,
+    "node_revision": "unavailable"
+  },
+  "limitations": [
+    "synthetic admission proof only",
+    "scripted/stateful children still unsupported",
+    "pending child reservations and child output lookup are separate scope"
+  ],
+  "publication": {
+    "pallas": "published; verified with git ls-remote",
+    "dolos": "local implementation; not pushed",
+    "checkpoint_tag": "local; pin is the published commit"
+  }
+}

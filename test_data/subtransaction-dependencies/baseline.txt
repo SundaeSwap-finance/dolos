@@ -1,0 +1,34 @@
+     Running tests/musashi_submission.rs (target/subtransaction-baseline/debug/deps/musashi_submission-9aced33ca381c30d)
+
+running 3 tests
+test batch_dependencies::batch_duplicate_spending_references_still_reject ... FAILED
+test batch_dependencies::batch_missing_parent_child_or_reference_input_rejects ... FAILED
+test batch_dependencies::batch_validates_without_child_inputs_in_parent_references ... FAILED
+
+failures:
+
+---- batch_dependencies::batch_duplicate_spending_references_still_reject stdout ----
+
+thread 'batch_dependencies::batch_duplicate_spending_references_still_reject' (3754396) panicked at tests/support/musashi_batch_dependencies.rs:148:9:
+ChainError(Phase1ValidationRejected(PostAlonzo(InputNotInUTxO)))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- batch_dependencies::batch_missing_parent_child_or_reference_input_rejects stdout ----
+
+thread 'batch_dependencies::batch_missing_parent_child_or_reference_input_rejects' (3754397) panicked at tests/support/musashi_batch_dependencies.rs:114:54:
+called `Result::unwrap()` on an `Err` value: ChainError(Phase1ValidationRejected(PostAlonzo(InputNotInUTxO)))
+
+---- batch_dependencies::batch_validates_without_child_inputs_in_parent_references stdout ----
+
+thread 'batch_dependencies::batch_validates_without_child_inputs_in_parent_references' (3754398) panicked at tests/support/musashi_batch_dependencies.rs:102:10:
+Dolos must load the children's spending UTxOs through requires(): ChainError(Phase1ValidationRejected(PostAlonzo(InputNotInUTxO)))
+
+
+failures:
+    batch_dependencies::batch_duplicate_spending_references_still_reject
+    batch_dependencies::batch_missing_parent_child_or_reference_input_rejects
+    batch_dependencies::batch_validates_without_child_inputs_in_parent_references
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.09s
+
+error: test failed, to rerun pass `-p dolos --test musashi_submission`

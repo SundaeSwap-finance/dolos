@@ -1,0 +1,205 @@
+{
+  "baseline_dolos": "d4f2e681167bac9739c4fb330e018047a06b9586",
+  "baseline_pallas": "00f2df7d827dca6fa4e7f7019f5a0b3f2e6e05b1",
+  "fixed_pallas": "8ad18dc5d3ac41dfc22605951cb02206e1aa705c",
+  "fixed_dolos": "commit containing this report",
+  "test_source": "tests/support/musashi_batch_dependencies.rs",
+  "test_sha256": "4e5851aebff79a1b58ba9c7bcc662b6af7200ac104914adb21db8cf5fce1f859",
+  "environment": {
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "cargo": "cargo 1.97.0 (c980f4866 2026-06-30)",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_BUILD_JOBS": "3"
+  },
+  "baseline": {
+    "command": "cargo test --locked -p dolos --test musashi_submission batch_dependencies",
+    "passed": 0,
+    "failed": 3,
+    "exit_code": 101,
+    "target": "target/subtransaction-baseline",
+    "reason": "InputNotInUTxO despite stored child inputs",
+    "log": "baseline.txt",
+    "sha256": "da2cb88d273255de0f86377d5a736be9dc295338322a34d6f3bed9b5c018cf19"
+  },
+  "fixed": {
+    "command": "cargo test --offline --locked -p dolos --test musashi_submission",
+    "passed": 19,
+    "failed": 0,
+    "exit_code": 0,
+    "target": "target/musashi-s07-fixed",
+    "log": "fixed.txt",
+    "sha256": "0d5bd9d740e0b9f8901b678a5acedc6e688f4cc63f9a52a45c39c92af0388afc"
+  },
+  "publication": {
+    "pallas_commit": "verified published and fetched from GitHub",
+    "dolos_commit": "local only; no push",
+    "tags": "v3 checkpoint tags local; prior tags retained",
+    "local_dependency_object_seeding": false,
+    "path_override": false
+  },
+  "dependency_resolution": {
+    "pallas_packages": 13,
+    "single_revision": "8ad18dc5d3ac41dfc22605951cb02206e1aa705c",
+    "lockfile_revision_only": true,
+    "metadata": "target/subtransaction-published-adoption/metadata.json",
+    "fetch_log": "target/subtransaction-published-adoption/dependency-fetch.log"
+  },
+  "checks": [
+    {
+      "name": "submission",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "dolos",
+        "--test",
+        "musashi_submission"
+      ],
+      "exit_code": 0,
+      "seconds": 142.13,
+      "log": "target/subtransaction-published-adoption/submission.log",
+      "sha256": "cb1fbb0b498b7f30a0840597f4987d340723077b6768d6b090ba9454e153f71c",
+      "tests": {
+        "passed": 19,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "seconds": 118.68,
+      "log": "target/subtransaction-published-adoption/clippy.log",
+      "sha256": "3144f2fa1179ae1ed596d4dad0ffda1949bf560e8598a3c4d3412a6159d84759"
+    },
+    {
+      "name": "build",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "seconds": 235.68,
+      "log": "target/subtransaction-published-adoption/build.log",
+      "sha256": "f9a63ad81b469566eb60ee01a5d5ccacb387d43937f50ea49e5e07b7f79febf4"
+    },
+    {
+      "name": "default-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-fail-fast"
+      ],
+      "exit_code": 0,
+      "seconds": 289.16,
+      "log": "target/subtransaction-published-adoption/default-tests.log",
+      "sha256": "16ff5eb56523c1c523ea8568502245cd997914029d865ff4a69e3f5a8b33a602",
+      "tests": {
+        "passed": 1982,
+        "failed": 0,
+        "ignored": 36
+      }
+    },
+    {
+      "name": "strict-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--exclude",
+        "dolos-minibf",
+        "--exclude",
+        "dolos-minikupo",
+        "--exclude",
+        "dolos-trp",
+        "--no-fail-fast"
+      ],
+      "exit_code": 101,
+      "seconds": 136.09,
+      "log": "target/subtransaction-published-adoption/strict-tests.log",
+      "sha256": "e468a9c4df1ab71c2d3c948341f0cea2cf8388b24d7553910e09c9d62d450be6",
+      "tests": {
+        "passed": 1412,
+        "failed": 16,
+        "ignored": 41
+      }
+    },
+    {
+      "name": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--check"
+      ],
+      "exit_code": 1,
+      "seconds": 2.95,
+      "log": "target/subtransaction-published-adoption/fmt.log",
+      "sha256": "277eee5fee7c482aee11fe8713d3a4464a6ce715b62a0bdaeffd77b872eb71fe"
+    }
+  ],
+  "known_findings": {
+    "strict_failures": [
+      "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+      "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+      "every_lookup_by_hash_finds_each_sub_transaction",
+      "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+      "minibf_address_routes_count_each_sub_transaction",
+      "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+      "minibf_block_routes_count_each_sub_transaction",
+      "minibf_resolves_an_input_a_sub_transaction_made",
+      "minibf_serves_each_sub_transaction_by_its_own_hash",
+      "minikupo_matches_the_outputs_of_a_sub_transaction",
+      "serve::grpc::v1::query::tests::read_tx_answers_a_sub_transaction_hash_with_its_parent",
+      "serve::grpc::v1::query::tests::read_tx_of_an_unknown_hash_is_not_found",
+      "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+      "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+      "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+      "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+    ],
+    "comparison": "Same names and epoch assertions as retained original baseline; all Dolos Rust files in current and original baseline commits match. The original strict baseline was not needlessly rerun.",
+    "comparison_evidence": "target/subtransaction-published-adoption/baseline-comparison.json",
+    "formatting_files": [
+      "crates/cardano/src/forks.rs",
+      "crates/cardano/src/roll/batch.rs",
+      "crates/cardano/tests/genesis_stake_pools.rs",
+      "crates/core/src/sync.rs",
+      "crates/minibf/src/routes/scripts.rs",
+      "src/bin/dolos/daemon.rs",
+      "src/serve/grpc/v1beta/watch.rs",
+      "src/sync/leios.rs",
+      "src/sync/pull.rs"
+    ],
+    "clippy": "Exit 0 with findings in unchanged files; existing proc-macro-error2 future incompatibility notice remains."
+  },
+  "limits": [
+    "No upstream Musashi node acceptance test",
+    "Pending child mempool reservations/output lookup are separate scope",
+    "Service not restarted; no deployment or live submission",
+    "Docker registry suite not applicable; macOS/Windows not available"
+  ]
+}
