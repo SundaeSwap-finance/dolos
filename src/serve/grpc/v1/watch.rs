@@ -1,0 +1,964 @@
+use futures_core::Stream;
+use futures_util::StreamExt;
+use pallas::interop::utxorpc::v1::{self as interop, spec as u5c};
+use pallas::interop::utxorpc::LedgerContext;
+use pallas::{
+    interop::utxorpc::v1::spec::watch::any_chain_tx_pattern::Chain,
+    ledger::{addresses::Address, traverse::MultiEraBlock},
+};
+use std::pin::Pin;
+use tonic::{Request, Response, Status};
+
+use super::criterion;
+use crate::prelude::*;
+use crate::serve::grpc::stream::ChainStream;
+
+fn outputs_match_address(
+    pattern: &u5c::cardano::AddressPattern,
+    outputs: &[u5c::cardano::TxOutput],
+) -> bool {
+    let exact_matches = criterion(&pattern.exact_address)
+        .is_none_or(|exact| outputs.iter().any(|o| o.address == *exact));
+
+    let delegation_matches = criterion(&pattern.delegation_part).is_none_or(|delegation| {
+        outputs.iter().any(|o| {
+            let addr = Address::from_bytes(&o.address).unwrap();
+            match addr {
+                Address::Shelley(s) => s.delegation().to_vec().eq(delegation),
+                _ => false,
+            }
+        })
+    });
+    let payment_matches = criterion(&pattern.payment_part).is_none_or(|payment| {
+        outputs.iter().any(|o| {
+            let addr = Address::from_bytes(&o.address).unwrap();
+            match addr {
+                Address::Shelley(s) => s.payment().to_vec().eq(payment),
+                _ => false,
+            }
+        })
+    });
+
+    exact_matches && delegation_matches && payment_matches
+}
+
+fn outputs_match_asset(
+    asset_pattern: &u5c::cardano::AssetPattern,
+    outputs: &[u5c::cardano::TxOutput],
+) -> bool {
+    outputs
+        .iter()
+        .any(|o| matches_asset(asset_pattern, &o.assets))
+}
+
+fn matches_asset(
+    asset_pattern: &u5c::cardano::AssetPattern,
+    assets: &[u5c::cardano::Multiasset],
+) -> bool {
+    assets.iter().any(|ma| {
+        if criterion(&asset_pattern.policy_id).is_some_and(|policy| policy.ne(&ma.policy_id)) {
+            return false;
+        }
+        let Some(name) = criterion(&asset_pattern.asset_name) else {
+            return true;
+        };
+        ma.assets.iter().any(|ma| name.eq(&ma.name))
+    })
+}
+
+fn matches_output(
+    pattern: &u5c::cardano::TxOutputPattern,
+    outputs: &[u5c::cardano::TxOutput],
+) -> bool {
+    let address_match = pattern
+        .address
+        .as_ref()
+        .is_none_or(|addr_pattern| outputs_match_address(addr_pattern, outputs));
+
+    let asset_match = pattern
+        .asset
+        .as_ref()
+        .is_none_or(|asset_pattern| outputs_match_asset(asset_pattern, outputs));
+
+    address_match && asset_match
+}
+
+fn credential_hash_eq(cred: &u5c::cardano::StakeCredential, hash: &[u8]) -> bool {
+    use u5c::cardano::stake_credential::StakeCredential as SC;
+    match &cred.stake_credential {
+        Some(SC::AddrKeyHash(h) | SC::ScriptHash(h)) => h == hash,
+        None => false,
+    }
+}
+
+fn drep_hash_eq(drep: &u5c::cardano::DRep, hash: &[u8]) -> bool {
+    use u5c::cardano::d_rep::Drep;
+    match &drep.drep {
+        Some(Drep::AddrKeyHash(h) | Drep::ScriptHash(h)) => h == hash,
+        _ => false,
+    }
+}
+
+fn matches_stake_credential_pattern(
+    pattern: &u5c::cardano::StakeCredential,
+    actual: &u5c::cardano::StakeCredential,
+) -> bool {
+    pattern.stake_credential.is_none() || pattern.stake_credential == actual.stake_credential
+}
+
+fn cert_involves_stake_credential(
+    cert: &u5c::cardano::certificate::Certificate,
+    hash: &[u8],
+) -> bool {
+    use u5c::cardano::certificate::Certificate as C;
+    match cert {
+        C::StakeRegistration(c) | C::StakeDeregistration(c) => credential_hash_eq(c, hash),
+        C::StakeDelegation(c) => c
+            .stake_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::RegCert(c) => c
+            .stake_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::UnregCert(c) => c
+            .stake_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::VoteDelegCert(c) => c
+            .stake_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::StakeVoteDelegCert(c) => c
+            .stake_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::StakeRegDelegCert(c) => c
+            .stake_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::VoteRegDelegCert(c) => c
+            .stake_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::StakeVoteRegDelegCert(c) => c
+            .stake_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::AuthCommitteeHotCert(c) => {
+            c.committee_cold_credential
+                .as_ref()
+                .is_some_and(|sc| credential_hash_eq(sc, hash))
+                || c.committee_hot_credential
+                    .as_ref()
+                    .is_some_and(|sc| credential_hash_eq(sc, hash))
+        }
+        C::ResignCommitteeColdCert(c) => c
+            .committee_cold_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::RegDrepCert(c) => c
+            .drep_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::UnregDrepCert(c) => c
+            .drep_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::UpdateDrepCert(c) => c
+            .drep_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::MirCert(c) => c.to.iter().any(|t| {
+            t.stake_credential
+                .as_ref()
+                .is_some_and(|sc| credential_hash_eq(sc, hash))
+        }),
+        _ => false,
+    }
+}
+
+fn cert_involves_pool(cert: &u5c::cardano::certificate::Certificate, hash: &[u8]) -> bool {
+    use u5c::cardano::certificate::Certificate as C;
+    match cert {
+        C::StakeDelegation(c) => c.pool_keyhash == hash,
+        C::PoolRegistration(c) => c.operator == hash,
+        C::PoolRetirement(c) => c.pool_keyhash == hash,
+        C::StakeVoteDelegCert(c) => c.pool_keyhash == hash,
+        C::StakeRegDelegCert(c) => c.pool_keyhash == hash,
+        C::StakeVoteRegDelegCert(c) => c.pool_keyhash == hash,
+        _ => false,
+    }
+}
+
+fn cert_involves_drep(cert: &u5c::cardano::certificate::Certificate, hash: &[u8]) -> bool {
+    use u5c::cardano::certificate::Certificate as C;
+    match cert {
+        C::VoteDelegCert(c) => c.drep.as_ref().is_some_and(|d| drep_hash_eq(d, hash)),
+        C::StakeVoteDelegCert(c) => c.drep.as_ref().is_some_and(|d| drep_hash_eq(d, hash)),
+        C::VoteRegDelegCert(c) => c.drep.as_ref().is_some_and(|d| drep_hash_eq(d, hash)),
+        C::StakeVoteRegDelegCert(c) => c.drep.as_ref().is_some_and(|d| drep_hash_eq(d, hash)),
+        C::RegDrepCert(c) => c
+            .drep_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::UnregDrepCert(c) => c
+            .drep_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        C::UpdateDrepCert(c) => c
+            .drep_credential
+            .as_ref()
+            .is_some_and(|sc| credential_hash_eq(sc, hash)),
+        _ => false,
+    }
+}
+
+fn matches_certificate_pattern(
+    pattern: &u5c::cardano::CertificatePattern,
+    certs: &[u5c::cardano::Certificate],
+) -> bool {
+    use u5c::cardano::certificate::Certificate as Cert;
+    use u5c::cardano::certificate_pattern::CertificateType;
+
+    let Some(ref cert_type) = pattern.certificate_type else {
+        return true;
+    };
+
+    certs.iter().any(|cert| {
+        let Some(ref c) = cert.certificate else {
+            return false;
+        };
+
+        match cert_type {
+            CertificateType::StakeRegistration(pat) => {
+                matches!(c, Cert::StakeRegistration(cred) if matches_stake_credential_pattern(pat, cred))
+            }
+            CertificateType::StakeDeregistration(pat) => {
+                matches!(c, Cert::StakeDeregistration(cred) if matches_stake_credential_pattern(pat, cred))
+            }
+            CertificateType::StakeDelegation(pat) => {
+                if let Cert::StakeDelegation(deleg) = c {
+                    let cred_match = pat.stake_credential.as_ref().is_none_or(|p| {
+                        deleg
+                            .stake_credential
+                            .as_ref()
+                            .is_some_and(|a| matches_stake_credential_pattern(p, a))
+                    });
+                    let pool_match =
+                        pat.pool_keyhash.is_empty() || pat.pool_keyhash == deleg.pool_keyhash;
+                    cred_match && pool_match
+                } else {
+                    false
+                }
+            }
+            CertificateType::PoolRegistration(pat) => {
+                if let Cert::PoolRegistration(reg) = c {
+                    let operator_match = pat.operator.is_empty() || pat.operator == reg.operator;
+                    let pool_match =
+                        pat.pool_keyhash.is_empty() || pat.pool_keyhash == reg.operator;
+                    operator_match && pool_match
+                } else {
+                    false
+                }
+            }
+            CertificateType::PoolRetirement(pat) => {
+                if let Cert::PoolRetirement(ret) = c {
+                    let pool_match =
+                        pat.pool_keyhash.is_empty() || pat.pool_keyhash == ret.pool_keyhash;
+                    let epoch_match = pat.epoch == 0 || pat.epoch == ret.epoch;
+                    pool_match && epoch_match
+                } else {
+                    false
+                }
+            }
+            CertificateType::AnyStakeCredential(hash) => {
+                cert_involves_stake_credential(c, hash)
+            }
+            CertificateType::AnyPoolKeyhash(hash) => cert_involves_pool(c, hash),
+            CertificateType::AnyDrep(hash) => cert_involves_drep(c, hash),
+        }
+    })
+}
+
+fn matches_cardano_pattern(tx_pattern: &u5c::cardano::TxPattern, tx: &u5c::cardano::Tx) -> bool {
+    // Each pattern field is checked against the transaction together with its
+    // sub transactions.
+    let members: Vec<&u5c::cardano::TxCommon> =
+        tx.common.iter().chain(tx.sub_transactions.iter()).collect();
+
+    let inputs: Vec<_> = members
+        .iter()
+        .flat_map(|x| x.inputs.iter())
+        .filter_map(|x| x.as_output.as_ref().cloned())
+        .collect();
+    let outputs: Vec<_> = members
+        .iter()
+        .flat_map(|x| x.outputs.iter().cloned())
+        .collect();
+    let mint: Vec<_> = members
+        .iter()
+        .flat_map(|x| x.mint.iter().cloned())
+        .collect();
+    let certificates: Vec<_> = members
+        .iter()
+        .flat_map(|x| x.certificates.iter().cloned())
+        .collect();
+
+    let has_address_match = tx_pattern.has_address.as_ref().is_none_or(|addr_pattern| {
+        outputs_match_address(addr_pattern, &inputs)
+            || outputs_match_address(addr_pattern, &outputs)
+    });
+
+    let consumes_match = tx_pattern
+        .consumes
+        .as_ref()
+        .is_none_or(|out_pattern| matches_output(out_pattern, &inputs));
+
+    let mints_asset_match = tx_pattern
+        .mints_asset
+        .as_ref()
+        .is_none_or(|asset_pattern| matches_asset(asset_pattern, &mint));
+
+    let moves_asset_match = tx_pattern.moves_asset.as_ref().is_none_or(|asset_pattern| {
+        outputs_match_asset(asset_pattern, &inputs) || outputs_match_asset(asset_pattern, &outputs)
+    });
+
+    let produces_match = tx_pattern
+        .produces
+        .as_ref()
+        .is_none_or(|out_pattern| matches_output(out_pattern, &outputs));
+
+    let has_certificate_match = tx_pattern
+        .has_certificate
+        .as_ref()
+        .is_none_or(|cert_pattern| matches_certificate_pattern(cert_pattern, &certificates));
+
+    has_address_match
+        && consumes_match
+        && mints_asset_match
+        && moves_asset_match
+        && produces_match
+        && has_certificate_match
+}
+
+fn matches_chain(chain: &Chain, tx: &u5c::cardano::Tx) -> bool {
+    match chain {
+        Chain::Cardano(tx_pattern) => matches_cardano_pattern(tx_pattern, tx),
+    }
+}
+
+fn apply_predicate(predicate: &u5c::watch::TxPredicate, tx: &u5c::cardano::Tx) -> bool {
+    let tx_matches = predicate
+        .r#match
+        .as_ref()
+        .and_then(|pattern| pattern.chain.as_ref())
+        .is_none_or(|chain| matches_chain(chain, tx));
+
+    let not_clause = predicate.not.iter().any(|p| apply_predicate(p, tx));
+
+    let and_clause = predicate.all_of.iter().all(|p| apply_predicate(p, tx));
+
+    let or_clause =
+        predicate.any_of.is_empty() || predicate.any_of.iter().any(|p| apply_predicate(p, tx));
+
+    tx_matches && !not_clause && and_clause && or_clause
+}
+
+fn block_to_txs<C: LedgerContext>(
+    block: &RawBlock,
+    mapper: &interop::Mapper<C>,
+    request: &u5c::watch::WatchTxRequest,
+) -> Vec<u5c::watch::AnyChainTx> {
+    let bytes = block;
+    let block = MultiEraBlock::decode(block).unwrap();
+    let txs = block.txs();
+
+    txs.iter()
+        .map(|x: &pallas::ledger::traverse::MultiEraTx<'_>| mapper.map_tx(x))
+        .filter(|tx| {
+            request
+                .predicate
+                .as_ref()
+                .is_none_or(|predicate| apply_predicate(predicate, tx))
+        })
+        .map(|x| u5c::watch::AnyChainTx {
+            chain: Some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
+            block: Some(u5c::watch::AnyChainBlock {
+                native_bytes: bytes.to_vec().into(),
+                chain: Some(u5c::watch::any_chain_block::Chain::Cardano(
+                    mapper.map_block(&block),
+                )),
+            }),
+        })
+        .collect()
+}
+
+fn raw_to_blockref<C: LedgerContext>(
+    mapper: &interop::Mapper<C>,
+    raw: &[u8],
+) -> Option<u5c::watch::BlockRef> {
+    let block = mapper.map_block_cbor(raw);
+    let header = block.header?;
+
+    Some(u5c::watch::BlockRef {
+        slot: header.slot,
+        hash: header.hash,
+        height: header.height,
+    })
+}
+
+fn roll_to_watch_response<C: LedgerContext>(
+    mapper: &interop::Mapper<C>,
+    log: &TipEvent,
+    request: &u5c::watch::WatchTxRequest,
+) -> impl Stream<Item = u5c::watch::WatchTxResponse> {
+    let txs: Vec<_> = match log {
+        TipEvent::Apply(_, block) => {
+            let txs = block_to_txs(block, mapper, request);
+            if txs.is_empty() {
+                let block_ref = raw_to_blockref(mapper, block);
+                if let Some(r) = block_ref {
+                    vec![u5c::watch::WatchTxResponse {
+                        action: Some(u5c::watch::watch_tx_response::Action::Idle(r)),
+                    }]
+                } else {
+                    vec![]
+                }
+            } else {
+                txs.into_iter()
+                    .map(u5c::watch::watch_tx_response::Action::Apply)
+                    .map(|x| u5c::watch::WatchTxResponse { action: Some(x) })
+                    .collect()
+            }
+        }
+        TipEvent::Undo(_, block) => block_to_txs(block, mapper, request)
+            .into_iter()
+            .map(u5c::watch::watch_tx_response::Action::Undo)
+            .map(|x| u5c::watch::WatchTxResponse { action: Some(x) })
+            .collect(),
+        // TODO: shouldn't we have a u5c event for origin?
+        TipEvent::Mark(..) => vec![],
+    };
+
+    tokio_stream::iter(txs)
+}
+
+pub struct WatchServiceImpl<D, C>
+where
+    D: Domain + LedgerContext,
+    C: CancelToken,
+{
+    domain: D,
+    mapper: interop::Mapper<D>,
+    cancel: C,
+}
+
+impl<D, C> WatchServiceImpl<D, C>
+where
+    D: Domain + LedgerContext,
+    C: CancelToken,
+{
+    pub fn new(domain: D, cancel: C) -> Self {
+        let mapper = interop::Mapper::new(domain.clone());
+
+        Self {
+            domain,
+            mapper,
+            cancel,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<D, C> u5c::watch::watch_service_server::WatchService for WatchServiceImpl<D, C>
+where
+    D: Domain + LedgerContext,
+    C: CancelToken,
+{
+    type WatchTxStream = Pin<
+        Box<dyn Stream<Item = Result<u5c::watch::WatchTxResponse, tonic::Status>> + Send + 'static>,
+    >;
+
+    async fn watch_tx(
+        &self,
+        request: Request<u5c::watch::WatchTxRequest>,
+    ) -> Result<Response<Self::WatchTxStream>, Status> {
+        let inner_req = request.into_inner();
+
+        let intersect = inner_req
+            .intersect
+            .iter()
+            .map(|x| ChainPoint::Specific(x.slot, x.hash.to_vec().as_slice().into()))
+            .collect::<Vec<ChainPoint>>();
+
+        let stream =
+            ChainStream::start::<D, _>(self.domain.clone(), intersect.clone(), self.cancel.clone())
+                .map_err(|e| Status::internal(format!("failed to start chain stream: {e}")))?
+                .ok_or_else(|| {
+                    Status::not_found(format!(
+                        "none of the requested points intersect with local history: {intersect:?}"
+                    ))
+                })?;
+
+        let mapper = self.mapper.clone();
+
+        let stream = stream.flat_map(move |log| match log {
+            Ok(log) => roll_to_watch_response(&mapper, &log, &inner_req)
+                .map(Ok)
+                .left_stream(),
+            Err(error) => futures_util::stream::once(async move {
+                Err(Status::internal(format!("chain stream failed: {error}")))
+            })
+            .right_stream(),
+        });
+
+        Ok(Response::new(Box::pin(stream)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pallas::ledger::traverse::MultiEraTx;
+
+    // Real mainnet tx
+    // 9f8de76622a4474cc8386a85cceffd62c2bf762a004941972546d635490ec465
+    // Contains: StakeRegistration + StakeDelegation to
+    // pool1398lzhvtaa0hgz305d2jz4urfkwkkt66yv476wqe6att2f7dphh
+    const DELEGATION_TX_CBOR: &str = "84a500d901028182582012e3d7a496de1939bc681a662884b1668f77cf1660dbc57b0aa84b1c264bd3b700018182583901376a4625c82451cc13a265b0f362ee24f85d2054158257c0fcdb7b6a493e5224dc0f58895a75ac89911186ef7e853edc65108e2fdaccb0211a59257118021a0002aa69031a0a390ad604d901028282008200581c493e5224dc0f58895a75ac89911186ef7e853edc65108e2fdaccb02183028200581c493e5224dc0f58895a75ac89911186ef7e853edc65108e2fdaccb021581c894ff15d8bef5f740a2fa3552157834d9d6b2f5a232bed3819d756b5a100d9010282825820341834b6cbf8c7c524e9c0238b23a934c9bdc4e2c4ba5c4c2b96fb4431e4455c5840e0ebed89ba8f273098b323cae468759a7f3aafca03b7de8bdb95fd8d2cadcd8f98c691729be59ad3a80ab0011463ccf36195864944da59365ebfa4d3141e8e0982582056a47150e2fa8164a59985a05a935a464917a818647f072fe7a7238d772d7d7558401a9de51c89274147107fdc3fdb261ce9f995e3d5f131ee891a1c240f1c585b9e0b714b8c261cd1cf88e394ab0054a84c8e679fdf0a3d9587c7417f8ece94bd0ef5f6";
+    const STAKE_CRED: &str = "493e5224dc0f58895a75ac89911186ef7e853edc65108e2fdaccb021";
+    const POOL_HASH: &str = "894ff15d8bef5f740a2fa3552157834d9d6b2f5a232bed3819d756b5";
+
+    fn decoded_tx() -> u5c::cardano::Tx {
+        let domain = dolos_testing::toy_domain::ToyDomain::new(None, None);
+        let mapper = interop::Mapper::new(domain);
+        let cbor = hex::decode(DELEGATION_TX_CBOR).unwrap();
+        let multi_era_tx = MultiEraTx::decode(&cbor).unwrap();
+        mapper.map_tx(&multi_era_tx)
+    }
+
+    fn common(tx: &u5c::cardano::Tx) -> &u5c::cardano::TxCommon {
+        tx.common
+            .as_ref()
+            .expect("the transaction has no common fields")
+    }
+
+    fn stake_cred_bytes() -> Vec<u8> {
+        hex::decode(STAKE_CRED).unwrap()
+    }
+
+    fn pool_hash_bytes() -> Vec<u8> {
+        hex::decode(POOL_HASH).unwrap()
+    }
+
+    fn make_stake_credential(hash: Vec<u8>) -> u5c::cardano::StakeCredential {
+        u5c::cardano::StakeCredential {
+            stake_credential: Some(
+                u5c::cardano::stake_credential::StakeCredential::AddrKeyHash(hash.into()),
+            ),
+        }
+    }
+
+    #[test]
+    fn real_tx_contains_expected_certificates() {
+        let tx = decoded_tx();
+        let certificates = &common(&tx).certificates;
+        assert_eq!(certificates.len(), 2);
+
+        let cert0 = certificates[0].certificate.as_ref().unwrap();
+        assert!(matches!(
+            cert0,
+            u5c::cardano::certificate::Certificate::StakeRegistration(_)
+        ));
+
+        let cert1 = certificates[1].certificate.as_ref().unwrap();
+        match cert1 {
+            u5c::cardano::certificate::Certificate::StakeDelegation(deleg) => {
+                assert_eq!(deleg.pool_keyhash.as_ref(), pool_hash_bytes().as_slice());
+                let cred = deleg.stake_credential.as_ref().unwrap();
+                assert!(matches!(
+                    &cred.stake_credential,
+                    Some(u5c::cardano::stake_credential::StakeCredential::AddrKeyHash(h))
+                        if h.as_ref() == stake_cred_bytes().as_slice()
+                ));
+            }
+            other => panic!("expected StakeDelegation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn matches_delegation_to_specific_pool() {
+        let tx = decoded_tx();
+        let pattern = u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::StakeDelegation(
+                    u5c::cardano::StakeDelegationPattern {
+                        stake_credential: None,
+                        pool_keyhash: pool_hash_bytes().into(),
+                    },
+                ),
+            ),
+        };
+        assert!(matches_certificate_pattern(
+            &pattern,
+            &common(&tx).certificates
+        ));
+    }
+
+    #[test]
+    fn matches_delegation_from_specific_wallet() {
+        let tx = decoded_tx();
+        let pattern = u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::StakeDelegation(
+                    u5c::cardano::StakeDelegationPattern {
+                        stake_credential: Some(make_stake_credential(stake_cred_bytes())),
+                        pool_keyhash: Default::default(),
+                    },
+                ),
+            ),
+        };
+        assert!(matches_certificate_pattern(
+            &pattern,
+            &common(&tx).certificates
+        ));
+    }
+
+    #[test]
+    fn matches_delegation_with_both_credential_and_pool() {
+        let tx = decoded_tx();
+        let pattern = u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::StakeDelegation(
+                    u5c::cardano::StakeDelegationPattern {
+                        stake_credential: Some(make_stake_credential(stake_cred_bytes())),
+                        pool_keyhash: pool_hash_bytes().into(),
+                    },
+                ),
+            ),
+        };
+        assert!(matches_certificate_pattern(
+            &pattern,
+            &common(&tx).certificates
+        ));
+    }
+
+    #[test]
+    fn rejects_delegation_to_wrong_pool() {
+        let tx = decoded_tx();
+        let pattern = u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::StakeDelegation(
+                    u5c::cardano::StakeDelegationPattern {
+                        stake_credential: None,
+                        pool_keyhash: vec![0xaa; 28].into(),
+                    },
+                ),
+            ),
+        };
+        assert!(!matches_certificate_pattern(
+            &pattern,
+            &common(&tx).certificates
+        ));
+    }
+
+    #[test]
+    fn matches_stake_registration_in_same_tx() {
+        let tx = decoded_tx();
+        let pattern = u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::StakeRegistration(
+                    make_stake_credential(stake_cred_bytes()),
+                ),
+            ),
+        };
+        assert!(matches_certificate_pattern(
+            &pattern,
+            &common(&tx).certificates
+        ));
+    }
+
+    #[test]
+    fn any_pool_keyhash_matches_delegation() {
+        let tx = decoded_tx();
+        let pattern = u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::AnyPoolKeyhash(
+                    pool_hash_bytes().into(),
+                ),
+            ),
+        };
+        assert!(matches_certificate_pattern(
+            &pattern,
+            &common(&tx).certificates
+        ));
+    }
+
+    #[test]
+    fn any_stake_credential_matches_registration_and_delegation() {
+        let tx = decoded_tx();
+        let pattern = u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::AnyStakeCredential(
+                    stake_cred_bytes().into(),
+                ),
+            ),
+        };
+        assert!(matches_certificate_pattern(
+            &pattern,
+            &common(&tx).certificates
+        ));
+    }
+
+    #[test]
+    fn empty_certificate_pattern_matches_all() {
+        let tx = decoded_tx();
+        let pattern = u5c::cardano::CertificatePattern {
+            certificate_type: None,
+        };
+        assert!(matches_certificate_pattern(
+            &pattern,
+            &common(&tx).certificates
+        ));
+    }
+
+    #[test]
+    fn cardano_pattern_with_certificate_filter() {
+        let tx = decoded_tx();
+        let tx_pattern = u5c::cardano::TxPattern {
+            has_certificate: Some(u5c::cardano::CertificatePattern {
+                certificate_type: Some(
+                    u5c::cardano::certificate_pattern::CertificateType::StakeDelegation(
+                        u5c::cardano::StakeDelegationPattern {
+                            stake_credential: None,
+                            pool_keyhash: pool_hash_bytes().into(),
+                        },
+                    ),
+                ),
+            }),
+            ..Default::default()
+        };
+        assert!(matches_cardano_pattern(&tx_pattern, &tx));
+    }
+
+    /// A transaction whose only content is one sub transaction, the delegation
+    /// transaction.
+    fn parent_of_delegation() -> u5c::cardano::Tx {
+        u5c::cardano::Tx {
+            sub_transactions: vec![common(&decoded_tx()).clone()],
+            ..Default::default()
+        }
+    }
+
+    fn delegation_to(pool: Vec<u8>) -> u5c::cardano::CertificatePattern {
+        u5c::cardano::CertificatePattern {
+            certificate_type: Some(
+                u5c::cardano::certificate_pattern::CertificateType::StakeDelegation(
+                    u5c::cardano::StakeDelegationPattern {
+                        stake_credential: None,
+                        pool_keyhash: pool.into(),
+                    },
+                ),
+            ),
+        }
+    }
+
+    fn delegating_address() -> u5c::cardano::AddressPattern {
+        u5c::cardano::AddressPattern {
+            delegation_part: Some(stake_cred_bytes().into()),
+            ..Default::default()
+        }
+    }
+
+    /// The must-not case. A sub transaction certificate that differs from the
+    /// pattern matches nothing.
+    #[test]
+    fn a_sub_transaction_delegation_to_another_pool_does_not_match() {
+        let tx_pattern = u5c::cardano::TxPattern {
+            has_certificate: Some(delegation_to(vec![0xaa; 28])),
+            ..Default::default()
+        };
+
+        assert!(!matches_cardano_pattern(
+            &tx_pattern,
+            &parent_of_delegation()
+        ));
+    }
+
+    #[test]
+    fn a_certificate_in_a_sub_transaction_matches() {
+        let tx_pattern = u5c::cardano::TxPattern {
+            has_certificate: Some(delegation_to(pool_hash_bytes())),
+            ..Default::default()
+        };
+
+        assert!(matches_cardano_pattern(
+            &tx_pattern,
+            &parent_of_delegation()
+        ));
+    }
+
+    #[test]
+    fn an_output_of_a_sub_transaction_matches_produces_and_has_address() {
+        let produces = u5c::cardano::TxPattern {
+            produces: Some(u5c::cardano::TxOutputPattern {
+                address: Some(delegating_address()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let has_address = u5c::cardano::TxPattern {
+            has_address: Some(delegating_address()),
+            ..Default::default()
+        };
+
+        assert!(matches_cardano_pattern(&produces, &parent_of_delegation()));
+        assert!(matches_cardano_pattern(
+            &has_address,
+            &parent_of_delegation()
+        ));
+    }
+
+    /// Each field is checked on its own, so one field matching the parent and
+    /// another matching a sub transaction match together.
+    #[test]
+    fn fields_matched_by_the_parent_and_by_a_sub_transaction_match_together() {
+        let mut tx = parent_of_delegation();
+        tx.common = Some(u5c::cardano::TxCommon {
+            certificates: common(&decoded_tx()).certificates.clone(),
+            ..Default::default()
+        });
+        tx.sub_transactions[0].certificates.clear();
+
+        let tx_pattern = u5c::cardano::TxPattern {
+            has_certificate: Some(delegation_to(pool_hash_bytes())),
+            produces: Some(u5c::cardano::TxOutputPattern {
+                address: Some(delegating_address()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert!(common(&tx).outputs.is_empty());
+        assert!(matches_cardano_pattern(&tx_pattern, &tx));
+    }
+
+    /// The must-not case. A transaction with no common fields and no sub
+    /// transaction offers no certificate to match.
+    #[test]
+    fn a_transaction_with_no_fields_matches_no_certificate() {
+        let tx_pattern = u5c::cardano::TxPattern {
+            has_certificate: Some(delegation_to(pool_hash_bytes())),
+            ..Default::default()
+        };
+
+        assert!(!matches_cardano_pattern(
+            &tx_pattern,
+            &u5c::cardano::Tx::default()
+        ));
+    }
+
+    fn token(policy: u8, name: &[u8]) -> Vec<u5c::cardano::TxOutput> {
+        vec![u5c::cardano::TxOutput {
+            assets: vec![u5c::cardano::Multiasset {
+                policy_id: vec![policy; 28].into(),
+                assets: vec![u5c::cardano::Asset {
+                    name: name.to_vec().into(),
+                    ..Default::default()
+                }],
+            }],
+            ..Default::default()
+        }]
+    }
+
+    #[test]
+    fn an_address_field_set_to_another_value_does_not_match() {
+        let outputs = common(&decoded_tx()).outputs.clone();
+        let other = || Some(bytes::Bytes::from(vec![0xaa; 28]));
+
+        for pattern in [
+            u5c::cardano::AddressPattern {
+                exact_address: other(),
+                ..Default::default()
+            },
+            u5c::cardano::AddressPattern {
+                payment_part: other(),
+                ..Default::default()
+            },
+            u5c::cardano::AddressPattern {
+                delegation_part: other(),
+                ..Default::default()
+            },
+        ] {
+            assert!(!outputs_match_address(&pattern, &outputs), "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn an_asset_field_set_to_another_value_does_not_match() {
+        let outputs = token(1, b"coin");
+
+        for pattern in [
+            u5c::cardano::AssetPattern {
+                policy_id: Some(vec![2; 28].into()),
+                ..Default::default()
+            },
+            u5c::cardano::AssetPattern {
+                asset_name: Some(b"other".to_vec().into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(!outputs_match_asset(&pattern, &outputs), "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn address_fields_unset_or_empty_match_any_output() {
+        let outputs = common(&decoded_tx()).outputs.clone();
+        let empty = || Some(bytes::Bytes::new());
+
+        for pattern in [
+            u5c::cardano::AddressPattern::default(),
+            u5c::cardano::AddressPattern {
+                exact_address: empty(),
+                payment_part: empty(),
+                delegation_part: empty(),
+            },
+        ] {
+            assert!(outputs_match_address(&pattern, &outputs), "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn asset_fields_unset_or_empty_match_any_asset() {
+        let outputs = token(1, b"coin");
+
+        for pattern in [
+            u5c::cardano::AssetPattern::default(),
+            u5c::cardano::AssetPattern {
+                policy_id: Some(bytes::Bytes::new()),
+                asset_name: Some(bytes::Bytes::new()),
+            },
+        ] {
+            assert!(outputs_match_asset(&pattern, &outputs), "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn set_address_and_asset_fields_match_their_values() {
+        let outputs = common(&decoded_tx()).outputs.clone();
+        let address = u5c::cardano::AddressPattern {
+            exact_address: Some(outputs[0].address.clone()),
+            delegation_part: Some(stake_cred_bytes().into()),
+            ..Default::default()
+        };
+        let asset = u5c::cardano::AssetPattern {
+            policy_id: Some(vec![1; 28].into()),
+            asset_name: Some(b"coin".to_vec().into()),
+        };
+
+        assert!(outputs_match_address(&address, &outputs));
+        assert!(outputs_match_asset(&asset, &token(1, b"coin")));
+    }
+}
