@@ -11,6 +11,7 @@ pub(crate) mod block_refs;
 mod convert;
 mod masking;
 mod stream;
+mod v1;
 mod v1alpha;
 mod v1beta;
 
@@ -72,12 +73,18 @@ where
         let sync_v1beta = v1beta::spec::sync::sync_service_server::SyncServiceServer::new(
             v1beta::sync::SyncServiceImpl::new(domain.clone(), cancel.clone()),
         );
+        let sync_v1 = v1::spec::sync::sync_service_server::SyncServiceServer::new(
+            v1::sync::SyncServiceImpl::new(domain.clone(), cancel.clone()),
+        );
 
         let query_v1alpha = v1alpha::spec::query::query_service_server::QueryServiceServer::new(
             v1alpha::query::QueryServiceImpl::new(domain.clone()),
         );
         let query_v1beta = v1beta::spec::query::query_service_server::QueryServiceServer::new(
             v1beta::query::QueryServiceImpl::new(domain.clone()),
+        );
+        let query_v1 = v1::spec::query::query_service_server::QueryServiceServer::new(
+            v1::query::QueryServiceImpl::new(domain.clone()),
         );
 
         let watch_v1alpha = v1alpha::spec::watch::watch_service_server::WatchServiceServer::new(
@@ -86,12 +93,18 @@ where
         let watch_v1beta = v1beta::spec::watch::watch_service_server::WatchServiceServer::new(
             v1beta::watch::WatchServiceImpl::new(domain.clone(), cancel.clone()),
         );
+        let watch_v1 = v1::spec::watch::watch_service_server::WatchServiceServer::new(
+            v1::watch::WatchServiceImpl::new(domain.clone(), cancel.clone()),
+        );
 
         let submit_v1alpha = v1alpha::spec::submit::submit_service_server::SubmitServiceServer::new(
             v1alpha::submit::SubmitServiceImpl::new(domain.clone()),
         );
         let submit_v1beta = v1beta::spec::submit::submit_service_server::SubmitServiceServer::new(
             v1beta::submit::SubmitServiceImpl::new(domain.clone()),
+        );
+        let submit_v1 = v1::spec::submit::submit_service_server::SubmitServiceServer::new(
+            v1::submit::SubmitServiceImpl::new(domain.clone()),
         );
 
         let reflection = tonic_reflection::server::Builder::configure()
@@ -105,6 +118,11 @@ where
             .register_encoded_file_descriptor_set(v1beta::spec::query::FILE_DESCRIPTOR_SET)
             .register_encoded_file_descriptor_set(v1beta::spec::submit::FILE_DESCRIPTOR_SET)
             .register_encoded_file_descriptor_set(v1beta::spec::watch::FILE_DESCRIPTOR_SET)
+            .register_encoded_file_descriptor_set(v1::spec::cardano::FILE_DESCRIPTOR_SET)
+            .register_encoded_file_descriptor_set(v1::spec::sync::FILE_DESCRIPTOR_SET)
+            .register_encoded_file_descriptor_set(v1::spec::query::FILE_DESCRIPTOR_SET)
+            .register_encoded_file_descriptor_set(v1::spec::submit::FILE_DESCRIPTOR_SET)
+            .register_encoded_file_descriptor_set(v1::spec::watch::FILE_DESCRIPTOR_SET)
             .register_encoded_file_descriptor_set(protoc_wkt::google::protobuf::FILE_DESCRIPTOR_SET)
             .build_v1()
             .unwrap();
@@ -137,12 +155,16 @@ where
         server
             .add_service(tonic_web::enable(sync_v1alpha))
             .add_service(tonic_web::enable(sync_v1beta))
+            .add_service(tonic_web::enable(sync_v1))
             .add_service(tonic_web::enable(query_v1alpha))
             .add_service(tonic_web::enable(query_v1beta))
+            .add_service(tonic_web::enable(query_v1))
             .add_service(tonic_web::enable(submit_v1alpha))
             .add_service(tonic_web::enable(submit_v1beta))
+            .add_service(tonic_web::enable(submit_v1))
             .add_service(tonic_web::enable(watch_v1alpha))
             .add_service(tonic_web::enable(watch_v1beta))
+            .add_service(tonic_web::enable(watch_v1))
             .add_service(reflection)
             .serve_with_shutdown(addr, cancel.cancelled())
             .await
