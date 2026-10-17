@@ -1,8 +1,10 @@
 use std::{collections::VecDeque, sync::Arc};
 
+use pallas::ledger::traverse::MultiEraBlock;
+
 use crate::{
-    ArchiveStore as _, ChainPoint, Domain, DomainError, RawBlock, TipEvent, TipSubscription,
-    WalStore,
+    ArchiveError, ArchiveStore as _, ChainPoint, Domain, DomainError, RawBlock, TipEvent,
+    TipSubscription, WalStore,
 };
 
 pub enum Batch<D: Domain> {
@@ -41,13 +43,20 @@ impl<D: Domain> Batch<D> {
             // skip the last point, we already seen it
             .skip(1)
             .take(LOAD_BATCH_SIZE)
-            .map(|(slot, body)| (ChainPoint::Slot(slot), Arc::new(body)))
-            .collect::<VecDeque<_>>();
+            .map(|(_, body)| {
+                let block =
+                    MultiEraBlock::decode(&body).map_err(ArchiveError::BlockDecodingError)?;
+                let point = ChainPoint::Specific(block.slot(), block.hash());
+                Ok((point, Arc::new(body)))
+            })
+            .collect::<Result<VecDeque<_>, DomainError>>()?;
 
         // if the archive page is empty, this means we reached the end of the archive
         // store and we need to transition to the wal.
         if page.is_empty() {
-            let intersect = domain.wal().find_intersect(&[last_point.clone()])?;
+            let intersect = domain
+                .wal()
+                .find_intersect(std::slice::from_ref(&last_point))?;
 
             let Some((point, _)) = intersect else {
                 return Err(DomainError::ArchiveWalGap(last_point));
