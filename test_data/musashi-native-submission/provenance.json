@@ -50,9 +50,9 @@
       "sha256": "56dae0ae1d97b172225555804c621a1dc74ff58f5f4963b9118add52592acea6"
     },
     "registration-dijkstra-genesis.json": {
-      "source": "test_data/musashi-phase1/registration-dijkstra-genesis.json",
-      "revision": "dc2c81dcced2a316c8aacb8155b8b90fee428e08",
-      "sha256": "e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be"
+      "source": "crates/core/test_data/musashi/dijkstra-genesis.json, whose provenance.txt names its origin. Its 16 keys hold the values of the file this replaced",
+      "replaced_sha256": "e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be",
+      "sha256": "267696eeec946ff0952176e20be9d1c6a3f96f6e16d870898228acd4c56bc43d"
     },
     "registration-certificate-state.json": {
       "source": "test_data/musashi-phase1/registration-certificate-state.json",

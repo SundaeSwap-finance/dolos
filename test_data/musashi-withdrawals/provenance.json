@@ -150,8 +150,8 @@
       "domain": "file bytes"
     },
     "../musashi-native-submission/registration-dijkstra-genesis.json": {
-      "sha256": "e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be",
-      "bytes": 3028,
+      "sha256": "267696eeec946ff0952176e20be9d1c6a3f96f6e16d870898228acd4c56bc43d",
+      "bytes": 2364,
       "domain": "file bytes"
     },
     "../musashi-native-submission/registration-epoch64-parameters.json": {

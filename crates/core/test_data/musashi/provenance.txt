@@ -1,11 +1,15 @@
 dijkstra-genesis.json
 
-source        the Musashi Leios testnet node, /opt/musashi/config/dijkstra-genesis.json
-copied        2026-09-21, byte for byte, no edit
-file mtime    2026-09-18 01:01:17 UTC, 3028 bytes
-sha256        e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be
+source        the dijkstra-genesis.json a local network of image
+              ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:rc-2026w42
+              ran under, the demo/proto-devnet file of ouroboros-leios tag
+              rc-2026w42 (commit 49f7c4a2)
+copied        2026-10-20, byte for byte, no edit
+size          2364 bytes, 24 keys
+sha256        267696eeec946ff0952176e20be9d1c6a3f96f6e16d870898228acd4c56bc43d
 
-This is the file the chain is governed by, so a parameter read out of it is
-the value the node is running and not a value chosen for a test. Recopy it
-from the same path and compare the sha256 to tell whether the network has
-been respun under it.
+This is the file a chain was governed by, so a parameter read out of it is
+a value a node ran and not a value chosen for a test. It replaces a 16 key
+file (sha256 e3a0f8edd086e0c1fccc9fa04b58fa76b8f735ce1214f854072078f7c823e8be)
+whose 16 keys hold the same values here, and adds 8 keys: six Peras
+parameters and two reference input costs.

@@ -1,8 +1,8 @@
 //! Reading a Dijkstra genesis file.
 //!
-//! The file under test is the Musashi node's own, copied byte for byte, so a
-//! value asserted here is a value the chain is being governed by. Its
-//! provenance is beside it.
+//! The file under test is a node's own, copied byte for byte, so a value
+//! asserted here is a value a chain is governed by. Its provenance is beside
+//! it.
 
 use std::path::{Path, PathBuf};
 
@@ -54,6 +54,12 @@ fn every_parameter_of_the_node_genesis_is_read() {
     assert_eq!(file.max_ref_script_size_per_endorser_block, 4_000_000);
     assert_eq!(file.max_ref_script_size_per_tx, 204_800);
     assert_eq!(file.min_pool_margin, 0.015);
+    assert_eq!(file.peras_bootstrap_round, None);
+    assert_eq!(file.peras_cert_boost, 0);
+    assert_eq!(file.peras_healing_factor, 1.0);
+    assert_eq!(file.peras_min_candidate_block_age, 0);
+    assert_eq!(file.peras_quorum_threshold_safety_margin, 0.0);
+    assert_eq!(file.peras_target_committee_size, 0);
     assert_eq!(file.plutus_v4_cost_model.len(), 251);
     assert_eq!(file.plutus_v4_cost_model.first(), Some(&100_788));
     assert_eq!(
@@ -61,8 +67,53 @@ fn every_parameter_of_the_node_genesis_is_read() {
         Some(&-900),
         "a cost model entry is negative, so the entries are signed",
     );
+    assert_eq!(file.ref_inputs_cost_per_datum_byte, 0);
+    assert_eq!(file.ref_inputs_cost_per_multi_asset_policy, 0);
     assert_eq!(file.ref_script_cost_multiplier, 1.2);
     assert_eq!(file.ref_script_cost_stride, 25_600);
+}
+
+/// MUST FIRE: each Peras and reference input parameter reaches its own field,
+/// which the node's file cannot show because it sets most of them to zero.
+#[test]
+fn each_peras_and_reference_input_parameter_reaches_its_own_field() {
+    let original = std::fs::read_to_string(musashi_dijkstra_path()).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&original).unwrap();
+    for (key, value) in [
+        ("perasBootstrapRound", serde_json::json!(1)),
+        ("perasCertBoost", serde_json::json!(2)),
+        ("perasHealingFactor", serde_json::json!(3.5)),
+        ("perasMinCandidateBlockAge", serde_json::json!(4)),
+        ("perasQuorumThresholdSafetyMargin", serde_json::json!(5.5)),
+        ("perasTargetCommitteeSize", serde_json::json!(6)),
+        ("refInputsCostPerDatumByte", serde_json::json!(7)),
+        ("refInputsCostPerMultiAssetPolicy", serde_json::json!(8)),
+    ] {
+        assert!(
+            json.get(key).is_some(),
+            "the node's file does not declare {key}"
+        );
+        json[key] = value;
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("dijkstra-genesis.json");
+    std::fs::write(&path, json.to_string()).unwrap();
+    let file = dijkstra::from_file(&path).unwrap();
+
+    assert_eq!(
+        (
+            file.peras_bootstrap_round,
+            file.peras_cert_boost,
+            file.peras_healing_factor,
+            file.peras_min_candidate_block_age,
+            file.peras_quorum_threshold_safety_margin,
+            file.peras_target_committee_size,
+            file.ref_inputs_cost_per_datum_byte,
+            file.ref_inputs_cost_per_multi_asset_policy,
+        ),
+        (Some(1), 2, 3.5, 4, 5.5, 6, 7, 8)
+    );
 }
 
 /// MUST FIRE: a parameter the file names and this type does not model is
