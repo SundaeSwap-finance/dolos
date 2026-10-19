@@ -1,9 +1,11 @@
 //! What a crawl does when the archive runs out where the wal does not reach.
 
+use std::sync::Arc;
+
 use dolos_core::crawl::ChainCrawler;
 use dolos_core::{
-    ArchiveStore as _, ArchiveWriter as _, BlockSlot, ChainPoint, Domain as _, DomainError,
-    SyncExt as _, WalStore as _,
+    ArchiveError, ArchiveStore as _, ArchiveWriter as _, BlockSlot, ChainPoint, Domain as _,
+    DomainError, SyncExt as _, WalStore as _,
 };
 use dolos_testing::blocks::{make_conway_block, make_conway_block_with_prev};
 use dolos_testing::toy_domain::ToyDomain;
@@ -77,9 +79,6 @@ fn domain_with_a_block_only_in_the_archive() -> (ToyDomain, ChainPoint) {
     (domain, point)
 }
 
-/// The must-not case. The same crawl over blocks the wal does hold runs to the
-/// tip and reports the end as the end, so the arm below says the gap is what is
-/// being refused rather than any archive intersect.
 #[test]
 fn a_crawl_the_wal_reaches_back_to_runs_to_the_tip() {
     let domain = ToyDomain::new(None, None);
@@ -107,8 +106,6 @@ fn a_crawl_the_wal_reaches_back_to_runs_to_the_tip() {
     assert_eq!(seen, vec![2, 3, 4, 5]);
 }
 
-/// The must-fire case. The crawl intersects in the archive, drains it, and
-/// finds no wal entry to continue from.
 #[test]
 fn a_crawl_past_the_end_of_the_archive_names_the_gap() {
     let (domain, point) = domain_with_a_block_only_in_the_archive();
@@ -125,7 +122,6 @@ fn a_crawl_past_the_end_of_the_archive_names_the_gap() {
     );
 }
 
-/// The must-fire case for a wal that starts after the archive ends.
 #[test]
 fn a_crawl_past_an_archive_that_ends_before_the_wal_starts_names_the_gap() {
     let domain = domain_split_at(40, 70);
@@ -141,8 +137,6 @@ fn a_crawl_past_an_archive_that_ends_before_the_wal_starts_names_the_gap() {
     assert_eq!(slots, vec![30, 40]);
 }
 
-/// The must-fire case for a wal that holds a different block at the slot where
-/// the archive ends.
 #[test]
 fn a_crawl_names_the_gap_when_the_wal_holds_another_block_at_the_archive_end() {
     let domain = ToyDomain::new(None, None);
@@ -177,8 +171,6 @@ fn a_crawl_names_the_gap_when_the_wal_holds_another_block_at_the_archive_end() {
     assert_eq!(slots, vec![30, 40, 50, 60, 70]);
 }
 
-/// The must-not case. The crawl reads the archive to its end, finds its last
-/// block in the wal, and continues from the wal to the tip.
 #[test]
 fn a_crawl_from_the_archive_continues_into_the_wal_where_they_overlap() {
     let domain = domain_split_at(70, 50);
@@ -195,4 +187,34 @@ fn a_crawl_from_the_archive_continues_into_the_wal_where_they_overlap() {
         .collect();
 
     assert_eq!(seen, expected);
+}
+
+#[test]
+fn a_crawl_stops_on_an_archive_block_that_does_not_decode() {
+    let domain = ToyDomain::new(None, None);
+
+    let writer = domain.archive().start_writer().unwrap();
+    for slot in (10..=200).step_by(10) {
+        let (point, block) = make_conway_block(slot);
+        writer.apply(&point, &block).unwrap();
+    }
+    writer
+        .apply(&ChainPoint::Slot(155), &Arc::new(vec![0xff, 0x00, 0x13]))
+        .unwrap();
+    writer.commit().unwrap();
+
+    let (seen, end) = crawl_from(&domain, make_conway_block(10).0);
+
+    assert!(
+        matches!(
+            &end,
+            Err(DomainError::ArchiveError(ArchiveError::BlockDecodingError(
+                _
+            )))
+        ),
+        "{end:?}"
+    );
+
+    let slots: Vec<_> = seen.iter().map(ChainPoint::slot).collect();
+    assert_eq!(slots, vec![20, 30, 40, 50, 60, 70, 80, 90, 100, 110]);
 }
