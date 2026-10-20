@@ -96,14 +96,14 @@ fn block_fixtures() -> Vec<(Fixture, Vec<u8>)> {
     out
 }
 
-/// Only the Dijkstra parameters and the protocol version are this chain's own.
-/// The earlier era files are preview's.
+/// Only the protocol version is this chain's own. The Dijkstra parameters are
+/// the proto-devnet file's and the earlier era files are preview's.
 fn genesis() -> Arc<Genesis> {
     let dijkstra = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates")
         .join("core")
         .join("test_data")
-        .join("musashi")
+        .join("proto-devnet")
         .join("dijkstra-genesis.json");
 
     let mut genesis = dolos_cardano::include::preview::load();

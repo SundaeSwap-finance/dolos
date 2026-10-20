@@ -12,8 +12,10 @@ fn test_data() -> PathBuf {
     PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("test_data")
 }
 
-fn musashi_dijkstra_path() -> PathBuf {
-    test_data().join("musashi").join("dijkstra-genesis.json")
+fn proto_devnet_dijkstra_path() -> PathBuf {
+    test_data()
+        .join("proto-devnet")
+        .join("dijkstra-genesis.json")
 }
 
 fn preview_genesis_paths(root: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
@@ -35,7 +37,7 @@ fn preview_genesis_paths(root: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
 /// differs, so each one is named.
 #[test]
 fn every_parameter_of_the_node_genesis_is_read() {
-    let file = dijkstra::from_file(musashi_dijkstra_path()).unwrap();
+    let file = dijkstra::from_file(proto_devnet_dijkstra_path()).unwrap();
 
     assert_eq!(file.leios_announcement_period_length, 1000);
     assert_eq!(file.leios_committee_size, 900);
@@ -77,7 +79,7 @@ fn every_parameter_of_the_node_genesis_is_read() {
 /// which the node's file cannot show because it sets most of them to zero.
 #[test]
 fn each_peras_and_reference_input_parameter_reaches_its_own_field() {
-    let original = std::fs::read_to_string(musashi_dijkstra_path()).unwrap();
+    let original = std::fs::read_to_string(proto_devnet_dijkstra_path()).unwrap();
     let mut json: serde_json::Value = serde_json::from_str(&original).unwrap();
     for (key, value) in [
         ("perasBootstrapRound", serde_json::json!(1)),
@@ -124,10 +126,10 @@ fn each_peras_and_reference_input_parameter_reaches_its_own_field() {
 /// refusal is about the unknown parameter and not about the file.
 #[test]
 fn a_parameter_with_nowhere_to_go_stops_the_load() {
-    let original = std::fs::read_to_string(musashi_dijkstra_path()).unwrap();
+    let original = std::fs::read_to_string(proto_devnet_dijkstra_path()).unwrap();
 
     assert!(
-        dijkstra::from_file(musashi_dijkstra_path()).is_ok(),
+        dijkstra::from_file(proto_devnet_dijkstra_path()).is_ok(),
         "the file this case edits loads as it stands",
     );
 
@@ -153,10 +155,10 @@ fn a_parameter_with_nowhere_to_go_stops_the_load() {
 /// about the absence and not about the edit.
 #[test]
 fn a_parameter_the_file_omits_stops_the_load() {
-    let original = std::fs::read_to_string(musashi_dijkstra_path()).unwrap();
+    let original = std::fs::read_to_string(proto_devnet_dijkstra_path()).unwrap();
 
     assert!(
-        dijkstra::from_file(musashi_dijkstra_path()).is_ok(),
+        dijkstra::from_file(proto_devnet_dijkstra_path()).is_ok(),
         "the file this case edits loads as it stands",
     );
 
@@ -196,7 +198,7 @@ fn the_dijkstra_file_is_additive_to_the_genesis() {
 
     let with = Genesis::from_file_paths(&byron, &shelley, &alonzo, &conway, None)
         .unwrap()
-        .with_dijkstra(musashi_dijkstra_path())
+        .with_dijkstra(proto_devnet_dijkstra_path())
         .unwrap();
 
     let dijkstra = with.dijkstra.expect("the dijkstra file was not carried");

@@ -410,7 +410,7 @@ mod tests {
                 dir.join("..")
                     .join("core")
                     .join("test_data")
-                    .join("musashi")
+                    .join("proto-devnet")
                     .join("dijkstra-genesis.json"),
             )
             .unwrap();
@@ -432,9 +432,9 @@ mod tests {
         load_genesis(&path)
     }
 
-    /// The mainnet genesis with the Musashi node's own Dijkstra file attached.
+    /// The mainnet genesis with the proto-devnet Dijkstra file attached.
     ///
-    /// The Dijkstra file is the one the Musashi network is governed by, copied
+    /// The Dijkstra file is the one a proto-devnet network is governed by, copied
     /// byte for byte, so a cost model read out of it is the one the node runs
     /// and not one chosen for a test.
     fn genesis_with_dijkstra() -> dolos_core::Genesis {
@@ -442,7 +442,7 @@ mod tests {
             .join("..")
             .join("core")
             .join("test_data")
-            .join("musashi")
+            .join("proto-devnet")
             .join("dijkstra-genesis.json");
 
         mainnet_genesis().with_dijkstra(path).unwrap()

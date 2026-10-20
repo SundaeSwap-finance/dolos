@@ -41,7 +41,7 @@ pub(crate) fn sub_transaction_block() -> SubTransactionBlock {
             "crates",
             "core",
             "test_data",
-            "musashi",
+            "proto-devnet",
             "dijkstra-genesis.json",
         ]))
         .unwrap(),

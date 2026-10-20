@@ -1461,14 +1461,14 @@ mod tests {
         assert_ne!(anchor.content_hash.as_ref(), constitution.hash.as_ref());
     }
 
-    /// The Musashi node's own Dijkstra genesis, copied byte for byte, so a cost
-    /// model read out of it is the one the chain is governed by.
-    fn musashi_dijkstra() -> dolos_core::dijkstra::GenesisFile {
+    /// The proto-devnet Dijkstra genesis, copied byte for byte, so a cost model
+    /// read out of it is the one a chain is governed by.
+    fn proto_devnet_dijkstra() -> dolos_core::dijkstra::GenesisFile {
         let path = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
             .join("crates")
             .join("core")
             .join("test_data")
-            .join("musashi")
+            .join("proto-devnet")
             .join("dijkstra-genesis.json");
 
         dolos_core::dijkstra::from_file(path).unwrap()
@@ -1482,7 +1482,7 @@ mod tests {
     #[test]
     fn a_dijkstra_genesis_reports_its_plutus_v4_cost_model() {
         let mut genesis = dolos_cardano::include::preview::load();
-        genesis.dijkstra = Some(musashi_dijkstra());
+        genesis.dijkstra = Some(proto_devnet_dijkstra());
 
         let (models, map) = map_cost_models(&genesis);
 

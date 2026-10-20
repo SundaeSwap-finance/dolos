@@ -149,7 +149,7 @@
       "bytes": 3914,
       "domain": "file bytes"
     },
-    "../musashi-native-submission/registration-dijkstra-genesis.json": {
+    "../../crates/core/test_data/proto-devnet/dijkstra-genesis.json": {
       "sha256": "267696eeec946ff0952176e20be9d1c6a3f96f6e16d870898228acd4c56bc43d",
       "bytes": 2364,
       "domain": "file bytes"

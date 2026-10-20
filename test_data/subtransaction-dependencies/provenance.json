@@ -39,7 +39,7 @@
     "../musashi-native-submission/shelley-genesis.json": "da8508afc546a0b1824d93629a7a5fc8c0898d85095c2cf1b25730eb99d5a151",
     "../musashi-native-submission/alonzo-genesis.json": "23bf365cae730137ad6868787f20ef4f58e446d22617d7b824f1c75695c760b5",
     "../musashi-native-submission/conway-genesis.json": "51e9d92f09ea79e61811983b4b1e299926a61b352c3313aaebc7c287169ae2f0",
-    "../musashi-native-submission/registration-dijkstra-genesis.json": "267696eeec946ff0952176e20be9d1c6a3f96f6e16d870898228acd4c56bc43d",
+    "../../crates/core/test_data/proto-devnet/dijkstra-genesis.json":"267696eeec946ff0952176e20be9d1c6a3f96f6e16d870898228acd4c56bc43d",
     "../musashi-native-submission/registration-epoch64-parameters.json": "56dae0ae1d97b172225555804c621a1dc74ff58f5f4963b9118add52592acea6"
   },
   "baseline": {

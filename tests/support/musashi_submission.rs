@@ -28,7 +28,10 @@ pub fn fixture(settings: bool) -> (ToyDomain, Vec<u8>) {
         Some(12),
     )
     .unwrap()
-    .with_dijkstra(path("registration-dijkstra-genesis.json"))
+    .with_dijkstra(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("crates/core/test_data/proto-devnet/dijkstra-genesis.json"),
+    )
     .unwrap();
     let cbor = bytes(if settings {
         "settings-registration.mempool.hex"

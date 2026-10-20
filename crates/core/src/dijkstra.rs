@@ -46,7 +46,7 @@ pub struct GenesisFile {
     pub peras_min_candidate_block_age: u64,
     pub peras_quorum_threshold_safety_margin: f64,
     pub peras_target_committee_size: u64,
-    /// Entries are signed. The Musashi node's file holds negative ones.
+    /// Entries are signed. The proto-devnet file holds negative ones.
     pub plutus_v4_cost_model: Vec<i64>,
     pub ref_inputs_cost_per_datum_byte: u64,
     pub ref_inputs_cost_per_multi_asset_policy: u64,
