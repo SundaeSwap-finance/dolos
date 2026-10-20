@@ -1,0 +1,47 @@
+[[fixture]]
+name = "eb-body"
+kind = "endorser_block_body"
+files = ["eb-body.cbor"]
+chain_tag = "rc-2026w42"
+network_magic = 164
+endorser_block = "60dd69251684ae70378f3f2c2b1619f71f6dd49a36799b523f052582fb944d18"
+announced_slot = 427
+announced_size = 2888
+bytes = 2888
+sha256 = "f6bb7bdff16ad557c5e97d69c1930e62f73234ad876271bb5f9500622f93e0b2"
+source = "the endorser block body rebuilt from the references a node's Leios volatile store holds for it, a map of transaction hash to size in body order, on a private network of three rc-2026w42 nodes, its blake2b-256 and its size equal what block 20 announces"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:rc-2026w42 (cardano-node 11.2.0.164)"
+captured_at = "2026-10-20"
+
+[[fixture]]
+name = "eb-txs"
+kind = "endorser_block_transactions"
+files = ["eb-txs.cbor"]
+chain_tag = "rc-2026w42"
+network_magic = 164
+endorser_block = "60dd69251684ae70378f3f2c2b1619f71f6dd49a36799b523f052582fb944d18"
+transactions = 78
+invalid_transaction = 77
+invalid_transaction_id = "9035d7a679633106742b7c4b857883e9e37943a8862f9a629407a5f2e991046b"
+bytes = 324288
+sha256 = "50fd48be5976d0d688daa24ff204c6c79c5b572b054b36e67180fc6151c6b3f8"
+source = "the transactions of the endorser block above as the same store holds them, in body order, as one CBOR array, each hashing to its reference. The last spends an always failing PlutusV3 script output, was offered to the node over node to node tx submission and is stored with a false flag"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:rc-2026w42 (cardano-node 11.2.0.164)"
+captured_at = "2026-10-20"
+
+[[fixture]]
+name = "certifying-block"
+kind = "ranking_block_certifying_an_endorser_block"
+files = ["certifying-block.cbor"]
+chain_tag = "rc-2026w42"
+network_magic = 164
+block_no = 21
+slot = 491
+block_hash = "6cf3787a75fbf68f78991cc0887c29c081267059a2095ab9217959fab2cf8522"
+transactions = 0
+certifies = "60dd69251684ae70378f3f2c2b1619f71f6dd49a36799b523f052582fb944d18"
+bytes = 911
+sha256 = "4ce51339543ed821e692c1c37f19c48929706e025eab9073b74a6bb69c29b0ef"
+source = "the block as the node's volatile DB stored it, [8, block], its parent block 20 at slot 427 announcing the endorser block above"
+node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:rc-2026w42 (cardano-node 11.2.0.164)"
+captured_at = "2026-10-20"

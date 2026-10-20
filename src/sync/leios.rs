@@ -1452,6 +1452,158 @@ mod tests {
         }
     }
 
+    /// An rc-2026w42 endorser block whose last transaction the node stored with
+    /// a false flag, and the block that certifies it.
+    fn invalid_tx_eb() -> (Vec<u8>, Vec<Vec<u8>>, AnnouncedEndorserBlock, BlockBody) {
+        let body = include_bytes!("../../test_data/leios-rc-2026w42-invalid-tx/eb-body.cbor");
+        let array = include_bytes!("../../test_data/leios-rc-2026w42-invalid-tx/eb-txs.cbor");
+
+        let mut d = minicbor::Decoder::new(array);
+        let count = d.array().unwrap().unwrap();
+        let txs = (0..count)
+            .map(|_| {
+                let start = d.position();
+                d.skip().unwrap();
+                array[start..d.position()].to_vec()
+            })
+            .collect();
+
+        let announced = AnnouncedEndorserBlock {
+            slot: 427,
+            hash: "60dd69251684ae70378f3f2c2b1619f71f6dd49a36799b523f052582fb944d18"
+                .parse()
+                .unwrap(),
+            size: 2888,
+        };
+        let certifying =
+            include_bytes!("../../test_data/leios-rc-2026w42-invalid-tx/certifying-block.cbor");
+
+        (body.to_vec(), txs, announced, certifying.to_vec())
+    }
+
+    /// MUST FIRE: a transaction the node applied as invalid in a certified
+    /// endorser block is fetched, checked against its reference and applied as
+    /// invalid, so it spends only its collateral and produces only its
+    /// collateral return, at the index after its outputs.
+    ///
+    /// MUST NOT FIRE: each of the other 77 transactions of the block spends its
+    /// inputs and produces its outputs.
+    #[tokio::test]
+    async fn a_transaction_the_node_applied_as_invalid_is_applied_invalid() {
+        const INVALID: usize = 77;
+
+        let (body, eb_txs, announced, certifying) = invalid_tx_eb();
+        assert_eq!(eb_txs.len(), 78, "fixture precondition");
+        assert_eq!(eb_txs[INVALID].last(), Some(&0xf4), "fixture precondition");
+        assert_eq!(body.len(), announced.size as usize, "fixture precondition");
+
+        let point: EbId = Point::Specific(announced.slot, announced.hash.to_vec());
+        let relay = FakeRelay::new(point, body, eb_txs.clone(), usize::MAX);
+        let mut client = client(relay, 64);
+        let fetched = client.fetch(&announced).await.expect("must fetch whole");
+        assert_eq!(fetched, eb_txs, "the transactions come back in body order");
+
+        let slot = MultiEraBlock::decode(&certifying).unwrap().slot();
+        assert_eq!(slot, 491, "fixture precondition");
+        let mut pending = PendingPayloads::default();
+        pending.expect(slot);
+        pending.deliver(
+            slot,
+            CertifiedPayload {
+                endorser_block: announced,
+                txs: fetched,
+            },
+        );
+        let out = pending.apply(vec![certifying]).expect("must resolve");
+
+        let resolved = MultiEraBlock::decode(&out[0]).unwrap();
+        let txs = resolved.txs();
+        let invalid: Vec<usize> = txs
+            .iter()
+            .enumerate()
+            .filter(|(_, tx)| !tx.is_valid())
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(invalid, vec![INVALID]);
+
+        fn refs(inputs: Vec<MultiEraInput<'_>>) -> Vec<TxoRef> {
+            inputs
+                .iter()
+                .map(|input| TxoRef(*input.hash(), input.index() as u32))
+                .collect()
+        }
+        let failed = &txs[INVALID];
+        assert_eq!(
+            failed.hash().to_string(),
+            "9035d7a679633106742b7c4b857883e9e37943a8862f9a629407a5f2e991046b",
+            "fixture precondition"
+        );
+        let collateral = refs(failed.collateral());
+        let script_inputs = refs(failed.inputs());
+        assert_eq!(collateral.len(), 1, "fixture precondition");
+        assert!(
+            script_inputs.iter().all(|r| !collateral.contains(r)),
+            "fixture precondition"
+        );
+        let collateral_return = failed.collateral_return().expect("fixture precondition");
+        assert_eq!(
+            collateral_return.value().coin(),
+            18_000_000,
+            "fixture precondition"
+        );
+        assert!(
+            txs.iter().all(|tx| tx.sub_transactions().is_empty()),
+            "fixture precondition"
+        );
+
+        let sample = txs[0].outputs()[0].encode();
+        let loaded: HashMap<TxoRef, OwnedMultiEraOutput> = txs
+            .iter()
+            .flat_map(|tx| [refs(tx.inputs()), refs(tx.collateral())].concat())
+            .map(|key| {
+                let body = EraCbor(resolved.era().into(), sample.clone());
+                (key, OwnedMultiEraOutput::decode(Arc::new(body)).unwrap())
+            })
+            .collect();
+
+        let delta = compute_apply_delta(&resolved, &loaded).expect("must apply");
+
+        for (index, tx) in txs.iter().enumerate() {
+            let (spent, kept) = match index == INVALID {
+                true => (collateral.clone(), script_inputs.clone()),
+                false => (refs(tx.inputs()), vec![]),
+            };
+            assert!(
+                spent.iter().all(|r| delta.consumed_utxo.contains_key(r)),
+                "transaction {index} spends {spent:?}"
+            );
+            assert!(
+                kept.iter().all(|r| !delta.consumed_utxo.contains_key(r)),
+                "transaction {index} keeps {kept:?}"
+            );
+
+            let mut produced: Vec<u32> = delta
+                .produced_utxo
+                .keys()
+                .filter(|TxoRef(hash, _)| *hash == tx.hash())
+                .map(|TxoRef(_, at)| *at)
+                .collect();
+            produced.sort();
+            let expected: Vec<u32> = match index == INVALID {
+                true => vec![tx.outputs().len() as u32],
+                false => (0..tx.outputs().len() as u32).collect(),
+            };
+            assert_eq!(produced, expected, "transaction {index} produces");
+        }
+
+        let returned = &delta.produced_utxo[&TxoRef(failed.hash(), failed.outputs().len() as u32)];
+        assert_eq!(
+            returned.1,
+            collateral_return.encode(),
+            "the output produced is the collateral return"
+        );
+    }
+
     /// MUST FIRE: a block that carries transactions of its own is refused when
     /// a payload is delivered at its slot, since inlining would replace them.
     #[test]
