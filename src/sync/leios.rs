@@ -658,9 +658,14 @@ fn finish(wire: Vec<leiosfetch::TxCbor>) -> Result<Vec<Vec<u8>>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dolos_cardano::owned::OwnedMultiEraOutput;
+    use dolos_cardano::utxoset::compute_apply_delta;
+    use dolos_core::{EraCbor, TxoRef};
     use pallas::codec::minicbor::{self, bytes::ByteSlice};
     use pallas::crypto::hash::Hash;
+    use pallas::ledger::traverse::MultiEraInput;
     use pallas::network2::protocol::AnyCbor;
+    use std::collections::HashMap;
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -1288,15 +1293,25 @@ mod tests {
     }
 
     /// MUST FIRE: a transaction its endorser block commits to with a false flag
-    /// is fetched, checked against its reference and applied as invalid.
+    /// is fetched, checked against its reference and applied as invalid, so it
+    /// spends only its collateral, and neither it nor its sub transaction
+    /// spends any other input or produces an output.
+    ///
+    /// MUST NOT FIRE: every other transaction of the block, and each of their
+    /// sub transactions, spends its inputs and produces its outputs.
     #[tokio::test]
     async fn a_transaction_committed_with_a_false_flag_is_applied_invalid() {
+        // Index 5 spends an input besides its collateral, index 8 has a sub transaction.
+        const FLAGGED: [usize; 2] = [5, 8];
+
         let (body, txs, announced) = captured_eb();
         let mut eb_txs: Vec<Vec<u8>> = txs.into_iter().map(|tx| tx.0).collect();
 
-        let flag = eb_txs[5].last_mut().unwrap();
-        assert_eq!(*flag, 0xf5, "fixture precondition");
-        *flag = 0xf4;
+        for index in FLAGGED {
+            let flag = eb_txs[index].last_mut().unwrap();
+            assert_eq!(*flag, 0xf5, "fixture precondition");
+            *flag = 0xf4;
+        }
 
         let own = pallas::ledger::primitives::dijkstra::EbAnnouncement {
             eb_hash: announced.hash,
@@ -1306,9 +1321,9 @@ mod tests {
         let mut e = minicbor::Encoder::new(Vec::new());
         e.map(entries.len() as u64).unwrap();
         for (index, (hash, size)) in entries.iter().enumerate() {
-            let hash = match index {
-                5 => pallas::crypto::hash::Hasher::<256>::hash(&eb_txs[5]),
-                _ => *hash,
+            let hash = match FLAGGED.contains(&index) {
+                true => pallas::crypto::hash::Hasher::<256>::hash(&eb_txs[index]),
+                false => *hash,
             };
             e.bytes(hash.as_ref()).unwrap().u32(*size).unwrap();
         }
@@ -1344,7 +1359,97 @@ mod tests {
             .filter(|(_, tx)| !tx.is_valid())
             .map(|(index, _)| index)
             .collect();
-        assert_eq!(invalid, vec![5]);
+        assert_eq!(invalid, FLAGGED.to_vec());
+
+        fn refs(inputs: Vec<MultiEraInput<'_>>) -> Vec<TxoRef> {
+            inputs
+                .iter()
+                .map(|input| TxoRef(*input.hash(), input.index() as u32))
+                .collect()
+        }
+        let txs = resolved.txs();
+        let beyond = |tx: &MultiEraTx, inputs: Vec<TxoRef>| -> Vec<TxoRef> {
+            let collateral = refs(tx.collateral());
+            inputs
+                .into_iter()
+                .filter(|r| !collateral.contains(r))
+                .collect()
+        };
+        let [five, eight] = FLAGGED.map(|index| &txs[index]);
+        assert!(
+            !beyond(five, refs(five.inputs())).is_empty(),
+            "fixture precondition"
+        );
+        assert!(!five.outputs().is_empty(), "fixture precondition");
+        assert_eq!(eight.sub_transactions().len(), 1, "fixture precondition");
+        let sub = &eight.sub_transactions()[0];
+        assert!(
+            !beyond(eight, refs(sub.inputs())).is_empty(),
+            "fixture precondition"
+        );
+        assert!(!sub.outputs().is_empty(), "fixture precondition");
+
+        let sample = txs[0].outputs()[0].encode();
+        let loaded: HashMap<TxoRef, OwnedMultiEraOutput> = txs
+            .iter()
+            .flat_map(|tx| {
+                let mut keys = [refs(tx.inputs()), refs(tx.collateral())].concat();
+                for sub in tx.sub_transactions() {
+                    keys.extend(refs(sub.inputs()));
+                }
+                keys
+            })
+            .map(|key| {
+                let body = EraCbor(resolved.era().into(), sample.clone());
+                (key, OwnedMultiEraOutput::decode(Arc::new(body)).unwrap())
+            })
+            .collect();
+
+        let delta = compute_apply_delta(&resolved, &loaded).expect("must apply");
+
+        let produced = |hash: Hash<32>| {
+            delta
+                .produced_utxo
+                .keys()
+                .filter(|TxoRef(produced, _)| *produced == hash)
+                .count()
+        };
+        let spends = |label: String, spent: Vec<TxoRef>, kept: Vec<TxoRef>| {
+            assert!(
+                spent.iter().all(|r| delta.consumed_utxo.contains_key(r)),
+                "{label} spends {spent:?}"
+            );
+            assert!(
+                kept.iter().all(|r| !delta.consumed_utxo.contains_key(r)),
+                "{label} keeps {kept:?}"
+            );
+        };
+
+        for (index, tx) in txs.iter().enumerate() {
+            let flagged = FLAGGED.contains(&index);
+            let (spent, kept) = match flagged {
+                true => (refs(tx.collateral()), beyond(tx, refs(tx.inputs()))),
+                false => (refs(tx.inputs()), vec![]),
+            };
+            assert!(!spent.is_empty(), "fixture precondition");
+            spends(format!("transaction {index}"), spent, kept);
+
+            let outputs = match flagged {
+                true => tx.collateral_return().into_iter().count(),
+                false => tx.outputs().len(),
+            };
+            assert_eq!(produced(tx.hash()), outputs, "transaction {index} produces");
+
+            for sub in tx.sub_transactions() {
+                let label = format!("sub transaction of {index}");
+                let (spent, kept, outputs) = match flagged {
+                    true => (vec![], beyond(tx, refs(sub.inputs())), 0),
+                    false => (refs(sub.inputs()), vec![], sub.outputs().len()),
+                };
+                spends(label.clone(), spent, kept);
+                assert_eq!(produced(sub.hash()), outputs, "{label} produces");
+            }
+        }
     }
 
     /// MUST FIRE: a block that carries transactions of its own is refused when
