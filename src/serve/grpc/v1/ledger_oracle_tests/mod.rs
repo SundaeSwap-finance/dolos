@@ -6,17 +6,19 @@ mod serve;
 mod validate;
 
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fmt,
     sync::atomic::{AtomicBool, Ordering},
 };
 
 use dolos_cardano::{
+    indexes::{AsyncCardanoQueryExt as _, ScriptLanguage},
     model::{AccountState, DRepDelegation},
     FixedNamespace as _,
 };
-use dolos_core::{BlockHash, ChainPoint, Domain as _, StateStore as _, SyncExt as _, TxoRef};
+use dolos_core::{
+    AsyncQueryFacade, BlockHash, ChainPoint, Domain as _, StateStore as _, SyncExt as _, TxoRef,
+};
 use itertools::Itertools as _;
 use ledger_oracle_judge::{
     accounts::{self, Account, Credential, LedgerAccounts},
@@ -35,9 +37,10 @@ use pallas::{
         minicbor,
         utils::{KeepRaw, Nullable},
     },
+    crypto::hash::Hasher,
     ledger::{
         primitives::dijkstra,
-        traverse::{Era, MultiEraTx},
+        traverse::{ComputeHash as _, Era, MultiEraOutput, MultiEraTx},
     },
 };
 use seed::SeedPoint;
@@ -445,7 +448,7 @@ impl TxParts {
         })
     }
 
-    /// The parts of a transaction in the four element form a block carries.
+    /// The parts of a transaction in the four element form of a block.
     fn block(bytes: &[u8]) -> Result<Self, String> {
         let tx: dijkstra::BlockTransaction = minicbor::decode(bytes).map_err(|e| e.to_string())?;
         Ok(TxParts {
@@ -497,7 +500,7 @@ impl fmt::Display for TxName {
     }
 }
 
-/// Counts each transaction hash of a run against what ReadTx serves for it, the block and transaction of the accepted record that carries it or nothing when only refused records do.
+/// Counts each transaction hash of a run against what ReadTx serves for it, the block and transaction of the accepted record that names it or nothing when only refused records do.
 async fn compare_read_tx(
     domain: &DomainAdapter,
     kind: CorpusKind,
@@ -521,14 +524,11 @@ async fn compare_read_tx(
         let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
             .unwrap_or_else(|e| panic!("TX {id} {e}"));
         let mut names = vec![TxName::Top(*tx.hash())];
-        if let MultiEraTx::Dijkstra(x) = &tx {
-            let subs = x.transaction_body.sub_transactions.iter();
-            let subs = subs.flat_map(|subs| subs.iter());
-            names.extend(subs.map(|sub| {
-                let sub = MultiEraTx::DijkstraSub(Box::new(Cow::Owned(sub.clone())), x.success);
-                TxName::Sub(*sub.hash())
-            }));
-        }
+        names.extend(
+            tx.sub_transactions()
+                .iter()
+                .map(|sub| TxName::Sub(*sub.hash())),
+        );
         let ledger = match &record.outcome {
             LedgerOutcome::Accepted { .. } => Some(ExpectedTx {
                 slot: record.slot,
@@ -579,6 +579,122 @@ async fn compare_read_tx(
         };
         tally.add(agrees, || {
             format!("{id} {name} ledger={shown} dolos={dolos}")
+        });
+    }
+}
+
+/// Where a script appears, in the witnesses of a transaction or on an output.
+#[derive(Debug, Clone, Copy)]
+enum ScriptAt {
+    Witness(TxName),
+    Output(TxIn),
+}
+
+impl fmt::Display for ScriptAt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScriptAt::Witness(name) => write!(f, "witness,{name}"),
+            ScriptAt::Output(input) => write!(f, "output={}", show_input(input)),
+        }
+    }
+}
+
+/// The hash and language of each script in the witnesses of a transaction.
+fn witness_scripts(tx: &MultiEraTx<'_>) -> Vec<([u8; 28], ScriptLanguage)> {
+    let native = tx.multi_era_native_scripts();
+    let native = native.iter().map(|s| (*s.hash(), ScriptLanguage::Native));
+    let v1 = tx.plutus_v1_scripts().iter();
+    let v1 = v1.map(|s| (*s.compute_hash(), ScriptLanguage::PlutusV1));
+    let v2 = tx.plutus_v2_scripts().iter();
+    let v2 = v2.map(|s| (*s.compute_hash(), ScriptLanguage::PlutusV2));
+    let v3 = tx.plutus_v3_scripts().iter();
+    let v3 = v3.map(|s| (*s.compute_hash(), ScriptLanguage::PlutusV3));
+    let v4 = tx.plutus_v4_scripts().iter();
+    let v4 = v4.map(|s| (*s.compute_hash(), ScriptLanguage::PlutusV4));
+    native.chain(v1).chain(v2).chain(v3).chain(v4).collect()
+}
+
+/// The hash and language of the reference script of an output.
+fn output_script(output: &MultiEraOutput<'_>) -> Option<([u8; 28], ScriptLanguage)> {
+    let script = output.multi_era_script_ref()?;
+    Some((*script.hash(), script.language()))
+}
+
+/// Counts each script hash of a run against what the script lookup serves for it, the language from the witnesses or produced outputs of an accepted record, or nothing otherwise.
+async fn compare_scripts(
+    domain: &DomainAdapter,
+    kind: CorpusKind,
+    run: &KeptRun,
+    tally: &mut Tally,
+) {
+    let mut expected: BTreeMap<[u8; 28], (RecordId, Option<(ScriptLanguage, ScriptAt)>)> =
+        BTreeMap::new();
+    for record in run.records() {
+        let id = RecordId {
+            corpus: kind,
+            n: record.n,
+        };
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
+            .unwrap_or_else(|e| panic!("TX {id} {e}"));
+        let subs = tx.sub_transactions();
+        let txs = std::iter::once((TxName::Top(*tx.hash()), &tx));
+        let txs = txs.chain(subs.iter().map(|sub| (TxName::Sub(*sub.hash()), sub)));
+        let mut carried = Vec::new();
+        let mut written = Vec::new();
+        for (name, tx) in txs {
+            let witnessed = witness_scripts(tx).into_iter();
+            carried.extend(witnessed.map(|(h, l)| (h, l, ScriptAt::Witness(name))));
+            written.extend(tx.outputs().iter().filter_map(output_script));
+        }
+        for (hash, _) in &written {
+            expected.entry(*hash).or_insert((id, None));
+        }
+        let LedgerOutcome::Accepted { post_utxo, .. } = &record.outcome else {
+            for (hash, _, _) in carried {
+                expected.entry(hash).or_insert((id, None));
+            }
+            continue;
+        };
+        let pre: BTreeSet<&TxIn> = record.pre_utxo.iter().map(|e| &e.input).collect();
+        for entry in post_utxo.iter().filter(|e| !pre.contains(&e.input)) {
+            let output = MultiEraOutput::decode(Era::Dijkstra, &entry.output.0)
+                .unwrap_or_else(|e| panic!("OUTPUT {id} {e}"));
+            if let Some((hash, language)) = output_script(&output) {
+                carried.push((hash, language, ScriptAt::Output(entry.input)));
+            }
+        }
+        for (hash, language, at) in carried {
+            let entry = expected.entry(hash).or_insert((id, None));
+            if entry.1.is_none() {
+                *entry = (id, Some((language, at)));
+            }
+        }
+    }
+    let query = AsyncQueryFacade::new(domain.clone());
+    for (hash, (id, ledger)) in expected {
+        let shown = match &ledger {
+            Some((language, at)) => format!("{language:?},{at}"),
+            None => "none".to_string(),
+        };
+        let (agrees, dolos) = match (&ledger, query.script_by_hash(&hash.into()).await) {
+            (_, Err(e)) => (false, format!("error={e:?}")),
+            (None, Ok(None)) => (true, "none".to_string()),
+            (Some(_), Ok(None)) => (false, "none".to_string()),
+            (None, Ok(Some(served))) => (false, format!("{:?}", served.language)),
+            (Some((language, _)), Ok(Some(served))) => {
+                let rehashed = *Hasher::<224>::hash_tagged(&served.script, served.language.tag());
+                let dolos = match rehashed == hash {
+                    true => format!("{:?}", served.language),
+                    false => format!("{:?},hash={}", served.language, hex::encode(rehashed)),
+                };
+                (served.language == *language && rehashed == hash, dolos)
+            }
+        };
+        tally.add(agrees, || {
+            format!(
+                "{id} script={} ledger={shown} dolos={dolos}",
+                hex::encode(hash)
+            )
         });
     }
 }
@@ -844,6 +960,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             &mut judged.state.readtx,
         )
         .await;
+        compare_scripts(&seeded.domain, corpus.kind, run, &mut judged.state.script).await;
         let services = serve_rolled(&seeded.domain, &seeded.seed, &rolled).await;
         compare_as_output(
             corpus.kind,
@@ -1291,6 +1408,48 @@ async fn an_accepted_tx_left_out_of_its_block_is_not_found_by_read_tx() {
         .collect();
     assert_eq!(lines.len(), 1, "{planted}");
     assert!(lines[0].ends_with(" dolos=none"), "{planted}");
+}
+
+/// The hash of the first reference script on an output of a sub transaction of the record.
+fn sub_output_script(record: &Record) -> Option<[u8; 28]> {
+    let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0).ok()?;
+    for sub in tx.sub_transactions() {
+        for output in sub.outputs() {
+            if let Some(script) = output.multi_era_script_ref() {
+                return Some(*script.hash());
+            }
+        }
+    }
+    None
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn a_reference_script_on_a_sub_transaction_output_prints_script_disagree() {
+    let corpus = load(CorpusKind::Supp);
+    let judged = judge(&corpus, &Manifests::committed(), &Edits::default()).await;
+    let script = &judged.state.script;
+    println!(
+        "SCRIPT compared={} disagree={}",
+        script.compared,
+        script.disagree.len()
+    );
+    assert!(script.compared > script.disagree.len(), "{judged}");
+    let (id, hash) = corpus
+        .kept()
+        .flat_map(KeptRun::records)
+        .filter(|r| matches!(r.outcome, LedgerOutcome::Accepted { .. }))
+        .find_map(|r| sub_output_script(r).map(|hash| (supp(r.n), hash)))
+        .expect("a sub transaction output carries a reference script");
+    let prefix = format!("{id} script={} ", hex::encode(hash));
+    let lines: Vec<&String> = script
+        .disagree
+        .iter()
+        .filter(|d| d.starts_with(&prefix))
+        .collect();
+    assert_eq!(lines.len(), 1, "{judged}");
+    assert!(lines[0].contains(" ledger=Native,output="), "{judged}");
+    assert!(lines[0].ends_with(" dolos=none"), "{judged}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
