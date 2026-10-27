@@ -11,6 +11,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 IMAGE="$HERE/in-image.sh"
 SCRATCH=scratch/dolos
 PALLAS=scratch/pallas
+# The pallas commit the rob arm reverts f3419a3a on, one where no later change touches the lines of that merge.
+ROB_BASE=${ROB_BASE:-362f5e0e2610686382752b1392fde02c84eb3b50}
 TEST=serve::grpc::v1::ledger_oracle_tests::ledger_oracle
 OUT=${OUT:-"$ROOT/runs/$(date -u +%Y%m%dT%H%M%SZ)"}
 mkdir -p "$OUT"
@@ -43,9 +45,15 @@ plant_coin() {
 
 plant_rob() {
   rm -rf "${ROOT:?}/$PALLAS"
-  cp -a "$ROOT"/cargo-home/git/checkouts/pallas-*/"$pin_short" "$ROOT/$PALLAS"
+  for db in "$ROOT"/cargo-home/git/db/pallas-*; do
+    if git -C "$db" cat-file -e "$ROB_BASE^{commit}" 2>/dev/null; then
+      git clone -q --no-checkout "$db" "$ROOT/$PALLAS"
+      break
+    fi
+  done
+  git -C "$ROOT/$PALLAS" checkout -q --detach "$ROB_BASE"
   git -C "$ROOT/$PALLAS" revert -m 1 --no-commit f3419a3a
-  sed -E -i 's#^(pallas[a-z-]*) = \{ git = "https://github.com/SundaeSwap-finance/pallas", rev = "[0-9a-f]+"#\1 = { path = "/w/'"$PALLAS"'/\1"#' \
+  sed -E -i 's#^(pallas[a-z-]*) = \{ git = "https://github.com/[^/]+/pallas", rev = "[0-9a-f]+"#\1 = { path = "/w/'"$PALLAS"'/\1"#' \
     "$ROOT/$SCRATCH/Cargo.toml"
 }
 
@@ -86,7 +94,7 @@ for arm in $ARMS; do
   esac
   source=$(pallas_source)
   if [ "$arm" = rob-reverted ]; then
-    pallas_rev="$pin_short-reverted-f3419a3a"
+    pallas_rev="$(echo "$ROB_BASE" | cut -c1-7)-reverted-f3419a3a"
     if [ "$source" != "/w/$PALLAS/pallas-validate" ]; then
       echo "ARM $arm REFUSED pallas_source=$source"
       verdicts="$verdicts $arm=MISSED"
