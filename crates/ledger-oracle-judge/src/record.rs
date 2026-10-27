@@ -3,6 +3,7 @@ use std::fmt;
 use serde::{de::Error as _, Deserialize, Deserializer};
 
 use crate::{
+    accounts::LedgerAccounts,
     cbor::{self, TxIn},
     refusal::RefusalClass,
 };
@@ -153,7 +154,7 @@ impl From<(TxIn, Bytes)> for UtxoEntry {
 pub enum LedgerOutcome {
     Accepted {
         post_utxo: Vec<UtxoEntry>,
-        accounts_post: serde_json::Value,
+        accounts_post: LedgerAccounts,
     },
     Refused {
         failures: String,
@@ -182,7 +183,7 @@ pub struct Record {
     pub tx: Bytes,
     pub pparams: PParams,
     pub pre_utxo: Vec<UtxoEntry>,
-    pub accounts_pre: serde_json::Value,
+    pub accounts_pre: LedgerAccounts,
     pub outcome: LedgerOutcome,
     #[serde(default)]
     pub globals: Option<Globals>,

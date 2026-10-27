@@ -1,5 +1,6 @@
 //! Ledger corpus records and the judgement of a node's answers against them.
 
+pub mod accounts;
 pub mod cbor;
 pub mod compare;
 pub mod corpus;

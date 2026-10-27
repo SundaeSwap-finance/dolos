@@ -325,7 +325,7 @@ mod tests {
     fn accepted() -> LedgerOutcome {
         LedgerOutcome::Accepted {
             post_utxo: vec![],
-            accounts_post: serde_json::Value::Null,
+            accounts_post: Default::default(),
         }
     }
 

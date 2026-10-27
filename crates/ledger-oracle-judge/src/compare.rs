@@ -78,6 +78,7 @@ pub struct StateTallies {
     pub as_output: Tally,
     pub in_run: usize,
     pub seeded_unjudged: usize,
+    pub accounts: Tally,
     pub undo: Tally,
     pub params: Tally,
     pub known: Vec<String>,
@@ -85,10 +86,11 @@ pub struct StateTallies {
 }
 
 impl StateTallies {
-    fn named(&self) -> [(&'static str, &Tally); 4] {
+    fn named(&self) -> [(&'static str, &Tally); 5] {
         [
             ("utxo", &self.utxo),
             ("as_output", &self.as_output),
+            ("accounts", &self.accounts),
             ("undo", &self.undo),
             ("params", &self.params),
         ]
@@ -146,6 +148,7 @@ impl fmt::Display for StateTallies {
             as_output,
             in_run,
             seeded_unjudged,
+            accounts,
             undo,
             params,
             known,
@@ -154,8 +157,8 @@ impl fmt::Display for StateTallies {
         write!(
             f,
             "STATE compared utxo={} as_output={} of in_run={in_run} \
-             seeded_unjudged={seeded_unjudged} undo={} params={}",
-            utxo.compared, as_output.compared, undo.compared, params.compared
+             seeded_unjudged={seeded_unjudged} accounts={} undo={} params={}",
+            utxo.compared, as_output.compared, accounts.compared, undo.compared, params.compared
         )?;
         for line in known {
             write!(f, "\nKNOWN {line}")?;
@@ -212,6 +215,7 @@ mod tests {
     fn compared() -> StateTallies {
         let mut state = StateTallies::default();
         state.utxo.add(true, String::new);
+        state.accounts.add(true, String::new);
         state.undo.add(true, String::new);
         state.params.add(true, String::new);
         state
@@ -222,9 +226,10 @@ mod tests {
         let mut state = compared();
         state.as_output.add(true, String::new);
         assert!(state.pass(), "{state}");
-        let empties: [fn(&mut StateTallies) -> &mut Tally; 4] = [
+        let empties: [fn(&mut StateTallies) -> &mut Tally; 5] = [
             |s| &mut s.utxo,
             |s| &mut s.as_output,
+            |s| &mut s.accounts,
             |s| &mut s.undo,
             |s| &mut s.params,
         ];
@@ -235,7 +240,7 @@ mod tests {
         }
         assert!(state
             .to_string()
-            .contains(" seeded_unjudged=0 undo=1 params=1"));
+            .contains(" seeded_unjudged=0 accounts=1 undo=1 params=1"));
     }
 
     #[test]

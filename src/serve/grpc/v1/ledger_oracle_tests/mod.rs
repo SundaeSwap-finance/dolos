@@ -11,9 +11,14 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use dolos_core::{BlockHash, ChainPoint, SyncExt as _, TxoRef};
+use dolos_cardano::{
+    model::{AccountState, DRepDelegation},
+    FixedNamespace as _,
+};
+use dolos_core::{BlockHash, ChainPoint, Domain as _, StateStore as _, SyncExt as _, TxoRef};
 use itertools::Itertools as _;
 use ledger_oracle_judge::{
+    accounts::{self, Account, Credential, LedgerAccounts},
     cbor::{tx_inputs, TxIn},
     compare::{ByteVerdict, StateTallies, Tally},
     corpus::{self, Corpus},
@@ -284,14 +289,17 @@ async fn validate_run<'r>(
             judged.insert(id);
         }
         let accepted = records.iter().filter_map(|r| match &r.outcome {
-            LedgerOutcome::Accepted { post_utxo, .. } => Some((r, post_utxo)),
+            LedgerOutcome::Accepted {
+                post_utxo,
+                accounts_post,
+            } => Some((r, post_utxo, accounts_post)),
             LedgerOutcome::Refused { .. } => None,
         });
-        let Some((last, post)) = accepted.clone().next_back() else {
+        let Some((last, post, accounts_post)) = accepted.clone().next_back() else {
             continue;
         };
         let included: Vec<(&Record, Phase2)> = accepted
-            .filter_map(|(r, _)| Some((r, (edits.block_tx)(id_of(r), r.phase2_valid)?)))
+            .filter_map(|(r, ..)| Some((r, (edits.block_tx)(id_of(r), r.phase2_valid)?)))
             .collect();
         let txs: Vec<_> = included
             .iter()
@@ -312,8 +320,34 @@ async fn validate_run<'r>(
         });
         let inputs = records.iter().flat_map(|r| &r.pre_utxo).map(|e| &e.input);
         compare_utxos(group.domain(), id_of(last), inputs, post, &mut state.utxo).await;
+        let served = dolos_accounts(group.domain());
+        accounts::compare(id_of(last), accounts_post, &served, &mut state.accounts);
     }
     rolled
+}
+
+/// The registered accounts Dolos holds, in the fields the ledger also holds.
+fn dolos_accounts(domain: &DomainAdapter) -> BTreeMap<Credential, Account> {
+    let entities = domain
+        .state()
+        .iter_entities_typed::<AccountState>(AccountState::NS, None)
+        .unwrap();
+    entities
+        .map(|entity| entity.unwrap().1)
+        .filter(AccountState::is_registered)
+        .map(|account| {
+            let drep = match account.drep.live() {
+                Some(DRepDelegation::Delegated(drep)) => Some(seed::drep(drep)),
+                Some(DRepDelegation::NotDelegated) | None => None,
+            };
+            let served = Account {
+                balance: account.stake.live().map_or(0, |s| s.withdrawable()),
+                pool: account.delegated_pool_live().map(|pool| **pool),
+                drep,
+            };
+            (seed::credential(&account.credential), served)
+        })
+        .collect()
 }
 
 /// The output bytes each service serves for the blocks a run rolled, streamed from the seed point.
@@ -449,7 +483,7 @@ fn compare_as_output(
     }
 }
 
-/// Rolls a run back one block at a time to its seed point, counting what FollowTip and WatchTx serve for each undone input, what ReadUtxos serves for the inputs earlier blocks made, and the seed outputs it serves at the end.
+/// Rolls a run back one block at a time to its seed point, counting what FollowTip and WatchTx serve for each undone input, what ReadUtxos serves for the inputs earlier blocks made, and the seed outputs and accounts Dolos holds at the end.
 async fn sweep(
     domain: &DomainAdapter,
     seed: &SeedPoint,
@@ -501,11 +535,13 @@ async fn sweep(
         }
     }
     compare_utxos(domain, id, [], &first.pre_utxo, tally).await;
+    accounts::compare(id, &first.accounts_pre, &dolos_accounts(domain), tally);
 }
 
 /// What a planted check changes in the seed, the expected parameters and the blocks of one judgement.
 struct Edits<'a> {
     pre: Box<dyn Fn(RecordId, &[UtxoEntry]) -> Vec<UtxoEntry> + 'a>,
+    accounts_pre: Box<dyn Fn(&LedgerAccounts) -> LedgerAccounts + 'a>,
     expected_params: Box<dyn Fn(&PParams) -> PParams + 'a>,
     block_tx: Box<dyn Fn(RecordId, Phase2) -> Option<Phase2> + 'a>,
 }
@@ -514,6 +550,7 @@ impl Default for Edits<'_> {
     fn default() -> Self {
         Edits {
             pre: Box::new(|_, pre| pre.to_vec()),
+            accounts_pre: Box::new(LedgerAccounts::clone),
             expected_params: Box::new(PParams::clone),
             block_tx: Box::new(|_, phase2| Some(phase2)),
         }
@@ -536,7 +573,13 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             .epoch()
             .unwrap_or_else(|| panic!("RUN {id} has no epoch"));
         let pparams = params::seed_values(run.pparams()).unwrap_or_else(|e| panic!("{e}"));
-        let seeded = seed::seed(&genesis, epoch, &pparams, &(edits.pre)(id, &first.pre_utxo));
+        let seeded = seed::seed(
+            &genesis,
+            epoch,
+            &pparams,
+            &(edits.pre)(id, &first.pre_utxo),
+            &(edits.accounts_pre)(&first.accounts_pre),
+        );
         compare_utxos(
             &seeded.domain,
             id,
@@ -545,6 +588,8 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             &mut judged.state.utxo,
         )
         .await;
+        let served = dolos_accounts(&seeded.domain);
+        accounts::compare(id, &first.accounts_pre, &served, &mut judged.state.accounts);
         let served = read_params(&seeded.domain).await;
         let expected = (edits.expected_params)(run.pparams());
         params::compare(id, &expected, &served, &mut judged.state.params);
@@ -912,6 +957,7 @@ async fn a_tx_received_in_one_group_is_absent_from_the_next() {
             run.epoch().unwrap(),
             &pparams,
             &run.records()[0].pre_utxo,
+            &run.records()[0].accounts_pre,
         );
         let one = validate::group(&seeded.domain, first[0].slot);
         let Some(hash) = first
@@ -975,6 +1021,58 @@ async fn rolling_back_each_block_serves_the_inputs_earlier_blocks_made() {
     assert!(other.is_empty(), "{text}\nUNDO\n{other}");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn a_seeded_reward_changed_by_one_prints_accounts_disagree() {
+    let corpus = load(CorpusKind::Ic);
+    let manifests = Manifests::committed();
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    assert!(intact.state.accounts.compared > 0, "{intact}");
+    let before: BTreeSet<&String> = intact.state.accounts.disagree.iter().collect();
+    let bumped = std::sync::Mutex::new(None);
+    let edits = Edits {
+        accounts_pre: Box::new(|accounts| {
+            let mut accounts = accounts.clone();
+            let mut bumped = bumped.lock().unwrap();
+            if bumped.is_none() {
+                if let Some((credential, account)) = accounts.iter_mut().next() {
+                    account.balance += 1;
+                    *bumped = Some((*credential, account.balance));
+                }
+            }
+            accounts
+        }),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
+    drop(edits);
+    let (credential, balance) = bumped
+        .into_inner()
+        .unwrap()
+        .expect("a kept run seeds an account");
+    let text = planted.to_string();
+    let lines: Vec<&String> = planted
+        .state
+        .accounts
+        .disagree
+        .iter()
+        .filter(|d| !before.contains(d))
+        .collect();
+    println!(
+        "PLANTED accounts disagree={} new={}",
+        planted.state.accounts.disagree.len(),
+        lines.len()
+    );
+    let seeded = format!(" account={credential} ledger=balance={},", balance - 1);
+    assert!(lines.first().is_some_and(|d| d.contains(&seeded)), "{text}");
+    assert!(
+        lines[0].contains(&format!(" dolos=balance={balance},")),
+        "{text}"
+    );
+    let named = format!(" account={credential} ");
+    assert!(lines.iter().all(|d| d.contains(&named)), "{text}");
+}
+
 #[test]
 fn a_dolos_refusal_is_named_by_its_kind() {
     let refused: Result<dolos_core::TxHash, _> = Err(dolos_core::DomainError::ChainError(
@@ -997,7 +1095,13 @@ async fn a_seed_output_compared_as_bytes_names_the_first_differing_byte() {
     let run = corpus.kept().next().unwrap();
     let first = &run.records()[0];
     let genesis = seed::genesis(epoch_size(&corpus));
-    let seeded = seed::seed(&genesis, run.epoch().unwrap(), &[], &first.pre_utxo);
+    let seeded = seed::seed(
+        &genesis,
+        run.epoch().unwrap(),
+        &[],
+        &first.pre_utxo,
+        &first.accounts_pre,
+    );
     let id = RecordId {
         corpus: corpus.kind,
         n: first.n,
@@ -1028,6 +1132,7 @@ async fn the_seed_point_is_a_rollback_target() {
         run.epoch().unwrap(),
         &[],
         &run.records()[0].pre_utxo,
+        &run.records()[0].accounts_pre,
     );
     let rolled = seeded.domain.rollback(seeded.seed.point());
     assert!(rolled.is_ok(), "{rolled:?}");
