@@ -32,7 +32,7 @@ use ledger_oracle_judge::{
     run::{origin, InputOrigin, KeptRun},
     verdict::{
         declares, outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, Pass,
-        ValidationTally,
+        SeedingMaker, ValidationTally,
     },
 };
 use pallas::{
@@ -265,7 +265,7 @@ fn missing_from_makers<'r>(
     inputs: &BTreeSet<TxIn>,
     makers: &BTreeMap<TxIn, RecordId>,
     records: &[Record],
-    seeding: &BTreeSet<RecordId>,
+    seeding: &BTreeSet<SeedingMaker>,
 ) -> (Vec<&'r UtxoEntry>, BTreeSet<RecordId>) {
     let mut entries = Vec::new();
     let mut made_by = BTreeSet::new();
@@ -340,8 +340,8 @@ async fn validate_run<'r>(
                 let entry = (Locus::Validation, id);
                 candidates.known.records.insert(entry, *row);
             }
-            if seeds_dependents(&dolos, &judgement) {
-                seeding.insert(id);
+            if let Some(maker) = seeds_dependents(id, &dolos, &judgement) {
+                seeding.insert(maker);
             }
             tally.add(id, judgement);
             judged.insert(id);

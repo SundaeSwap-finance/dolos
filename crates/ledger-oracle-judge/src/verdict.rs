@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
     fmt,
 };
@@ -190,13 +191,29 @@ pub fn with_known(outcome: Outcome, row: Option<&Row>) -> Outcome {
     }
 }
 
-/// Whether the outputs a record made are seeded for the records that spend them, which holds when Dolos did not take the record and its outcome passes.
-pub fn seeds_dependents(dolos: &DolosVerdict, outcome: &Outcome) -> bool {
+/// A record whose outputs are seeded for the records that spend them, made only by `seeds_dependents`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SeedingMaker(RecordId);
+
+impl Borrow<RecordId> for SeedingMaker {
+    fn borrow(&self) -> &RecordId {
+        &self.0
+    }
+}
+
+/// The record as a seeding maker when Dolos did not take it and its outcome passes.
+pub fn seeds_dependents(
+    id: RecordId,
+    dolos: &DolosVerdict,
+    outcome: &Outcome,
+) -> Option<SeedingMaker> {
     use DolosVerdict as D;
     match (dolos, outcome) {
-        (D::Accepted, Outcome::Pass(_) | Outcome::Fail(_)) => false,
-        (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Fail(_)) => false,
-        (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Pass(_)) => true,
+        (D::Accepted, Outcome::Pass(_) | Outcome::Fail(_)) => None,
+        (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Fail(_)) => None,
+        (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Pass(_)) => {
+            Some(SeedingMaker(id))
+        }
     }
 }
 
@@ -553,9 +570,15 @@ mod tests {
         );
         let unexpected = outcome(&accepted(), Phase2::Valid, &unsupported, None);
         let held = Outcome::Pass(Pass::Agree);
-        assert!(seeds_dependents(&unsupported, &expected));
-        assert!(!seeds_dependents(&unsupported, &unexpected));
-        assert!(!seeds_dependents(&DolosVerdict::Accepted, &held));
+        assert_eq!(
+            seeds_dependents(supp(3), &unsupported, &expected),
+            Some(SeedingMaker(supp(3)))
+        );
+        assert_eq!(seeds_dependents(supp(3), &unsupported, &unexpected), None);
+        assert_eq!(
+            seeds_dependents(supp(3), &DolosVerdict::Accepted, &held),
+            None
+        );
     }
 
     #[test]
