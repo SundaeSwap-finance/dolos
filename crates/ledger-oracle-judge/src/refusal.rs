@@ -129,7 +129,7 @@ impl fmt::Display for RefusalClass {
     }
 }
 
-/// The class of a node refusal by its error variant, unknown for a variant the node's error type gained after this table.
+/// The class of a node refusal by its error variant, unknown for a variant the class table does not name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DolosClass {
     Rule(RefusalClass),

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Judges the head of the oracle branch and three planted breaks of it, one oracle run each.
+# Judges the oracle branch head and each named arm, one oracle run each.
 # Usage: [REV=ref] [ARMS="head colret coin rodrigo-reverted rob-reverted"] breaks.sh
-# The branch is read from the bare repository $ROOT/dolos.git, fed from a git bundle.
+# The branch is read from the bare repository $ROOT/dolos.git.
 set -eu
 ROOT=${ROOT:-/opt/build/ledger-oracle-1027}
 REV=${REV:-feat/ledger-oracle}

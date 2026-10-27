@@ -5,7 +5,7 @@ use crate::{
     record::{CorpusKind, RecordId},
 };
 
-/// How the ledger's bytes for one item stand against the node's.
+/// The result of comparing the ledger's bytes for one item with the node's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ByteVerdict {
     Equal,

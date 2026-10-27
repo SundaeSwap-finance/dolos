@@ -36,7 +36,7 @@ pub struct Aligned<T> {
 }
 
 impl<T> Aligned<T> {
-    /// Pairs the reads with the epoch both node tips and the served slot fall in, none otherwise.
+    /// Pairs the reads with the epoch that contains both node tips and the served slot, none otherwise.
     pub fn new(before: &NodeTip, after: &NodeTip, served_slot: u64, value: T) -> Option<Self> {
         let slots = before.epoch_slots()?;
         let aligned = before.epoch == after.epoch && slots.contains(&served_slot);
@@ -46,7 +46,7 @@ impl<T> Aligned<T> {
         })
     }
 
-    /// The epoch the reads fall in.
+    /// The epoch that contains the reads.
     pub fn epoch(&self) -> u64 {
         self.epoch
     }
@@ -57,7 +57,7 @@ impl<T> Aligned<T> {
     }
 }
 
-/// How the name of the last era Dolos serves stands against the node's era.
+/// The result of comparing the last era name Dolos serves with the node's era.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EraName {
     Agree(String),
@@ -97,7 +97,7 @@ pub fn era_name(served: &[String], node: &str) -> EraName {
     }
 }
 
-/// The lines and verdict of the live comparisons, settled against the known list.
+/// The lines and verdict of the live comparisons, judged against the known list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settled {
     pub lines: Vec<String>,
@@ -105,7 +105,7 @@ pub struct Settled {
     pub pass: bool,
 }
 
-/// Settles each live locus's tally, failing one that compared nothing, disagrees off the list, or agrees on it.
+/// Judges each live locus's tally, failing one that compared nothing, disagrees off the list, or agrees on it.
 pub fn settle(tallies: &BTreeMap<LiveLocus, Tally>, known: &KnownLive) -> Settled {
     let mut settled = Settled {
         lines: Vec::new(),

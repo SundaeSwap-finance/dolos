@@ -270,7 +270,7 @@ impl Borrow<RecordId> for FailingMaker {
     }
 }
 
-/// What the records that spend a record's outputs in its group are given of them.
+/// A record as the maker of outputs that later records in its group spend, by whether Dolos took it and whether it passed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Maker {
     Taken,

@@ -132,7 +132,7 @@ async fn read_utxo_data<'a>(
         .collect()
 }
 
-/// The fields of a served output that state other values than the ledger's output bytes, the parsed state itself when Dolos serves none.
+/// The names of the fields of a served output that state other values than the ledger's output bytes, only `parsed_state` when Dolos serves no parsed output.
 fn parsed_differing(
     id: RecordId,
     ledger: &[u8],
@@ -815,7 +815,7 @@ fn output_script(output: &MultiEraOutput<'_>) -> Option<([u8; 28], ScriptLanguag
     Some((*script.hash(), script.language()))
 }
 
-/// The language and place of a script an accepted record carries, none for a script the ledger does not hold.
+/// The language and place of a script in an accepted record, none for a script the ledger does not hold.
 type LedgerScript = Option<(ScriptLanguage, ScriptAt)>;
 
 /// Counts each script hash of the groups whose block rolled or was never made against what the script lookup serves for it, the language from the witnesses or produced outputs of an accepted record, or nothing otherwise.

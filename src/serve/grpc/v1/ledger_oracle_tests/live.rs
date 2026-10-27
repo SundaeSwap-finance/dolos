@@ -60,7 +60,7 @@ fn era_names(response: q::ReadEraSummaryResponse) -> Vec<String> {
     }
 }
 
-/// The hashes of the transactions in a served block that carry child transactions.
+/// The hashes of the transactions in a served block that contain sub transactions.
 fn batch_hashes(block: &s::AnyChainBlock) -> Vec<[u8; 32]> {
     let Some(any_chain_block::Chain::Cardano(block)) = &block.chain else {
         panic!("LIVE a served block is a Cardano block");
