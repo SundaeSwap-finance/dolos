@@ -403,6 +403,12 @@ fn certificate_state<D: Domain>(
     use pallas::ledger::primitives::dijkstra::Certificate;
     let mut state = CertState::default();
     if let Some(native) = tx.as_dijkstra() {
+        let unconfirmed = unconfirmed_txs(utxos);
+        let unconfirmed = unconfirmed
+            .iter()
+            .map(|entry| MultiEraTx::try_from(&entry.payload))
+            .collect::<Result<Vec<_>, _>>()?;
+        let pending = pending_registrations(&unconfirmed);
         if let Some(withdrawals) = &native.transaction_body.withdrawals {
             let epoch = crate::load_epoch::<D>(utxos.state())?.number;
             for raw in withdrawals.keys() {
@@ -411,51 +417,28 @@ fn certificate_state<D: Domain>(
                 let account = utxos
                     .state()
                     .read_entity_typed::<AccountState>(AccountState::NS, &key.into())?;
-                let unavailable = |reason| {
-                    pallas_validate::utils::ValidationError::DijkstraAccountStateUnavailable(
-                        format!("{}: {reason}", hex::encode(raw.as_slice())),
-                    )
-                };
-                let balance = match account {
-                    None => None, // Absence in the synced namespace means unregistered.
-                    Some(account) => {
-                        if account.credential != credential {
-                            return Err(unavailable(
-                                "stored credential does not match account key",
-                            )
-                            .into());
-                        }
-                        if account.is_registered() {
-                            if !account.stake.is_at_epoch(epoch) {
-                                return Err(unavailable(
-                                    "account snapshot does not match current epoch",
-                                )
-                                .into());
-                            }
-                            let stake = account.stake.live().ok_or_else(|| {
-                                unavailable("registered account has no live balance")
-                            })?;
-                            Some(stake.rewards_sum.checked_sub(stake.withdrawals_sum).ok_or_else(|| {
-                                unavailable("recorded withdrawals exceed rewards; account state is inconsistent")
-                            })?)
-                        } else {
-                            None
-                        }
-                    }
-                };
+                let balance = withdrawal_balance(
+                    raw,
+                    &credential,
+                    account,
+                    epoch,
+                    pending.get(&credential).copied(),
+                )?;
                 state.dijkstra_account_balances.insert(credential, balance);
             }
         }
         for cert in native.transaction_body.certificates.iter().flatten() {
             if let Certificate::Reg(credential, _) = cert {
-                // The synced account namespace is authoritative, including
-                // absence. Only the transaction-local state is
-                // changed by phase one.
-                let key = pallas::codec::minicbor::to_vec(credential).unwrap();
-                let account = utxos
-                    .state()
-                    .read_entity_typed::<AccountState>(AccountState::NS, &key.into())?;
-                let registered = account.is_some_and(|a| a.is_registered());
+                let registered = match pending.get(credential) {
+                    Some(pending) => *pending == PendingRegistration::Registered,
+                    None => {
+                        let key = pallas::codec::minicbor::to_vec(credential).unwrap();
+                        utxos
+                            .state()
+                            .read_entity_typed::<AccountState>(AccountState::NS, &key.into())?
+                            .is_some_and(|a| a.is_registered())
+                    }
+                };
                 state.dijkstra_registrations.insert(
                     credential.clone(),
                     if registered {
@@ -466,22 +449,109 @@ fn certificate_state<D: Domain>(
                 );
             }
         }
-        // Pending accepted registrations also reserve their credentials. Do not
-        // let two otherwise independent transactions register the same account.
-        let mut pending = utxos.mempool().peek_pending();
-        pending.extend(utxos.mempool().peek_inflight());
-        for entry in pending {
-            let pending_tx = MultiEraTx::try_from(&entry.payload)?;
-            for cert in pending_tx.certs() {
-                if let Some(credential) = crate::pallas_extras::cert_as_stake_registration(&cert) {
-                    if let Some(value) = state.dijkstra_registrations.get_mut(&credential) {
-                        *value = DijkstraRegistrationState::Registered;
-                    }
-                }
-            }
-        }
     }
     Ok(state)
+}
+
+/// The registration the last certificate naming a credential leaves it in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingRegistration {
+    Registered,
+    Deregistered,
+}
+
+/// The registration each credential is left in by the certificates of `txs`, applied in order.
+fn pending_registrations(
+    txs: &[MultiEraTx<'_>],
+) -> std::collections::HashMap<pallas::ledger::primitives::StakeCredential, PendingRegistration> {
+    use crate::pallas_extras::{cert_as_stake_deregistration, cert_as_stake_registration};
+    let mut pending = std::collections::HashMap::new();
+    for tx in txs {
+        let Ok(()) = crate::pallas_extras::for_each_applied_tx(tx, |tx| {
+            for cert in tx.certs() {
+                if let Some(credential) = cert_as_stake_registration(&cert) {
+                    pending.insert(credential, PendingRegistration::Registered);
+                }
+                if let Some(credential) = cert_as_stake_deregistration(&cert) {
+                    pending.insert(credential, PendingRegistration::Deregistered);
+                }
+            }
+            Ok::<_, std::convert::Infallible>(())
+        });
+    }
+    pending
+}
+
+/// The balance a withdrawal from the account may draw, `None` when the account is not registered.
+fn withdrawal_balance(
+    raw: &[u8],
+    credential: &pallas::ledger::primitives::StakeCredential,
+    account: Option<crate::model::AccountState>,
+    epoch: u64,
+    pending: Option<PendingRegistration>,
+) -> Result<Option<u64>, ChainError> {
+    match pending {
+        Some(PendingRegistration::Registered) => return Ok(Some(0)),
+        Some(PendingRegistration::Deregistered) => return Ok(None),
+        None => {}
+    }
+    let unavailable = |reason| {
+        pallas_validate::utils::ValidationError::DijkstraAccountStateUnavailable(format!(
+            "{}: {reason}",
+            hex::encode(raw)
+        ))
+    };
+    let balance = match account {
+        None => None, // Absence in the synced namespace means unregistered.
+        Some(account) => {
+            if account.credential != *credential {
+                return Err(unavailable("stored credential does not match account key").into());
+            }
+            if account.is_registered() {
+                if !account.stake.is_at_epoch(epoch) {
+                    return Err(unavailable("account snapshot does not match current epoch").into());
+                }
+                let stake = account
+                    .stake
+                    .live()
+                    .ok_or_else(|| unavailable("registered account has no live balance"))?;
+                Some(
+                    stake
+                        .rewards_sum
+                        .checked_sub(stake.withdrawals_sum)
+                        .ok_or_else(|| {
+                            unavailable(
+                                "recorded withdrawals exceed rewards; account state is inconsistent",
+                            )
+                        })?,
+                )
+            } else {
+                None
+            }
+        }
+    };
+    Ok(balance)
+}
+
+/// The mempool transactions the synced state does not reflect yet, inflight before pending, each once.
+fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx> {
+    let pending = utxos.mempool().peek_pending();
+    let inflight = utxos.mempool().peek_inflight();
+    // Relay can move a transaction between these two reads. Count it once.
+    let mut seen = std::collections::HashSet::new();
+    inflight
+        .into_iter()
+        .chain(pending)
+        .filter(|entry| seen.insert(entry.hash))
+        .filter(|entry| {
+            matches!(
+                entry.stage,
+                dolos_core::MempoolTxStage::Pending
+                    | dolos_core::MempoolTxStage::Propagated
+                    | dolos_core::MempoolTxStage::Acknowledged
+            )
+        })
+        .collect()
 }
 
 fn withdrawal_credential(
@@ -513,22 +583,7 @@ fn check_dijkstra_withdrawal_reservations<D: Domain>(
     // using reduced balances in phase one could incorrectly authorize a partial
     // V3 withdrawal. No provisional balances are written to the state store.
     let mut remaining = state.dijkstra_account_balances.clone();
-    let mut pending = utxos.mempool().peek_pending();
-    pending.extend(utxos.mempool().peek_inflight());
-    // Relay can move a transaction between these two reads. Count it once.
-    let mut seen = std::collections::HashSet::new();
-    for entry in pending {
-        if !seen.insert(entry.hash) {
-            continue;
-        }
-        if !matches!(
-            entry.stage,
-            dolos_core::MempoolTxStage::Pending
-                | dolos_core::MempoolTxStage::Propagated
-                | dolos_core::MempoolTxStage::Acknowledged
-        ) {
-            continue; // Confirmed withdrawals are already reflected in ledger state.
-        }
+    for entry in unconfirmed_txs(utxos) {
         let tx = MultiEraTx::try_from(&entry.payload)?;
         for (raw, amount) in tx.withdrawals().collect::<Vec<_>>() {
             let credential = withdrawal_credential(raw)?;
@@ -577,6 +632,132 @@ mod batch_tests {
         let native = tx.as_dijkstra().unwrap();
         assert!(native.transaction_body.sub_transactions.is_some());
         assert!(!requests_scripts(&tx));
+    }
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+    use pallas::codec::minicbor;
+    use pallas::crypto::hash::Hash;
+    use pallas::ledger::primitives::{dijkstra, StakeCredential};
+
+    fn credential(byte: u8) -> StakeCredential {
+        StakeCredential::AddrKeyhash(Hash::new([byte; 28]))
+    }
+
+    /// A Dijkstra transaction in mempool form whose body carries these certificates.
+    fn tx_with(certs: Vec<dijkstra::Certificate>) -> Vec<u8> {
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.array(3).unwrap().map(4).unwrap();
+        e.u8(0).unwrap().array(1).unwrap().array(2).unwrap();
+        e.bytes(&[0; 32]).unwrap().u8(0).unwrap();
+        e.u8(1).unwrap().array(0).unwrap();
+        e.u8(2).unwrap().u64(200_000).unwrap();
+        e.u8(4).unwrap();
+        e.encode(dijkstra::NonEmptySet::from_vec(certs).unwrap())
+            .unwrap();
+        e.map(0).unwrap().null().unwrap();
+        e.into_writer()
+    }
+
+    fn reg(byte: u8) -> dijkstra::Certificate {
+        dijkstra::Certificate::Reg(credential(byte), 2_000_000)
+    }
+
+    fn unreg(byte: u8) -> dijkstra::Certificate {
+        dijkstra::Certificate::UnReg(credential(byte), 2_000_000)
+    }
+
+    fn registrations(
+        txs: &[Vec<u8>],
+    ) -> std::collections::HashMap<StakeCredential, PendingRegistration> {
+        let txs: Vec<_> = txs
+            .iter()
+            .map(|cbor| MultiEraTx::decode_for_era(Era::Dijkstra, cbor).unwrap())
+            .collect();
+        pending_registrations(&txs)
+    }
+
+    #[test]
+    fn a_credential_no_pending_certificate_names_has_no_pending_registration() {
+        let pending = registrations(&[tx_with(vec![reg(1)]), tx_with(vec![unreg(2)])]);
+        assert_eq!(pending.get(&credential(3)), None);
+        assert_eq!(pending.len(), 2);
+    }
+
+    #[test]
+    fn the_last_pending_certificate_decides_the_registration() {
+        let pending = registrations(&[tx_with(vec![reg(1), unreg(2)]), tx_with(vec![unreg(1)])]);
+        assert_eq!(
+            (pending.get(&credential(1)), pending.get(&credential(2))),
+            (
+                Some(&PendingRegistration::Deregistered),
+                Some(&PendingRegistration::Deregistered)
+            )
+        );
+
+        let pending = registrations(&[tx_with(vec![unreg(1)]), tx_with(vec![reg(1)])]);
+        assert_eq!(
+            pending.get(&credential(1)),
+            Some(&PendingRegistration::Registered)
+        );
+    }
+
+    /// A synced account registered in epoch 7 with 5 lovelace of rewards and none withdrawn.
+    fn registered(byte: u8) -> crate::model::AccountState {
+        use crate::model::{EpochValue, Stake};
+        crate::model::AccountState {
+            registered_at: Some(0),
+            stake: EpochValue::with_live(
+                7,
+                Stake {
+                    rewards_sum: 5,
+                    ..Default::default()
+                },
+            ),
+            pool: EpochValue::new(7),
+            drep: EpochValue::new(7),
+            vote_delegated_at: None,
+            deregistered_at: None,
+            credential: credential(byte),
+            retired_pool: None,
+        }
+    }
+
+    #[test]
+    fn a_synced_account_no_pending_certificate_names_keeps_its_balance() {
+        let account = Some(registered(1));
+        let balance = withdrawal_balance(&[0xe0], &credential(1), account, 7, None).unwrap();
+        assert_eq!(balance, Some(5));
+    }
+
+    #[test]
+    fn a_synced_account_a_pending_certificate_deregisters_has_no_balance() {
+        let account = Some(registered(1));
+        let pending = Some(PendingRegistration::Deregistered);
+        let balance = withdrawal_balance(&[0xe0], &credential(1), account, 7, pending).unwrap();
+        assert_eq!(balance, None);
+    }
+
+    #[test]
+    fn an_account_neither_synced_nor_pending_has_no_balance() {
+        let balance = withdrawal_balance(&[0xe0], &credential(1), None, 7, None).unwrap();
+        assert_eq!(balance, None);
+    }
+
+    #[test]
+    fn an_account_a_pending_certificate_deregisters_has_no_balance() {
+        let pending = Some(PendingRegistration::Deregistered);
+        let balance = withdrawal_balance(&[0xe0], &credential(1), None, 7, pending).unwrap();
+        assert_eq!(balance, None);
+    }
+
+    #[test]
+    fn an_account_a_pending_certificate_registers_has_a_zero_balance() {
+        let pending = Some(PendingRegistration::Registered);
+        let balance = withdrawal_balance(&[0xe0], &credential(1), None, 7, pending).unwrap();
+        assert_eq!(balance, Some(0));
     }
 }
 
