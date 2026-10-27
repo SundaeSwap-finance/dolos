@@ -1,10 +1,10 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use dolos_cardano::model::PParamValue as P;
 use ledger_oracle_judge::{
     compare::Tally,
     params::{first_difference, Canon},
-    record::{PParams, RecordId},
+    record::PParams,
 };
 use pallas::ledger::primitives::{
     conway::{DRepVotingThresholds, PoolVotingThresholds},
@@ -483,7 +483,12 @@ pub(super) fn seed_values(pparams: &PParams) -> Result<Vec<P>, String> {
 }
 
 /// Counts each ledger parameter of a run against the value Dolos serves for it.
-pub(super) fn compare(id: RecordId, pparams: &PParams, served: &u5c::PParams, tally: &mut Tally) {
+pub(super) fn compare(
+    id: impl fmt::Display,
+    pparams: &PParams,
+    served: &u5c::PParams,
+    tally: &mut Tally,
+) {
     for (key, value) in &pparams.0 {
         let param = param(key).unwrap_or_else(|| panic!("PARAMS unmapped key={key}"));
         let ledger = canon(key, value).unwrap_or_else(|e| panic!("{e}"));

@@ -1,5 +1,6 @@
 //! Judges what Dolos validates and serves against ledger corpora.
 
+mod live;
 mod params;
 mod seed;
 mod serve;
@@ -215,7 +216,7 @@ impl Manifests {
     fn committed() -> Self {
         Manifests {
             declared: manifest::declared().unwrap_or_else(|e| panic!("{e}")),
-            known: manifest::known().unwrap_or_else(|e| panic!("{e}")),
+            known: manifest::known().unwrap_or_else(|e| panic!("{e}")).records,
         }
     }
 

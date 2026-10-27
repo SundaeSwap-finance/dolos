@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod cbor;
 pub mod compare;
 pub mod corpus;
+pub mod live;
 pub mod manifest;
 pub mod params;
 pub mod record;

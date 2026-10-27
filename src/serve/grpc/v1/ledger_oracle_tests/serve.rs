@@ -58,7 +58,8 @@ fn served_input(input: &cardano::TxInput) -> (TxIn, Option<Vec<u8>>) {
     (txin, output)
 }
 
-fn add_tx(served: &mut Served, tx: &cardano::Tx) {
+/// Adds the inputs a served transaction names, with the output served for each.
+pub(super) fn add_tx(served: &mut Served, tx: &cardano::Tx) {
     let common = tx
         .common
         .as_ref()
@@ -79,7 +80,8 @@ fn add_tx(served: &mut Served, tx: &cardano::Tx) {
     served.insert(hash32(&common.hash), inputs);
 }
 
-fn add_block(served: &mut Served, block: &s::AnyChainBlock) {
+/// Adds the inputs each transaction of a served block names, with the output served for each.
+pub(super) fn add_block(served: &mut Served, block: &s::AnyChainBlock) {
     let Some(s::any_chain_block::Chain::Cardano(block)) = &block.chain else {
         panic!("a served block is a Cardano block");
     };

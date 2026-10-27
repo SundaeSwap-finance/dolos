@@ -12,6 +12,9 @@ pub enum Check {
     ReadTx,
     Script,
     Datum,
+    EraSummary,
+    LiveParams,
+    LiveAsOutput,
 }
 
 /// How the oracle's comparisons judge one catalog row.
@@ -80,6 +83,12 @@ impl FromStr for Row {
     }
 }
 
+/// The rows a comparison judges, in catalog order.
+pub fn judged_by(check: Check) -> Vec<Row> {
+    let judges = |row: &Row| coverage(*row).checks().contains(&check);
+    Row::ALL.iter().copied().filter(judges).collect()
+}
+
 /// How the oracle's comparisons judge the row.
 pub fn coverage(row: Row) -> Coverage {
     use Check::*;
@@ -132,7 +141,8 @@ pub fn coverage(row: Row) -> Coverage {
         }
         Row::V25 => Partial(Validation, &[ReadTx], "Plutus in a batch is unsupported"),
         Row::V28 => Uncovered("the ledger gives no execution unit estimate to judge EvalTx"),
-        Row::S1 | Row::S2 | Row::S3 | Row::S4 | Row::S7 => Covered(AsOutput, &[]),
+        Row::S1 => Covered(AsOutput, &[LiveAsOutput]),
+        Row::S2 | Row::S3 | Row::S4 | Row::S7 => Covered(AsOutput, &[]),
         Row::S5 => Covered(Undo, &[]),
         Row::S6 => {
             Uncovered("the memory archive never ends at a slot without a write ahead log point")
@@ -158,10 +168,14 @@ pub fn coverage(row: Row) -> Coverage {
         Row::S14 => Uncovered("ReadData panics on any call and serves nothing from chain state"),
         Row::S15 => Partial(
             Params,
-            &[],
-            "parameters are seeded as values, so genesis loading is not judged",
+            &[LiveParams],
+            "the live node is read in one epoch, so no update across an epoch boundary is judged",
         ),
-        Row::S16 => Uncovered("the era summary is judged only against a node"),
+        Row::S16 => Partial(
+            EraSummary,
+            &[],
+            "the name of the last era only, starts and slot lengths are not compared",
+        ),
         Row::S17 => Uncovered("stake distribution changes only across an epoch change"),
         Row::S18 => Partial(
             Accounts,
