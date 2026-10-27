@@ -18,4 +18,6 @@ reset_scratch() {
   git -C "$ROOT/$SCRATCH" checkout -q --detach FETCH_HEAD
   git -C "$ROOT/$SCRATCH" reset -q --hard
   git -C "$ROOT/$SCRATCH" clean -q -fdx
+  # Every file gets a new time, so cargo rebuilds the workspace crates from this tree's sources.
+  git -C "$ROOT/$SCRATCH" ls-files -z | (cd "$ROOT/$SCRATCH" && xargs -0 touch)
 }
