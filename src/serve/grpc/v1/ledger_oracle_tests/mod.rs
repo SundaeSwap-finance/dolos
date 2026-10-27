@@ -1742,16 +1742,9 @@ fn sub_output_script(record: &Record) -> Option<[u8; 28]> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
-async fn a_reference_script_on_a_sub_transaction_output_prints_script_disagree() {
+async fn a_reference_script_on_a_sub_transaction_output_is_served() {
     let corpus = load(CorpusKind::Supp);
-    let judged = judge(&corpus, &Manifests::committed(), &Edits::default()).await;
-    let script = &judged.state.script;
-    println!(
-        "SCRIPT compared={} disagree={}",
-        script.compared,
-        script.disagree.len()
-    );
-    assert!(script.compared > script.disagree.len(), "{judged}");
+    let manifests = Manifests::committed();
     let (id, hash) = corpus
         .kept()
         .flat_map(KeptRun::records)
@@ -1759,14 +1752,33 @@ async fn a_reference_script_on_a_sub_transaction_output_prints_script_disagree()
         .find_map(|r| sub_output_script(r).map(|hash| (supp(r.n), hash)))
         .expect("a sub transaction output carries a reference script");
     let prefix = format!("{id} script={} ", hex::encode(hash));
-    let lines: Vec<&String> = script
-        .disagree
-        .iter()
-        .filter(|d| d.starts_with(&prefix))
-        .collect();
-    assert_eq!(lines.len(), 1, "{judged}");
-    assert!(lines[0].contains(" ledger=Native,output="), "{judged}");
-    assert!(lines[0].ends_with(" dolos=none"), "{judged}");
+    let lines = |judged: &Judged| -> Vec<String> {
+        judged
+            .state
+            .script
+            .disagree
+            .iter()
+            .filter(|d| d.starts_with(&prefix))
+            .cloned()
+            .collect()
+    };
+
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    assert!(intact.state.script.compared > 0, "{intact}");
+    assert_eq!(lines(&intact), Vec::<String>::new(), "{intact}");
+
+    let edits = Edits {
+        block_tx: Box::new(|record, phase2| (record != id).then_some(phase2)),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
+    let planted_lines = lines(&planted);
+    assert_eq!(planted_lines.len(), 1, "{planted}");
+    assert!(
+        planted_lines[0].contains(" ledger=Native,output="),
+        "{planted}"
+    );
+    assert!(planted_lines[0].ends_with(" dolos=none"), "{planted}");
 }
 
 /// The first output of a sub transaction of the record with a datum hash its sub transaction witnesses, and the length of that datum.

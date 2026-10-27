@@ -437,6 +437,54 @@ pub fn script_ref_hash(script_ref: &MultiEraScriptRef) -> Hash<28> {
     script_ref.hash()
 }
 
+/// The scripts of one transaction's witness set and of its outputs' references, sub transactions excluded.
+pub fn tx_scripts(tx: &MultiEraTx<'_>) -> Vec<ScriptRefParts> {
+    use pallas::ledger::traverse::ComputeHash as _;
+
+    let native = tx
+        .multi_era_native_scripts()
+        .into_iter()
+        .map(|s| ScriptRefParts {
+            language: ScriptLanguage::Native,
+            hash: s.hash(),
+            bytes: s.encode(),
+        });
+    let plutus = |language, hash, bytes: &[u8]| ScriptRefParts {
+        language,
+        hash,
+        bytes: bytes.to_vec(),
+    };
+    let v1 = tx
+        .plutus_v1_scripts()
+        .iter()
+        .map(|s| plutus(ScriptLanguage::PlutusV1, s.compute_hash(), s.as_ref()));
+    let v2 = tx
+        .plutus_v2_scripts()
+        .iter()
+        .map(|s| plutus(ScriptLanguage::PlutusV2, s.compute_hash(), s.as_ref()));
+    let v3 = tx
+        .plutus_v3_scripts()
+        .iter()
+        .map(|s| plutus(ScriptLanguage::PlutusV3, s.compute_hash(), s.as_ref()));
+    let v4 = tx
+        .plutus_v4_scripts()
+        .iter()
+        .map(|s| plutus(ScriptLanguage::PlutusV4, s.compute_hash(), s.as_ref()));
+    let references = tx.produces().into_iter().filter_map(|(_, output)| {
+        output
+            .multi_era_script_ref()
+            .map(|script_ref| script_ref_parts(&script_ref))
+    });
+
+    native
+        .chain(v1)
+        .chain(v2)
+        .chain(v3)
+        .chain(v4)
+        .chain(references)
+        .collect()
+}
+
 pub const DREP_KEY_PREFIX: u8 = 0b00100010;
 pub const DREP_SCRIPT_PREFIX: u8 = 0b00100011;
 

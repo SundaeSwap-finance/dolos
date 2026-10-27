@@ -507,58 +507,7 @@ where
             script_hash.as_slice().to_vec(),
             0,
             end_slot,
-            |block| {
-                for tx in block.txs() {
-                    for script in tx.multi_era_native_scripts() {
-                        if script.hash() == script_hash {
-                            return Some(ScriptData {
-                                language: ScriptLanguage::Native,
-                                script: script.encode(),
-                            });
-                        }
-                    }
-
-                    for script in tx.plutus_v1_scripts() {
-                        if script.compute_hash() == script_hash {
-                            return Some(ScriptData {
-                                language: ScriptLanguage::PlutusV1,
-                                script: script.as_ref().to_vec(),
-                            });
-                        }
-                    }
-
-                    for script in tx.plutus_v2_scripts() {
-                        if script.compute_hash() == script_hash {
-                            return Some(ScriptData {
-                                language: ScriptLanguage::PlutusV2,
-                                script: script.as_ref().to_vec(),
-                            });
-                        }
-                    }
-
-                    for script in tx.plutus_v3_scripts() {
-                        if script.compute_hash() == script_hash {
-                            return Some(ScriptData {
-                                language: ScriptLanguage::PlutusV3,
-                                script: script.as_ref().to_vec(),
-                            });
-                        }
-                    }
-
-                    for (_, output) in tx.produces() {
-                        if let Some(script_ref) = output.multi_era_script_ref() {
-                            let parts = crate::pallas_extras::script_ref_parts(&script_ref);
-                            if parts.hash == script_hash {
-                                return Some(ScriptData {
-                                    language: parts.language,
-                                    script: parts.bytes,
-                                });
-                            }
-                        }
-                    }
-                }
-                None
-            },
+            |block| script_in_block(block, script_hash),
         )
         .await
     }
@@ -596,6 +545,29 @@ where
         )
         .await
     }
+}
+
+/// The script with this hash in the witnesses or on the outputs of a transaction of the block.
+fn script_in_block(block: &MultiEraBlock, script_hash: Hash<28>) -> Option<ScriptData> {
+    for tx in block.txs() {
+        let searched = crate::pallas_extras::for_each_applied_tx(&tx, |tx| {
+            match crate::pallas_extras::tx_scripts(tx)
+                .into_iter()
+                .find(|parts| parts.hash == script_hash)
+            {
+                Some(parts) => Err(ScriptData {
+                    language: parts.language,
+                    script: parts.bytes,
+                }),
+                None => Ok(()),
+            }
+        });
+
+        if let Err(found) = searched {
+            return Some(found);
+        }
+    }
+    None
 }
 
 async fn blocks_by_tag<D>(
@@ -739,5 +711,102 @@ where
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use pallas::codec::minicbor;
+    use pallas::codec::utils::{KeepRaw, MaybeIndefArray};
+    use pallas::crypto::hash::Hasher;
+    use pallas::ledger::primitives::dijkstra;
+
+    use super::*;
+    use crate::indexes::CardanoIndexDeltaBuilder;
+
+    /// A block whose transaction lists a sub transaction, with a native script added to the witnesses of the sub transaction and a Plutus V4 script added to the witnesses of the transaction that lists it.
+    fn block_with_scripts() -> (Vec<u8>, Hash<28>, Hash<28>) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test_data/musashi-w36/ranking-sub-transaction.block");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let cbor = hex::decode(text.trim()).unwrap();
+        let (era, mut block): (u16, dijkstra::Block) = minicbor::decode(&cbor).unwrap();
+
+        let native = dijkstra::NativeScript::ScriptPubkey(Hash::new([9; 28]));
+        let native_hash = Hasher::<224>::hash_tagged(&minicbor::to_vec(&native).unwrap(), 0);
+        let v4 = dijkstra::PlutusScript::<4>(vec![1, 2, 3].into());
+        let v4_hash = v4.compute_hash();
+
+        let mut txs: Vec<_> = block.block_body.transactions.to_vec();
+        let carrier = txs
+            .iter_mut()
+            .find(|tx| tx.transaction_body.sub_transactions.is_some())
+            .expect("a transaction lists a sub transaction");
+        let mut body = (*carrier.transaction_body).clone();
+        let mut subs = body.sub_transactions.take().unwrap().into_vec();
+        let mut witnesses = (*subs[0].transaction_witness_set).clone();
+        witnesses.native_script = dijkstra::NonEmptySet::from_vec(vec![KeepRaw::from(native)]);
+        subs[0].transaction_witness_set = witnesses.into();
+        body.sub_transactions = dijkstra::NonEmptySet::from_vec(subs);
+        carrier.transaction_body = body.into();
+        let mut witnesses = (*carrier.transaction_witness_set).clone();
+        witnesses.plutus_v4_script = dijkstra::NonEmptySet::from_vec(vec![v4]);
+        carrier.transaction_witness_set = witnesses.into();
+        block.block_body.transactions = MaybeIndefArray::Def(txs);
+
+        (
+            minicbor::to_vec((era, block)).unwrap(),
+            native_hash,
+            v4_hash,
+        )
+    }
+
+    /// The script hashes the archive index tags the block with.
+    fn tagged_scripts(block: &MultiEraBlock) -> Vec<Vec<u8>> {
+        let mut builder = CardanoIndexDeltaBuilder::new();
+        builder.index_block(block, &HashMap::new());
+        builder
+            .build()
+            .into_iter()
+            .flat_map(|delta| delta.tags)
+            .filter(|tag| tag.dimension == archive::SCRIPT)
+            .map(|tag| tag.key)
+            .collect()
+    }
+
+    #[test]
+    fn a_script_the_block_does_not_carry_is_neither_found_nor_tagged() {
+        let (cbor, _, _) = block_with_scripts();
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        let absent = Hash::new([7; 28]);
+
+        assert_eq!(script_in_block(&block, absent), None);
+        assert!(!tagged_scripts(&block).contains(&absent.to_vec()));
+    }
+
+    #[test]
+    fn a_sub_transaction_witness_is_found_and_tagged() {
+        let (cbor, native, _) = block_with_scripts();
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        let found = script_in_block(&block, native).map(|s| s.language);
+        let tagged = tagged_scripts(&block).contains(&native.to_vec());
+
+        assert_eq!((found, tagged), (Some(ScriptLanguage::Native), true));
+    }
+
+    #[test]
+    fn a_v4_witness_is_found_and_tagged() {
+        let (cbor, _, v4) = block_with_scripts();
+        let block = MultiEraBlock::decode(&cbor).unwrap();
+        let found = script_in_block(&block, v4);
+        let tagged = tagged_scripts(&block).contains(&v4.to_vec());
+        let expected = ScriptData {
+            language: ScriptLanguage::PlutusV4,
+            script: vec![1, 2, 3],
+        };
+
+        assert_eq!((found, tagged), (Some(expected), true));
     }
 }
