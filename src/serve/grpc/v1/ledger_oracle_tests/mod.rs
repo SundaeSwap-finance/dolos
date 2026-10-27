@@ -259,6 +259,19 @@ fn named_inputs(id: RecordId, record: &Record) -> BTreeSet<TxIn> {
         .collect()
 }
 
+/// Every output reference a record's transaction and sub transactions could produce, each output index and the index after them that a collateral return takes.
+fn producible(id: RecordId, record: &Record) -> Vec<TxIn> {
+    let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
+        .unwrap_or_else(|e| panic!("TX {id} {e}"));
+    let subs = tx.sub_transactions();
+    let txs = std::iter::once(&tx).chain(&subs);
+    let refs = txs.flat_map(|t| {
+        let hash = *t.hash();
+        (0..=t.outputs().len() as u64).map(move |ix| TxIn { tx: hash, ix })
+    });
+    refs.collect()
+}
+
 /// The pre state entries for the inputs of a record that Dolos misses because a maker in its group was not taken.
 fn missing_from_makers<'r>(
     group: &validate::Group,
@@ -400,7 +413,12 @@ async fn validate_run<'r>(
             group: records,
             records: included.into_iter().map(|(r, _)| r).collect(),
         }));
+        let producible: Vec<TxIn> = records
+            .iter()
+            .flat_map(|r| producible(id_of(r), r))
+            .collect();
         let inputs = records.iter().flat_map(|r| &r.pre_utxo).map(|e| &e.input);
+        let inputs = inputs.chain(&producible);
         compare_utxos(group.domain(), id_of(last), inputs, post, &mut state.utxo).await;
         let made = post
             .iter()
@@ -1508,6 +1526,39 @@ async fn supp8_written_as_phase2_valid_leaves_the_input_of_supp9_missing() {
         )),
         "{planted}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn an_output_dolos_holds_that_the_ledger_never_made_prints_utxo_disagree() {
+    let corpus = load(CorpusKind::Supp);
+    let manifests = Manifests::committed();
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    let unmade = |judged: &Judged, tx: Option<[u8; 32]>| -> Vec<String> {
+        let lines = judged.state.utxo.disagree.iter();
+        let lines = lines.filter(|d| d.contains(" ledger=none dolos="));
+        let named =
+            |d: &&String| tx.is_none_or(|tx| d.contains(&format!(" input={}#", hex::encode(tx))));
+        lines.filter(named).cloned().collect()
+    };
+    assert!(unmade(&intact, None).is_empty(), "{intact}");
+    let supp8 = corpus
+        .kept()
+        .flat_map(KeptRun::records)
+        .find(|r| r.n == 8)
+        .expect("supp#8 is in a kept run");
+    let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &supp8.tx.0).unwrap();
+    assert!(!tx.outputs().is_empty());
+    let edits = Edits {
+        block_tx: Box::new(|id, phase2| match id == supp(8) {
+            true => Some(Phase2::Valid),
+            false => Some(phase2),
+        }),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
+    let lines = unmade(&planted, Some(*tx.hash()));
+    assert_eq!(lines.len(), tx.outputs().len(), "{planted}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
