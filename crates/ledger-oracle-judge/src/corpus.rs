@@ -284,6 +284,22 @@ mod tests {
         assert!(reason.contains("expected at least one element"), "{reason}");
     }
 
+    #[test]
+    fn a_leaf_outside_the_class_table_fails_the_load() {
+        let refused = ic_bytes()
+            .split(|b| *b == b'\n')
+            .position(|l| l.windows(9).any(|w| w == b"\"refused\""))
+            .unwrap();
+        let unclassified = edit_line(refused, |v| {
+            v["outcome"]["refused"]["failure_names"][0] = serde_json::json!(["UtxoFailure", "Nil"]);
+        });
+        let e = reload(CorpusKind::Ic, &unclassified).unwrap_err();
+        assert_eq!(e.reasons.len(), 1);
+        let (reason, (records, _)) = e.reasons.iter().next().unwrap();
+        assert_eq!(*records, 1);
+        assert!(reason.contains("unclassified ledger leaf Nil"), "{reason}");
+    }
+
     fn input_totals(kind: CorpusKind) -> [usize; 7] {
         let bytes = gunzip(kind.gz()).unwrap();
         let mut t = [0usize; 7];

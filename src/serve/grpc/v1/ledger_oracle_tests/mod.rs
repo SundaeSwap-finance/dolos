@@ -255,11 +255,16 @@ fn validate_run(
     }
 }
 
+/// The pre state of a run unchanged.
+fn unedited(_first: RecordId, pre: &[UtxoEntry]) -> Vec<UtxoEntry> {
+    pre.to_vec()
+}
+
 /// Judges every kept run of a corpus, each seeded from its first pre state.
 async fn judge(
     corpus: &Corpus,
     manifests: &Manifests,
-    edit_pre: impl Fn(&[UtxoEntry]) -> Vec<UtxoEntry>,
+    edit_pre: impl Fn(RecordId, &[UtxoEntry]) -> Vec<UtxoEntry>,
     edit_expected_params: impl Fn(&PParams) -> PParams,
 ) -> Judged {
     let genesis = seed::genesis(epoch_size(corpus));
@@ -276,7 +281,7 @@ async fn judge(
             .epoch()
             .unwrap_or_else(|| panic!("RUN {id} has no epoch"));
         let pparams = params::seed_values(run.pparams()).unwrap_or_else(|e| panic!("{e}"));
-        let seeded = seed::seed(&genesis, epoch, &pparams, &edit_pre(&first.pre_utxo));
+        let seeded = seed::seed(&genesis, epoch, &pparams, &edit_pre(id, &first.pre_utxo));
         compare_utxos(&seeded.domain, id, &first.pre_utxo, &mut tallies.utxo).await;
         let served = read_params(&seeded.domain).await;
         let expected = edit_expected_params(run.pparams());
@@ -301,7 +306,7 @@ async fn judge_supp(edit: impl FnOnce(&mut Manifests)) -> Judged {
     judge(
         &load(CorpusKind::Supp),
         &manifests,
-        <[UtxoEntry]>::to_vec,
+        unedited,
         PParams::clone,
     )
     .await
@@ -322,7 +327,7 @@ async fn ledger_oracle() {
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind);
         println!("{corpus}");
-        let tallies = judge(&corpus, &manifests, <[UtxoEntry]>::to_vec, PParams::clone).await;
+        let tallies = judge(&corpus, &manifests, unedited, PParams::clone).await;
         println!("{tallies}");
         pass &= tallies.pass();
     }
@@ -336,14 +341,14 @@ async fn ledger_oracle() {
 async fn dropping_one_seed_pair_prints_utxo_disagree() {
     let corpus = load(CorpusKind::Supp);
     let manifests = Manifests::committed();
-    let intact = judge(&corpus, &manifests, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    let intact = judge(&corpus, &manifests, unedited, PParams::clone).await;
     assert!(intact.state.utxo.compared > 0);
     assert!(intact.state.utxo.disagree.is_empty(), "{intact}");
     let dropped = AtomicBool::new(false);
     let planted = judge(
         &corpus,
         &manifests,
-        |pre| {
+        |_, pre| {
             let skip = !dropped.swap(true, Ordering::Relaxed);
             pre.iter().skip(usize::from(skip)).cloned().collect()
         },
@@ -360,11 +365,11 @@ async fn dropping_one_seed_pair_prints_utxo_disagree() {
 async fn one_changed_cost_model_entry_prints_params_disagree() {
     let corpus = load(CorpusKind::Supp);
     let manifests = Manifests::committed();
-    let intact = judge(&corpus, &manifests, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    let intact = judge(&corpus, &manifests, unedited, PParams::clone).await;
     assert!(intact.state.params.compared > 0);
     assert!(intact.state.params.disagree.is_empty(), "{intact}");
     let changed = AtomicBool::new(false);
-    let planted = judge(&corpus, &manifests, <[UtxoEntry]>::to_vec, |pparams| {
+    let planted = judge(&corpus, &manifests, unedited, |pparams| {
         let mut pparams = pparams.clone();
         if !changed.swap(true, Ordering::Relaxed) {
             let entry = &mut pparams.0["costModels"]["PlutusV1"][0];
@@ -454,7 +459,7 @@ async fn a_known_entry_naming_an_agreeing_or_unjudged_record_prints_known_stale(
 async fn a_maker_that_fails_leaves_its_dependents_disagreeing() {
     let corpus = load(CorpusKind::Ic);
     let committed = Manifests::committed();
-    let intact = judge(&corpus, &committed, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    let intact = judge(&corpus, &committed, unedited, PParams::clone).await;
     let maker = intact
         .validation
         .dependent
@@ -477,7 +482,7 @@ async fn a_maker_that_fails_leaves_its_dependents_disagreeing() {
     assert!(disagrees(&intact).is_empty(), "{intact}");
     let mut failing = committed.clone();
     failing.declared.remove(&maker).unwrap();
-    let patched = judge(&corpus, &failing, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    let patched = judge(&corpus, &failing, unedited, PParams::clone).await;
     assert!(
         patched
             .validation
@@ -489,6 +494,60 @@ async fn a_maker_that_fails_leaves_its_dependents_disagreeing() {
     assert!(
         !disagrees(&patched).is_empty(),
         "maker={maker} dependents={dependents:?} {patched}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn dropping_the_seeded_input_under_a_metadata_refusal_prints_reason_mismatch() {
+    let corpus = load(CorpusKind::Ic);
+    let manifests = Manifests::committed();
+    let run = corpus
+        .kept()
+        .find(|r| r.records().iter().any(|x| x.n == 1311))
+        .unwrap();
+    let first = &run.records()[0];
+    assert_eq!(first.pre_utxo.len(), 1, "the run is seeded with one output");
+    let first = RecordId {
+        corpus: CorpusKind::Ic,
+        n: first.n,
+    };
+    let line = "\nREASON_MISMATCH ic#1311 ";
+    let intact = judge(&corpus, &manifests, unedited, PParams::clone).await;
+    assert!(!intact.to_string().contains(line), "{intact}");
+    let planted = judge(
+        &corpus,
+        &manifests,
+        |id, pre| if id == first { vec![] } else { pre.to_vec() },
+        PParams::clone,
+    )
+    .await
+    .to_string();
+    assert!(
+        planted.contains(&format!(
+            "{line}ledger=refused[SubMissingTxMetadata] ledger_class=metadata \
+             dolos=refused[InputNotInUTxO] dolos_class=inputs"
+        )),
+        "{planted}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn deleting_the_v1_known_entry_prints_its_reason_mismatch() {
+    let intact = judge_supp(|_| ()).await.to_string();
+    assert!(intact.contains("\nKNOWN row=V1 ids=supp#5 "), "{intact}");
+    let deleted = judge_supp(|m| {
+        m.known.remove(&(Locus::Validation, supp(5))).unwrap();
+    })
+    .await
+    .to_string();
+    assert!(
+        deleted.contains(
+            "\nREASON_MISMATCH supp#5 ledger=refused[BadInputsUTxO,BadInputsUTxO] \
+             ledger_class=inputs dolos=refused[PreservationOfValue] dolos_class=value"
+        ),
+        "{deleted}"
     );
 }
 

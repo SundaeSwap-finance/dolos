@@ -2,7 +2,10 @@ use std::fmt;
 
 use serde::{de::Error as _, Deserialize, Deserializer};
 
-use crate::cbor::{self, TxIn};
+use crate::{
+    cbor::{self, TxIn},
+    refusal::RefusalClass,
+};
 
 /// The corpus a record comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -84,8 +87,29 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for NonEmpty<T> {
     }
 }
 
-/// The constructor names of one ledger failure, from the outer wrapper to the leaf.
-pub type FailurePath = NonEmpty<String>;
+/// The constructor names of one ledger failure, from the outer wrapper to the leaf, and the class of its leaf.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailurePath {
+    pub names: NonEmpty<String>,
+    pub class: RefusalClass,
+}
+
+impl FailurePath {
+    /// The constructor name of the failure itself.
+    pub fn leaf(&self) -> &str {
+        self.names.last()
+    }
+}
+
+impl<'de> Deserialize<'de> for FailurePath {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let names = NonEmpty::<String>::deserialize(d)?;
+        let leaf = names.last();
+        let class = RefusalClass::of_ledger_leaf(leaf)
+            .ok_or_else(|| D::Error::custom(format!("unclassified ledger leaf {leaf}")))?;
+        Ok(FailurePath { names, class })
+    }
+}
 
 /// The protocol parameters the ledger ran a record under.
 #[derive(Debug, Clone, PartialEq, Deserialize)]

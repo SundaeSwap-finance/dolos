@@ -6,5 +6,6 @@ pub mod corpus;
 pub mod manifest;
 pub mod params;
 pub mod record;
+pub mod refusal;
 pub mod run;
 pub mod verdict;

@@ -5,7 +5,8 @@ use std::{
 
 use crate::{
     manifest::Feature,
-    record::{LedgerOutcome, Phase2, RecordId},
+    record::{FailurePath, LedgerOutcome, NonEmpty, Phase2, RecordId},
+    refusal::RefusalClass,
 };
 
 /// What Dolos answered when one transaction was submitted to it.
@@ -34,8 +35,25 @@ pub fn show_ledger(outcome: &LedgerOutcome, phase2: Phase2) -> String {
         (LedgerOutcome::Accepted { .. }, Phase2::Valid) => "accepted".to_string(),
         (LedgerOutcome::Accepted { .. }, Phase2::Invalid) => "accepted_phase2_invalid".to_string(),
         (LedgerOutcome::Refused { failure_names, .. }, _) => {
-            let leaves: Vec<&str> = failure_names.iter().map(|p| p.last().as_str()).collect();
+            let leaves: Vec<&str> = failure_names.iter().map(FailurePath::leaf).collect();
             format!("refused[{}]", leaves.join(","))
+        }
+    }
+}
+
+/// The outcome of a refusal by both sides, which agrees when the node's class is one of the ledger's.
+fn refusal_outcome(failure_names: &NonEmpty<FailurePath>, ledger: String, kind: &str) -> Outcome {
+    let ledger_classes: BTreeSet<RefusalClass> = failure_names.iter().map(|p| p.class).collect();
+    match RefusalClass::of_dolos_kind(kind) {
+        Some(class) if ledger_classes.contains(&class) => Outcome::Pass(Pass::Agree),
+        dolos_class => {
+            let ledger_classes: Vec<&str> = ledger_classes.iter().map(|c| c.name()).collect();
+            Outcome::Fail(Fail::ReasonMismatch {
+                ledger,
+                ledger_classes: ledger_classes.join(","),
+                dolos: format!("refused[{kind}]"),
+                dolos_class: dolos_class.map_or("none", RefusalClass::name).to_string(),
+            })
         }
     }
 }
@@ -52,16 +70,42 @@ pub enum Pass {
 /// A judgement of one record that fails the arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Fail {
-    Disagree { ledger: String, dolos: String },
-    UnsupportedUnexpected { label: String },
-    StaleManifest { declared: String, dolos: String },
-    KnownStale { row: String },
+    Disagree {
+        ledger: String,
+        dolos: String,
+    },
+    ReasonMismatch {
+        ledger: String,
+        ledger_classes: String,
+        dolos: String,
+        dolos_class: String,
+    },
+    UnsupportedUnexpected {
+        label: String,
+    },
+    StaleManifest {
+        declared: String,
+        dolos: String,
+    },
+    KnownStale {
+        row: String,
+    },
 }
 
 impl fmt::Display for Fail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Fail::Disagree { ledger, dolos } => write!(f, "ledger={ledger} dolos={dolos}"),
+            Fail::ReasonMismatch {
+                ledger,
+                ledger_classes,
+                dolos,
+                dolos_class,
+            } => write!(
+                f,
+                "ledger={ledger} ledger_class={ledger_classes} dolos={dolos} \
+                 dolos_class={dolos_class}"
+            ),
             Fail::UnsupportedUnexpected { label } => write!(f, "label={label}"),
             Fail::StaleManifest { declared, dolos } => {
                 write!(f, "declared={declared} dolos={dolos}")
@@ -110,8 +154,12 @@ pub fn outcome(
             })
         }
         (L::Accepted { .. }, Phase2::Valid, D::Accepted, None)
-        | (L::Accepted { .. }, Phase2::Invalid, D::Phase2Rejected, None)
-        | (L::Refused { .. }, _, D::Refused(_), None) => Outcome::Pass(Pass::Agree),
+        | (L::Accepted { .. }, Phase2::Invalid, D::Phase2Rejected, None) => {
+            Outcome::Pass(Pass::Agree)
+        }
+        (L::Refused { failure_names, .. }, _, D::Refused(kind), None) => {
+            refusal_outcome(failure_names, show_ledger(ledger, phase2), kind)
+        }
         (L::Accepted { .. }, Phase2::Valid, D::Phase2Rejected, None)
         | (L::Accepted { .. }, Phase2::Invalid, D::Accepted, None)
         | (L::Accepted { .. }, _, D::Refused(_), None)
@@ -150,6 +198,7 @@ pub struct ValidationTally {
     pub refuse_unsupported: Vec<(RecordId, String)>,
     pub known: Vec<(RecordId, String, String)>,
     pub disagree: Vec<(RecordId, String)>,
+    pub reason_mismatch: Vec<(RecordId, String)>,
     pub unsupported_unexpected: Vec<(RecordId, String)>,
     pub stale_manifest: Vec<(RecordId, String)>,
     pub known_stale: Vec<(RecordId, String)>,
@@ -171,6 +220,7 @@ impl ValidationTally {
                 let text = fail.to_string();
                 match fail {
                     Fail::Disagree { .. } => self.disagree.push((id, text)),
+                    Fail::ReasonMismatch { .. } => self.reason_mismatch.push((id, text)),
                     Fail::UnsupportedUnexpected { .. } => {
                         self.unsupported_unexpected.push((id, text))
                     }
@@ -190,6 +240,7 @@ impl ValidationTally {
             refuse_unsupported,
             known,
             disagree,
+            reason_mismatch,
             unsupported_unexpected,
             stale_manifest,
             known_stale,
@@ -199,6 +250,7 @@ impl ValidationTally {
             + refuse_unsupported.len()
             + known.len();
         let failing = disagree.len()
+            + reason_mismatch.len()
             + unsupported_unexpected.len()
             + stale_manifest.len()
             + known_stale.len();
@@ -215,16 +267,18 @@ impl fmt::Display for ValidationTally {
             refuse_unsupported,
             known,
             disagree,
+            reason_mismatch,
             unsupported_unexpected,
             stale_manifest,
             known_stale,
         } = self;
         write!(
             f,
-            "VALIDATION agree={agree} disagree={} unsupported_expected={} \
+            "VALIDATION agree={agree} disagree={} reason_mismatch={} unsupported_expected={} \
              unsupported_unexpected={} refuse_unsupported={} stale_manifest={} dependent={} \
              known={} known_stale={}",
             disagree.len(),
+            reason_mismatch.len(),
             unsupported_expected.values().sum::<usize>(),
             unsupported_unexpected.len(),
             refuse_unsupported.len(),
@@ -246,6 +300,7 @@ impl fmt::Display for ValidationTally {
         }
         for (name, lines) in [
             ("DISAGREE", disagree),
+            ("REASON_MISMATCH", reason_mismatch),
             ("UNSUPPORTED_UNEXPECTED", unsupported_unexpected),
             ("STALE_MANIFEST", stale_manifest),
             ("KNOWN_STALE", known_stale),
@@ -265,7 +320,7 @@ impl fmt::Display for ValidationTally {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::record::{CorpusKind, NonEmpty};
+    use crate::record::CorpusKind;
 
     fn accepted() -> LedgerOutcome {
         LedgerOutcome::Accepted {
@@ -274,17 +329,71 @@ mod tests {
         }
     }
 
-    fn refused(leaf: &str) -> LedgerOutcome {
+    fn path(leaf: &str) -> FailurePath {
+        FailurePath {
+            names: NonEmpty {
+                head: "UtxoFailure".to_string(),
+                tail: vec![leaf.to_string()],
+            },
+            class: RefusalClass::of_ledger_leaf(leaf).unwrap(),
+        }
+    }
+
+    fn refused_by(leaves: &[&str]) -> LedgerOutcome {
         LedgerOutcome::Refused {
             failures: String::new(),
             failure_names: NonEmpty {
-                head: NonEmpty {
-                    head: "UtxoFailure".to_string(),
-                    tail: vec![leaf.to_string()],
-                },
-                tail: vec![],
+                head: path(leaves[0]),
+                tail: leaves[1..].iter().map(|l| path(l)).collect(),
             },
         }
+    }
+
+    fn refused(leaf: &str) -> LedgerOutcome {
+        refused_by(&[leaf])
+    }
+
+    #[test]
+    fn a_refusal_in_any_of_the_ledger_classes_agrees() {
+        let ledger = refused_by(&["SubMissingTxMetadata", "BadInputsUTxO"]);
+        for kind in ["MetadataHash", "InputNotInUTxO"] {
+            assert_eq!(
+                outcome(
+                    &ledger,
+                    Phase2::Valid,
+                    &DolosVerdict::Refused(kind.into()),
+                    None
+                ),
+                Outcome::Pass(Pass::Agree),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refusal_outside_the_ledger_classes_is_a_reason_mismatch() {
+        let ledger = refused_by(&["BadInputsUTxO", "BadInputsUTxO"]);
+        let mut tally = ValidationTally::default();
+        for (n, kind) in [(5, "PreservationOfValue"), (6, "DijkstraMissingParameters")] {
+            let dolos = DolosVerdict::Refused(kind.into());
+            tally.add(supp(n), outcome(&ledger, Phase2::Valid, &dolos, None));
+        }
+        assert!(!tally.pass());
+        let text = tally.to_string();
+        assert!(
+            text.contains(
+                "\nREASON_MISMATCH supp#5 ledger=refused[BadInputsUTxO,BadInputsUTxO] \
+                 ledger_class=inputs dolos=refused[PreservationOfValue] dolos_class=value"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "\nREASON_MISMATCH supp#6 ledger=refused[BadInputsUTxO,BadInputsUTxO] \
+                 ledger_class=inputs dolos=refused[DijkstraMissingParameters] dolos_class=none"
+            ),
+            "{text}"
+        );
     }
 
     fn supp(n: u32) -> RecordId {
@@ -338,7 +447,8 @@ mod tests {
         assert!(!tally.pass());
         assert_eq!(
             tally.to_string(),
-            "VALIDATION agree=0 disagree=1 unsupported_expected=0 unsupported_unexpected=0 \
+            "VALIDATION agree=0 disagree=1 reason_mismatch=0 unsupported_expected=0 \
+             unsupported_unexpected=0 \
              refuse_unsupported=0 stale_manifest=0 dependent=0 known=0 known_stale=0\n\
              DEPENDENT ids=\n\
              DISAGREE supp#5 ledger=refused[BadInputsUTxO] dolos=accepted"
