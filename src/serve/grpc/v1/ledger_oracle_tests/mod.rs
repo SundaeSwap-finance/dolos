@@ -26,12 +26,13 @@ use ledger_oracle_judge::{
     cbor::{tx_inputs, TxIn},
     compare::{ByteVerdict, StateTallies, Tally},
     corpus::{self, Corpus},
-    manifest::{self, Declared, Feature, KnownList, Locus},
+    manifest::{self, Candidates, Declared, Feature, KnownList, Locus},
     record::{CorpusKind, LedgerOutcome, PParams, Phase2, Record, RecordId, UtxoEntry},
     row::Row,
     run::{origin, InputOrigin, KeptRun},
     verdict::{
-        outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, ValidationTally,
+        declares, outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, Pass,
+        ValidationTally,
     },
 };
 use pallas::{
@@ -186,11 +187,12 @@ async fn read_params(domain: &DomainAdapter) -> cardano::PParams {
     }
 }
 
-/// The validation outcomes and state comparisons of one corpus.
+/// The validation outcomes, state comparisons and manifest candidates of one corpus.
 #[derive(Debug, Default)]
 struct Judged {
     validation: ValidationTally,
     state: StateTallies,
+    candidates: Candidates,
 }
 
 impl Judged {
@@ -304,6 +306,7 @@ async fn validate_run<'r>(
     let Judged {
         validation: tally,
         state,
+        candidates,
     } = tallies;
     let id_of = |record: &Record| RecordId {
         corpus: kind,
@@ -326,10 +329,17 @@ async fn validate_run<'r>(
                 tally.dependent.push((id, made_by));
             }
             let dolos = validate::verdict(&group.receive(&record.tx.0));
+            if let Some(feature) = declares(&record.outcome, &dolos) {
+                candidates.declared.insert(id, feature);
+            }
             let declared = manifests.declared.get(&id);
             let judgement = outcome(&record.outcome, record.phase2_valid, &dolos, declared);
             let known = manifests.known.get(&(Locus::Validation, id));
             let judgement = with_known(judgement, known);
+            if let Outcome::Pass(Pass::Known { row, .. }) = &judgement {
+                let entry = (Locus::Validation, id);
+                candidates.known.records.insert(entry, *row);
+            }
             if seeds_dependents(&dolos, &judgement) {
                 seeding.insert(id);
             }
@@ -1096,6 +1106,8 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
     judged
         .state
         .settle_as_output(corpus.kind, as_output, &manifests.known);
+    let fired = judged.state.known_fired.clone();
+    judged.candidates.known.records.extend(fired);
     judged
 }
 
@@ -1118,12 +1130,19 @@ fn supp(n: u32) -> RecordId {
 async fn ledger_oracle() {
     let mut pass = true;
     let manifests = Manifests::committed();
+    let mut candidates = Candidates::default();
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind);
         println!("{corpus}");
         let tallies = judge(&corpus, &manifests, &Edits::default()).await;
         println!("{tallies}");
         pass &= tallies.pass();
+        candidates.declared.extend(tallies.candidates.declared);
+        let known = tallies.candidates.known.records;
+        candidates.known.records.extend(known);
+    }
+    for line in candidates.lines() {
+        println!("{line}");
     }
     let result = if pass { "PASS" } else { "FAIL" };
     println!("RESULT {result}");

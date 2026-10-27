@@ -7,7 +7,7 @@ use std::{
 use ledger_oracle_judge::{
     compare::Tally,
     live::{era_name, settle, Aligned, NodeTip},
-    manifest::{self, LiveLocus},
+    manifest::{self, Candidates, Known, LiveLocus},
     record::PParams,
 };
 use serde::de::DeserializeOwned;
@@ -184,6 +184,16 @@ fn live() {
     println!("LIVE compared {}", compared.collect::<Vec<_>>().join(" "));
     let settled = settle(&tallies, &known);
     for line in &settled.lines {
+        println!("{line}");
+    }
+    let candidates = Candidates {
+        known: Known {
+            live: settled.known_fired.clone(),
+            ..Known::default()
+        },
+        ..Candidates::default()
+    };
+    for line in candidates.lines() {
         println!("{line}");
     }
     println!("LIVE RESULT {}", if settled.pass { "PASS" } else { "FAIL" });

@@ -14,23 +14,8 @@ PALLAS=scratch/pallas
 TEST=serve::grpc::v1::ledger_oracle_tests::ledger_oracle
 OUT=${OUT:-"$ROOT/runs/$(date -u +%Y%m%dT%H%M%SZ)"}
 mkdir -p "$OUT"
-
-free=$(df -BG --output=avail "$ROOT" | tail -1 | tr -dc 0-9)
-if [ "$free" -lt "$MIN_FREE_G" ]; then
-  echo "REFUSED free=${free}G below ${MIN_FREE_G}G at $ROOT"
-  exit 2
-fi
-
-# Puts the scratch tree back at the branch head with no planted change.
-reset_scratch() {
-  if [ ! -d "$ROOT/$SCRATCH/.git" ]; then
-    git clone -q --no-checkout "$ROOT/dolos.git" "$ROOT/$SCRATCH"
-  fi
-  git -C "$ROOT/$SCRATCH" fetch -q "$ROOT/dolos.git" "$REV"
-  git -C "$ROOT/$SCRATCH" checkout -q --detach FETCH_HEAD
-  git -C "$ROOT/$SCRATCH" reset -q --hard
-  git -C "$ROOT/$SCRATCH" clean -q -fdx
-}
+. "$HERE/lib.sh"
+require_free
 
 # The source cargo resolves pallas-validate from, as the scratch tree's build sees it.
 pallas_source() {
@@ -130,7 +115,7 @@ for arm in $ARMS; do
 done
 reset_scratch
 
-echo "DONE$verdicts logs=$OUT"
+echo "ARMS$verdicts logs=$OUT"
 case "$verdicts" in
   *MISSED* | *FAIL* | *SKIPPED*) exit 1 ;;
 esac

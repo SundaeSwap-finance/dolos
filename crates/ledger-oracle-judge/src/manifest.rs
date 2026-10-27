@@ -214,6 +214,58 @@ pub fn parse_known(file: &'static str, text: &str) -> Result<Known, ManifestErro
     Ok(known)
 }
 
+/// Writes declared support as `parse_declared` reads it, one record per line in record order.
+pub fn render_declared(declared: &Declared) -> String {
+    let lines = declared.iter();
+    lines
+        .map(|(id, feature)| format!("{id} {feature}\n"))
+        .collect()
+}
+
+/// Writes a known list as `parse_known` reads it, record entries by row and then live entries by row.
+pub fn render_known(known: &Known) -> String {
+    let records = known.records.iter();
+    let mut records: Vec<_> = records
+        .map(|(&(locus, id), &row)| (row, locus, id))
+        .collect();
+    records.sort();
+    let mut live: Vec<_> = known
+        .live
+        .iter()
+        .map(|(&locus, &row)| (row, locus))
+        .collect();
+    live.sort();
+    let records = records
+        .into_iter()
+        .map(|(row, locus, id)| format!("{row} {locus} {id}\n"));
+    let live = live
+        .into_iter()
+        .map(|(row, locus)| format!("{row} {locus}\n"));
+    records.chain(live).collect()
+}
+
+/// The declared support and known entries one judgement's answers would commit.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Candidates {
+    pub declared: Declared,
+    pub known: Known,
+}
+
+impl Candidates {
+    /// Each candidate line after `CANDIDATE` and the name of the file it belongs in.
+    pub fn lines(&self) -> Vec<String> {
+        let files = [
+            ("expected-unsupported.txt", render_declared(&self.declared)),
+            ("known.txt", render_known(&self.known)),
+        ];
+        let lines = files.iter().flat_map(|(file, text)| {
+            text.lines()
+                .map(move |line| format!("CANDIDATE {file} {line}"))
+        });
+        lines.collect()
+    }
+}
+
 /// The committed declared support.
 pub fn declared() -> Result<Declared, ManifestError> {
     parse_declared("expected-unsupported.txt", EXPECTED)
@@ -276,6 +328,41 @@ mod tests {
             reason("S13 validation supp#5"),
             "row S13 is not judged by validation"
         );
+    }
+
+    #[test]
+    fn the_committed_manifests_render_back_byte_for_byte() {
+        assert_eq!(render_declared(&declared().unwrap()), EXPECTED);
+        assert_eq!(render_known(&known().unwrap()), KNOWN);
+    }
+
+    #[test]
+    fn known_entries_render_by_row_with_live_entries_last() {
+        let text =
+            "S16 era_summary\nV2 validation supp#2\nV1 validation supp#5\nS3 as_output supp#9";
+        let known = parse_known("k", text).unwrap();
+        assert_eq!(
+            render_known(&known),
+            "V1 validation supp#5\nV2 validation supp#2\nS3 as_output supp#9\nS16 era_summary\n"
+        );
+        assert_eq!(render_known(&Known::default()), "");
+        assert_eq!(render_declared(&Declared::new()), "");
+    }
+
+    #[test]
+    fn candidate_lines_name_the_file_they_belong_in() {
+        let candidates = Candidates {
+            declared: parse_declared("e", "supp#2 non-vkey witnesses").unwrap(),
+            known: parse_known("k", "S16 era_summary").unwrap(),
+        };
+        assert_eq!(
+            candidates.lines(),
+            vec![
+                "CANDIDATE expected-unsupported.txt supp#2 non-vkey witnesses",
+                "CANDIDATE known.txt S16 era_summary",
+            ]
+        );
+        assert!(Candidates::default().lines().is_empty());
     }
 
     #[test]

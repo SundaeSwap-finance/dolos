@@ -101,6 +101,7 @@ pub fn era_name(served: &[String], node: &str) -> EraName {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settled {
     pub lines: Vec<String>,
+    pub known_fired: KnownLive,
     pub pass: bool,
 }
 
@@ -108,6 +109,7 @@ pub struct Settled {
 pub fn settle(tallies: &BTreeMap<LiveLocus, Tally>, known: &KnownLive) -> Settled {
     let mut settled = Settled {
         lines: Vec::new(),
+        known_fired: KnownLive::new(),
         pass: true,
     };
     for &locus in LiveLocus::ALL {
@@ -129,6 +131,7 @@ pub fn settle(tallies: &BTreeMap<LiveLocus, Tally>, known: &KnownLive) -> Settle
                 let lines = tally.disagree.iter();
                 let lines = lines.map(|d| format!("KNOWN row={row} locus={locus} {d}"));
                 settled.lines.extend(lines);
+                settled.known_fired.insert(locus, *row);
             }
             None => {
                 let rows: Vec<String> = judged_by(locus.check())
@@ -211,6 +214,7 @@ mod tests {
             settled,
             Settled {
                 lines: vec![],
+                known_fired: KnownLive::new(),
                 pass: true
             }
         );
@@ -233,6 +237,7 @@ mod tests {
             ]
         );
         assert!(!settled.pass);
+        assert_eq!(settled.known_fired, known);
         let tallies = all(
             tally(1, &["name=unknown node=Dijkstra"]),
             tally(50, &[]),
@@ -246,6 +251,7 @@ mod tests {
         let known = KnownLive::from([(LiveLocus::EraSummary, Row::S16)]);
         let settled = settle(&all(tally(1, &[]), tally(50, &[]), tally(12, &[])), &known);
         assert_eq!(settled.lines, vec!["KNOWN_STALE row=S16 locus=era_summary"]);
+        assert!(settled.known_fired.is_empty());
         assert!(!settled.pass);
         let mut tallies = all(tally(1, &[]), tally(50, &[]), tally(0, &[]));
         let settled = settle(&tallies, &KnownLive::new());

@@ -168,6 +168,16 @@ pub fn outcome(
     }
 }
 
+/// The feature a record would be declared unsupported for, from a ledger that accepted it and a Dolos that named it unsupported.
+pub fn declares(ledger: &LedgerOutcome, dolos: &DolosVerdict) -> Option<Feature> {
+    match (ledger, dolos) {
+        (LedgerOutcome::Accepted { .. }, DolosVerdict::Unsupported(label)) => {
+            Some(Feature(label.clone()))
+        }
+        _ => None,
+    }
+}
+
 /// The outcome of a record on the known list, which passes only while the record still fails.
 pub fn with_known(outcome: Outcome, row: Option<&Row>) -> Outcome {
     match (row, outcome) {
@@ -546,6 +556,19 @@ mod tests {
         assert!(seeds_dependents(&unsupported, &expected));
         assert!(!seeds_dependents(&unsupported, &unexpected));
         assert!(!seeds_dependents(&DolosVerdict::Accepted, &held));
+    }
+
+    #[test]
+    fn only_an_accepted_record_dolos_names_unsupported_is_declared() {
+        let unsupported = DolosVerdict::Unsupported("non-vkey witnesses".into());
+        assert_eq!(declares(&refused("BadInputsUTxO"), &unsupported), None);
+        assert_eq!(declares(&accepted(), &DolosVerdict::Accepted), None);
+        let refused_kind = DolosVerdict::Refused("InputNotInUTxO".into());
+        assert_eq!(declares(&accepted(), &refused_kind), None);
+        assert_eq!(
+            declares(&accepted(), &unsupported),
+            Some(feature("non-vkey witnesses"))
+        );
     }
 
     #[test]

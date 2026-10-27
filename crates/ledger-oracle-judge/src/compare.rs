@@ -92,6 +92,7 @@ pub struct StateTallies {
     pub script: Tally,
     pub datum: Tally,
     pub known: Vec<String>,
+    pub known_fired: KnownList,
     pub known_stale: Vec<String>,
 }
 
@@ -142,6 +143,7 @@ impl StateTallies {
                         .iter()
                         .map(|d| format!("row={row} ids={id} as_output {d}"));
                     self.known.extend(lines);
+                    self.known_fired.insert((Locus::AsOutput, *id), *row);
                 }
             }
         }
@@ -168,6 +170,7 @@ impl fmt::Display for StateTallies {
             script,
             datum,
             known,
+            known_fired: _,
             known_stale,
         } = self;
         write!(
@@ -297,6 +300,7 @@ mod tests {
             state.known,
             vec![format!("row=S3 ids=supp#9 as_output {diff}")]
         );
+        assert_eq!(state.known_fired, known);
         assert!(state.as_output.disagree.is_empty());
         assert!(state.pass(), "{state}");
     }
@@ -327,6 +331,7 @@ mod tests {
                 "supp#10 row=S3 locus=as_output not_compared".to_string()
             ]
         );
+        assert!(state.known_fired.is_empty());
         assert!(!state.pass());
     }
 
