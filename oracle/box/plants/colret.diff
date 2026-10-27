@@ -1,0 +1,22 @@
+diff --git a/crates/cardano/src/utxoset.rs b/crates/cardano/src/utxoset.rs
+index c91bdb20..9ba3d5d6 100644
+--- a/crates/cardano/src/utxoset.rs
++++ b/crates/cardano/src/utxoset.rs
+@@ -165,7 +165,7 @@ fn apply_txs_lenient(
+                 }
+             }
+ 
+-            for (idx, produced) in tx.produces() {
++            for (idx, produced) in tx.outputs().into_iter().enumerate() {
+                 let utxo_ref = TxoRef(tx_hash, idx as u32);
+                 let body: Arc<EraCbor> = Arc::new(produced.into());
+ 
+@@ -261,7 +261,7 @@ fn apply_txs(
+         for_each_applied_tx(tx, |tx| {
+             let tx_hash = tx.hash();
+ 
+-            for (idx, produced) in tx.produces() {
++            for (idx, produced) in tx.outputs().into_iter().enumerate() {
+                 let uxto_ref = TxoRef(tx_hash, idx as u32);
+                 delta
+                     .produced_utxo

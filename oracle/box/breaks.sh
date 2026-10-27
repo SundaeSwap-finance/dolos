@@ -32,6 +32,8 @@ plant_colret() {
   if [ -n "${COLRET_FIX:-}" ]; then
     git -C "$ROOT/$SCRATCH" diff "$COLRET_FIX^" "$COLRET_FIX" -- . ':(exclude)**/*tests*' |
       git -C "$ROOT/$SCRATCH" apply -R
+  else
+    git -C "$ROOT/$SCRATCH" apply "$HERE/plants/colret.diff"
   fi
 }
 
@@ -48,16 +50,16 @@ caught() {
   arm=$1
   case $arm in
     head) return 1 ;;
-    colret) pattern='^KNOWN row=S3 ids=supp#9 as_output ledger=' ;;
+    colret) pattern='^(DIFF utxo .* ledger=none dolos=|DISAGREE supp#9 |KNOWN_STALE supp#9 row=S3 )' ;;
     rodrigo-reverted) pattern='^STATE as_output disagree=' ;;
     rob-reverted) pattern='^(UNSUPPORTED_UNEXPECTED|DISAGREE|REASON_MISMATCH|STALE_MANIFEST) ic#(851|861|1215|1233) ' ;;
   esac
-  grep -E "$pattern" "$OUT/$arm.log" >"$OUT/$arm.expected" || true
-  if [ "$arm" = colret ] || [ ! -f "$OUT/head.log" ]; then
-    cp "$OUT/$arm.expected" "$OUT/$arm.new"
-  else
-    grep -E "$pattern" "$OUT/head.log" | grep -v -x -F -f - "$OUT/$arm.expected" >"$OUT/$arm.new" || true
+  if [ ! -f "$OUT/head.log" ]; then
+    echo "ARM $arm NO_HEAD_LOG"
+    return 1
   fi
+  grep -E "$pattern" "$OUT/$arm.log" >"$OUT/$arm.expected" || true
+  grep -E "$pattern" "$OUT/head.log" | grep -v -x -F -f - "$OUT/$arm.expected" >"$OUT/$arm.new" || true
   head -4 "$OUT/$arm.new"
   [ -s "$OUT/$arm.new" ]
 }
