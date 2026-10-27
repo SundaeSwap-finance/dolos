@@ -10,6 +10,22 @@ use std::{collections::HashSet, sync::Arc};
 pub(super) struct BlockContext<C: LedgerContext> {
     inner: C,
     resolved: Option<Arc<UtxoMap>>,
+    made: Arc<UtxoMap>,
+}
+
+/// The outputs of every transaction of the block, sub transactions included.
+fn made_outputs(block: &MultiEraBlock<'_>) -> UtxoMap {
+    dolos_core::applied_txs(block)
+        .into_iter()
+        .flat_map(|(_, tx)| {
+            let hash = tx.hash();
+            tx.outputs()
+                .iter()
+                .enumerate()
+                .map(|(i, o)| ((hash, i as u32), (block.era(), o.encode())))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 impl<C: LedgerContext> BlockContext<C> {
@@ -47,24 +63,138 @@ impl<C: LedgerContext> BlockContext<C> {
         Self {
             inner,
             resolved: resolved.map(Arc::new),
+            made: Arc::new(made_outputs(block)),
         }
     }
 }
 
 impl<C: LedgerContext> LedgerContext for BlockContext<C> {
     fn get_utxos(&self, refs: &[TxoRef]) -> Option<UtxoMap> {
-        match &self.resolved {
-            Some(resolved) => Some(
-                refs.iter()
-                    .filter_map(|r| resolved.get(r).map(|v| (*r, v.clone())))
-                    .collect(),
-            ),
+        // An output the block makes is served from the block, so applying and
+        // undoing the block serve the same output.
+        let (made, outside): (Vec<TxoRef>, Vec<TxoRef>) = refs
+            .iter()
+            .copied()
+            .partition(|r| self.made.contains_key(r));
+        let mut found = match &self.resolved {
+            Some(resolved) => outside
+                .iter()
+                .filter_map(|r| resolved.get(r).map(|v| (*r, v.clone())))
+                .collect(),
             // Preserve the old per-transaction behavior if the bulk read failed.
-            None => self.inner.get_utxos(refs),
-        }
+            None => self.inner.get_utxos(&outside)?,
+        };
+        found.extend(made.iter().map(|r| (*r, self.made[r].clone())));
+        Some(found)
     }
     fn get_slot_timestamp(&self, slot: u64) -> Option<u64> {
         self.inner.get_slot_timestamp(slot)
+    }
+}
+
+#[cfg(test)]
+mod made_in_block_tests {
+    use super::*;
+    use pallas::codec::minicbor;
+    use pallas::codec::utils::MaybeIndefArray;
+    use pallas::interop::utxorpc::v1;
+    use pallas::ledger::primitives::dijkstra::{self, TransactionInput};
+
+    /// A ledger context that knows exactly the outputs it holds.
+    #[derive(Clone)]
+    struct Known(Arc<UtxoMap>);
+
+    impl LedgerContext for Known {
+        fn get_utxos(&self, refs: &[TxoRef]) -> Option<UtxoMap> {
+            Some(
+                refs.iter()
+                    .filter_map(|r| self.0.get(r).map(|v| (*r, v.clone())))
+                    .collect(),
+            )
+        }
+        fn get_slot_timestamp(&self, _: u64) -> Option<u64> {
+            Some(0)
+        }
+    }
+
+    /// A block whose sub transaction carrier also spends the first output of its first sub transaction.
+    fn spends_its_own_sub_output() -> (Vec<u8>, TxoRef) {
+        let text = include_str!("../../../test_data/musashi-w36/ranking-sub-transaction.block");
+        let cbor = hex::decode(text.trim()).unwrap();
+        let made = MultiEraBlock::decode(&cbor)
+            .unwrap()
+            .txs()
+            .iter()
+            .find_map(|tx| tx.sub_transactions().first().map(|sub| sub.hash()))
+            .expect("a transaction lists a sub transaction");
+        let (era, mut block): (u16, dijkstra::Block) = minicbor::decode(&cbor).unwrap();
+        let mut txs: Vec<_> = block.block_body.transactions.to_vec();
+        let carrier = txs
+            .iter_mut()
+            .find(|tx| tx.transaction_body.sub_transactions.is_some())
+            .unwrap();
+        let mut body = (*carrier.transaction_body).clone();
+        let mut inputs = body.inputs.to_vec();
+        inputs.push(TransactionInput {
+            transaction_id: made,
+            index: 0,
+        });
+        body.inputs = inputs.into();
+        carrier.transaction_body = body.into();
+        block.block_body.transactions = MaybeIndefArray::Def(txs);
+        (minicbor::to_vec((era, block)).unwrap(), (made, 0))
+    }
+
+    /// The output the v1 mapper serves for each input of the block's top level transactions.
+    fn served(
+        block: &MultiEraBlock<'_>,
+        context: Known,
+    ) -> Vec<(TxoRef, Option<v1::spec::cardano::TxOutput>)> {
+        let mapped = v1::Mapper::new(BlockContext::new(context, block)).map_block(block);
+        mapped
+            .body
+            .unwrap()
+            .tx
+            .into_iter()
+            .flat_map(|tx| tx.common.unwrap().inputs)
+            .map(|i| {
+                let hash: [u8; 32] = i.tx_hash.as_ref().try_into().unwrap();
+                ((hash.into(), i.output_index), i.as_output)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_input_the_block_does_not_make_is_served_only_from_the_context() {
+        let (raw, made) = spends_its_own_sub_output();
+        let block = MultiEraBlock::decode(&raw).unwrap();
+        let outside: Vec<_> = served(&block, Known(Arc::default()))
+            .into_iter()
+            .filter(|(r, _)| *r != made)
+            .collect();
+        assert!(!outside.is_empty());
+        for (r, output) in outside {
+            assert!(output.is_none(), "{r:?} {output:?}");
+        }
+    }
+
+    #[test]
+    fn an_input_the_block_makes_is_served_the_same_with_or_without_the_context() {
+        let (raw, made) = spends_its_own_sub_output();
+        let block = MultiEraBlock::decode(&raw).unwrap();
+        let output = dolos_core::applied_txs(&block)
+            .into_iter()
+            .find(|(_, tx)| tx.hash() == made.0)
+            .map(|(_, tx)| (block.era(), tx.outputs()[0].encode()))
+            .unwrap();
+        let applied = Known(Arc::new(UtxoMap::from([(made, output)])));
+        let pick = |served: Vec<(TxoRef, Option<_>)>| {
+            served.into_iter().find(|(r, _)| *r == made).unwrap().1
+        };
+        let apply = pick(served(&block, applied));
+        let undo = pick(served(&block, Known(Arc::default())));
+        assert!(apply.is_some());
+        assert_eq!(undo, apply);
     }
 }
 

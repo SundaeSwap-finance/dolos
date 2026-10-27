@@ -1680,20 +1680,14 @@ async fn the_collateral_return_supp9_spends_is_known_unserved() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
-async fn rolling_back_each_block_serves_the_inputs_earlier_blocks_made() {
+async fn rolling_back_each_block_serves_every_input_the_run_made() {
     let corpus = load(CorpusKind::Supp);
     let seeds: usize = corpus.kept().map(|r| r.records()[0].pre_utxo.len()).sum();
     let judged = judge(&corpus, &Manifests::committed(), &Edits::default()).await;
     let text = judged.to_string();
     assert!(judged.state.undo.compared > seeds, "seeds={seeds} {text}");
-    let other = judged
-        .state
-        .undo
-        .disagree
-        .iter()
-        .filter(|d| !d.contains(" in_group made_by="))
-        .join("\n");
-    assert!(other.is_empty(), "{text}\nUNDO\n{other}");
+    let undo = judged.state.undo.disagree.iter().join("\n");
+    assert!(undo.is_empty(), "{text}\nUNDO\n{undo}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -10,6 +10,7 @@ use std::pin::Pin;
 use tonic::{Request, Response, Status};
 
 use crate::prelude::*;
+use crate::serve::grpc::block_context::BlockContext;
 use crate::serve::grpc::stream::ChainStream;
 
 fn outputs_match_address(
@@ -360,11 +361,12 @@ fn apply_predicate(predicate: &u5c::watch::TxPredicate, tx: &u5c::cardano::Tx) -
 
 fn block_to_txs<C: LedgerContext>(
     block: &RawBlock,
-    mapper: &interop::Mapper<C>,
+    context: &C,
     request: &u5c::watch::WatchTxRequest,
 ) -> Vec<u5c::watch::AnyChainTx> {
     let bytes = block;
     let block = MultiEraBlock::decode(block).unwrap();
+    let mapper = interop::Mapper::new(BlockContext::new(context.clone(), &block));
     let txs = block.txs();
 
     txs.iter()
@@ -387,11 +389,8 @@ fn block_to_txs<C: LedgerContext>(
         .collect()
 }
 
-fn raw_to_blockref<C: LedgerContext>(
-    mapper: &interop::Mapper<C>,
-    raw: &[u8],
-) -> Option<u5c::watch::BlockRef> {
-    let block = mapper.map_block_cbor(raw);
+fn raw_to_blockref<C: LedgerContext>(context: &C, raw: &[u8]) -> Option<u5c::watch::BlockRef> {
+    let block = interop::Mapper::new(context.clone()).map_block_cbor(raw);
     let header = block.header?;
 
     Some(u5c::watch::BlockRef {
@@ -402,15 +401,15 @@ fn raw_to_blockref<C: LedgerContext>(
 }
 
 fn roll_to_watch_response<C: LedgerContext>(
-    mapper: &interop::Mapper<C>,
+    context: &C,
     log: &TipEvent,
     request: &u5c::watch::WatchTxRequest,
 ) -> impl Stream<Item = u5c::watch::WatchTxResponse> {
     let txs: Vec<_> = match log {
         TipEvent::Apply(_, block) => {
-            let txs = block_to_txs(block, mapper, request);
+            let txs = block_to_txs(block, context, request);
             if txs.is_empty() {
-                let block_ref = raw_to_blockref(mapper, block);
+                let block_ref = raw_to_blockref(context, block);
                 if let Some(r) = block_ref {
                     vec![u5c::watch::WatchTxResponse {
                         action: Some(u5c::watch::watch_tx_response::Action::Idle(r)),
@@ -425,7 +424,7 @@ fn roll_to_watch_response<C: LedgerContext>(
                     .collect()
             }
         }
-        TipEvent::Undo(_, block) => block_to_txs(block, mapper, request)
+        TipEvent::Undo(_, block) => block_to_txs(block, context, request)
             .into_iter()
             .map(u5c::watch::watch_tx_response::Action::Undo)
             .map(|x| u5c::watch::WatchTxResponse { action: Some(x) })
@@ -443,7 +442,6 @@ where
     C: CancelToken,
 {
     domain: D,
-    mapper: interop::Mapper<D>,
     cancel: C,
 }
 
@@ -453,13 +451,7 @@ where
     C: CancelToken,
 {
     pub fn new(domain: D, cancel: C) -> Self {
-        let mapper = interop::Mapper::new(domain.clone());
-
-        Self {
-            domain,
-            mapper,
-            cancel,
-        }
+        Self { domain, cancel }
     }
 }
 
@@ -494,10 +486,10 @@ where
                     ))
                 })?;
 
-        let mapper = self.mapper.clone();
+        let domain = self.domain.clone();
 
         let stream = stream.flat_map(move |log| match log {
-            Ok(log) => roll_to_watch_response(&mapper, &log, &inner_req)
+            Ok(log) => roll_to_watch_response(&domain, &log, &inner_req)
                 .map(Ok)
                 .left_stream(),
             Err(error) => futures_util::stream::once(async move {
