@@ -25,7 +25,8 @@ use ledger_oracle_judge::{
     },
 };
 use pallas::ledger::traverse::{Era, MultiEraTx};
-use serve::{Served, Service};
+use seed::SeedPoint;
+use serve::{Event, Served, Service};
 use tonic::Request;
 
 use super::{
@@ -233,7 +234,7 @@ fn missing_from_makers<'r>(
 
 /// A block a run rolled, with the records it holds and their slot group.
 struct Rolled<'r> {
-    hash: BlockHash,
+    point: ChainPoint,
     group: &'r [Record],
     records: Vec<&'r Record>,
 }
@@ -305,7 +306,7 @@ async fn validate_run<'r>(
         }
         tip = Some(next);
         rolled.push(Rolled {
-            hash: next.hash(),
+            point: ChainPoint::Specific(last.slot, next.hash()),
             group: records,
             records: included.into_iter().map(|(r, _)| r).collect(),
         });
@@ -315,25 +316,21 @@ async fn validate_run<'r>(
     rolled
 }
 
-/// The output bytes each service serves for the blocks a run rolled, read from the seed point.
+/// The output bytes each service serves for the blocks a run rolled, streamed from the seed point.
 async fn serve_rolled(
     domain: &DomainAdapter,
-    seed: &ChainPoint,
+    seed: &SeedPoint,
     rolled: &[Rolled<'_>],
 ) -> [(Service, Served); 3] {
-    let hashes: Vec<BlockHash> = rolled.iter().map(|r| r.hash).collect();
+    let hashes: Vec<BlockHash> = rolled
+        .iter()
+        .map(|r| r.point.hash().expect("a rolled block has a hash"))
+        .collect();
     let txs = rolled.iter().map(|r| r.records.len()).sum();
-    [
-        (
-            Service::FetchBlock,
-            serve::fetch_block(domain, &hashes).await,
-        ),
-        (
-            Service::FollowTip,
-            serve::follow_tip(domain, seed, hashes.len()).await,
-        ),
-        (Service::WatchTx, serve::watch_tx(domain, seed, txs).await),
-    ]
+    let streams = serve::Streams::open(domain, seed.point()).await;
+    let [follow, watch] = streams.read(Event::Apply, hashes.len(), txs).await;
+    let fetch = serve::fetch_block(domain, &hashes).await;
+    [(Service::FetchBlock, fetch), follow, watch]
 }
 
 /// What each service serves for one input against the ledger's output bytes, grouping the services by each disagreeing verdict.
@@ -368,7 +365,69 @@ fn served_verdicts(
     failures
 }
 
-/// Counts each input a record of a rolled block names that an earlier record made, against what every service serves for it.
+/// The served output comparisons of the records of one block, with the inputs left uncompared because the run's seed made them and the compared inputs only sub transactions name.
+#[derive(Debug, Default)]
+struct ServedChecks {
+    records: BTreeMap<RecordId, Tally>,
+    seeded: usize,
+    sub_only: usize,
+}
+
+/// Counts each input a record of the block names that an earlier record made, against what every service serves for it.
+fn compare_served(
+    kind: CorpusKind,
+    makers: &BTreeMap<TxIn, RecordId>,
+    block: &Rolled<'_>,
+    services: &[(Service, Served)],
+) -> ServedChecks {
+    let mut checks = ServedChecks::default();
+    for record in &block.records {
+        let id = RecordId {
+            corpus: kind,
+            n: record.n,
+        };
+        let parsed = tx_inputs(&record.tx.0).unwrap_or_else(|e| panic!("TX {id} {e}"));
+        let sub_only = parsed.sub_only();
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
+            .unwrap_or_else(|e| panic!("TX {id} {e}"));
+        let hash: [u8; 32] = *tx.hash();
+        let tally = checks.records.entry(id).or_default();
+        for input in named_inputs(id, record) {
+            let shown = show_input(&input);
+            let made = match origin(&input, record, makers, block.group) {
+                InputOrigin::Seeded => {
+                    checks.seeded += 1;
+                    continue;
+                }
+                InputOrigin::AbsentFromPre => {
+                    tally.add(false, || format!("absent_from_pre input={shown}"));
+                    continue;
+                }
+                InputOrigin::InRun { made_by } => format!("in_run made_by={made_by}"),
+                InputOrigin::InGroup { made_by } => format!("in_group made_by={made_by}"),
+            };
+            if sub_only.contains(&input) {
+                checks.sub_only += 1;
+            }
+            let entry = record.pre_utxo.iter().find(|e| e.input == input);
+            let ledger = &entry
+                .expect("an input made in the run is in the pre state")
+                .output;
+            let failures = served_verdicts(&hash, &input, &ledger.0, services);
+            tally.add(failures.is_empty(), || {
+                let lines = failures.iter().map(|(verdict, services)| {
+                    let mut names = services.iter().map(Service::to_string);
+                    let names = names.join(",");
+                    format!("{verdict} input={shown} {made} services={names}")
+                });
+                lines.collect::<Vec<_>>().join(" and ")
+            });
+        }
+    }
+    checks
+}
+
+/// Counts the served outputs of every rolled block into the per record as_output checks.
 fn compare_as_output(
     kind: CorpusKind,
     run: &KeptRun,
@@ -379,48 +438,69 @@ fn compare_as_output(
 ) {
     let makers = run.makers(kind);
     for block in rolled {
+        let served = compare_served(kind, &makers, block, services);
+        state.seeded_unjudged += served.seeded;
+        state.in_run += served.sub_only;
+        for (id, tally) in served.records {
+            let merged = checks.entry(id).or_default();
+            merged.compared += tally.compared;
+            merged.disagree.extend(tally.disagree);
+        }
+    }
+}
+
+/// Rolls a run back one block at a time to its seed point, counting what FollowTip and WatchTx serve for each undone input, what ReadUtxos serves for the inputs earlier blocks made, and the seed outputs it serves at the end.
+async fn sweep(
+    domain: &DomainAdapter,
+    seed: &SeedPoint,
+    kind: CorpusKind,
+    run: &KeptRun,
+    rolled: &[Rolled<'_>],
+    tally: &mut Tally,
+) {
+    let makers = run.makers(kind);
+    let first = &run.records()[0];
+    let id = RecordId {
+        corpus: kind,
+        n: first.n,
+    };
+    for (i, block) in rolled.iter().enumerate().rev() {
+        let to = match i.checked_sub(1) {
+            Some(previous) => &rolled[previous].point,
+            None => seed.point(),
+        };
+        let streams = serve::Streams::open(domain, &block.point).await;
+        if let Err(e) = domain.rollback(to) {
+            tally.add(false, || format!("{id} rollback to={to} {e}"));
+            return;
+        }
+        let services = streams.read(Event::Undo, 1, block.records.len()).await;
+        for (record, checked) in compare_served(kind, &makers, block, &services).records {
+            tally.compared += checked.compared;
+            let lines = checked.disagree.into_iter();
+            tally
+                .disagree
+                .extend(lines.map(|d| format!("{record} {d}")));
+        }
         for record in &block.records {
-            let id = RecordId {
+            let rid = RecordId {
                 corpus: kind,
                 n: record.n,
             };
-            let parsed = tx_inputs(&record.tx.0).unwrap_or_else(|e| panic!("TX {id} {e}"));
-            let sub_only = parsed.sub_only();
-            let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
-                .unwrap_or_else(|e| panic!("TX {id} {e}"));
-            let hash: [u8; 32] = *tx.hash();
-            let tally = checks.entry(id).or_default();
-            for input in named_inputs(id, record) {
-                let shown = show_input(&input);
-                match origin(&input, record, &makers, block.group) {
-                    InputOrigin::Seeded => {
-                        state.seeded_unjudged += 1;
-                        continue;
-                    }
-                    InputOrigin::AbsentFromPre => {
-                        tally.add(false, || format!("absent_from_pre input={shown}"));
-                        continue;
-                    }
-                    InputOrigin::InRun { .. } | InputOrigin::InGroup { .. } => {}
-                }
-                if sub_only.contains(&input) {
-                    state.in_run += 1;
-                }
-                let entry = record.pre_utxo.iter().find(|e| e.input == input);
-                let ledger = &entry
-                    .expect("an input made in the run is in the pre state")
-                    .output;
-                let failures = served_verdicts(&hash, &input, &ledger.0, services);
-                tally.add(failures.is_empty(), || {
-                    let lines = failures.iter().map(|(verdict, services)| {
-                        let mut names = services.iter().map(Service::to_string);
-                        format!("{verdict} input={shown} services={}", names.join(","))
-                    });
-                    lines.collect::<Vec<_>>().join(" and ")
-                });
-            }
+            let restored: Vec<UtxoEntry> = record
+                .pre_utxo
+                .iter()
+                .filter(|e| {
+                    let named = named_inputs(rid, record).contains(&e.input);
+                    let from = origin(&e.input, record, &makers, block.group);
+                    named && matches!(from, InputOrigin::InRun { .. })
+                })
+                .cloned()
+                .collect();
+            compare_utxos(domain, rid, [], &restored, tally).await;
         }
     }
+    compare_utxos(domain, id, [], &first.pre_utxo, tally).await;
 }
 
 /// What a planted check changes in the seed, the expected parameters and the blocks of one judgement.
@@ -478,7 +558,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             &mut judged,
         )
         .await;
-        let services = serve_rolled(&seeded.domain, seeded.seed.point(), &rolled).await;
+        let services = serve_rolled(&seeded.domain, &seeded.seed, &rolled).await;
         compare_as_output(
             corpus.kind,
             run,
@@ -487,6 +567,15 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             &mut judged.state,
             &mut as_output,
         );
+        sweep(
+            &seeded.domain,
+            &seeded.seed,
+            corpus.kind,
+            run,
+            &rolled,
+            &mut judged.state.undo,
+        )
+        .await;
     }
     manifests.unjudged(corpus.kind, &judged_ids, &mut judged.validation);
     judged
@@ -584,7 +673,7 @@ async fn one_changed_cost_model_entry_prints_params_disagree() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn the_v2_record_is_known_and_its_maker_agrees() {
-    let text = judge_supp(|_| ()).await.to_string();
+    let text = judge_supp(|_| ()).await.validation.to_string();
     assert!(!text.contains(" supp#1 "), "{text}");
     assert!(!text.contains("\nDISAGREE supp#2 "), "{text}");
     assert!(
@@ -638,7 +727,7 @@ async fn deleting_one_declared_entry_prints_unsupported_unexpected() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn a_known_entry_naming_an_agreeing_or_unjudged_record_prints_known_stale() {
-    let intact = judge_supp(|_| ()).await.to_string();
+    let intact = judge_supp(|_| ()).await.validation.to_string();
     assert!(!intact.contains("supp#0 "), "{intact}");
     let named = judge_supp(|m| {
         m.known
@@ -866,6 +955,24 @@ async fn the_collateral_return_supp9_spends_is_known_unserved() {
         deleted.contains("\nDIFF as_output supp#9 ledger="),
         "{deleted}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn rolling_back_each_block_serves_the_inputs_earlier_blocks_made() {
+    let corpus = load(CorpusKind::Supp);
+    let seeds: usize = corpus.kept().map(|r| r.records()[0].pre_utxo.len()).sum();
+    let judged = judge(&corpus, &Manifests::committed(), &Edits::default()).await;
+    let text = judged.to_string();
+    assert!(judged.state.undo.compared > seeds, "seeds={seeds} {text}");
+    let other = judged
+        .state
+        .undo
+        .disagree
+        .iter()
+        .filter(|d| !d.contains(" in_group made_by="))
+        .join("\n");
+    assert!(other.is_empty(), "{text}\nUNDO\n{other}");
 }
 
 #[test]

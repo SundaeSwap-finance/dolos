@@ -78,16 +78,18 @@ pub struct StateTallies {
     pub as_output: Tally,
     pub in_run: usize,
     pub seeded_unjudged: usize,
+    pub undo: Tally,
     pub params: Tally,
     pub known: Vec<String>,
     pub known_stale: Vec<String>,
 }
 
 impl StateTallies {
-    fn named(&self) -> [(&'static str, &Tally); 3] {
+    fn named(&self) -> [(&'static str, &Tally); 4] {
         [
             ("utxo", &self.utxo),
             ("as_output", &self.as_output),
+            ("undo", &self.undo),
             ("params", &self.params),
         ]
     }
@@ -144,6 +146,7 @@ impl fmt::Display for StateTallies {
             as_output,
             in_run,
             seeded_unjudged,
+            undo,
             params,
             known,
             known_stale,
@@ -151,8 +154,8 @@ impl fmt::Display for StateTallies {
         write!(
             f,
             "STATE compared utxo={} as_output={} of in_run={in_run} \
-             seeded_unjudged={seeded_unjudged} params={}",
-            utxo.compared, as_output.compared, params.compared
+             seeded_unjudged={seeded_unjudged} undo={} params={}",
+            utxo.compared, as_output.compared, undo.compared, params.compared
         )?;
         for line in known {
             write!(f, "\nKNOWN {line}")?;
@@ -206,11 +209,38 @@ mod tests {
         checks
     }
 
-    #[test]
-    fn agreeing_records_off_the_known_list_print_nothing_and_pass() {
+    fn compared() -> StateTallies {
         let mut state = StateTallies::default();
         state.utxo.add(true, String::new);
+        state.undo.add(true, String::new);
         state.params.add(true, String::new);
+        state
+    }
+
+    #[test]
+    fn a_comparison_that_looked_at_nothing_fails() {
+        let mut state = compared();
+        state.as_output.add(true, String::new);
+        assert!(state.pass(), "{state}");
+        let empties: [fn(&mut StateTallies) -> &mut Tally; 4] = [
+            |s| &mut s.utxo,
+            |s| &mut s.as_output,
+            |s| &mut s.undo,
+            |s| &mut s.params,
+        ];
+        for empty in empties {
+            let mut state = state.clone();
+            *empty(&mut state) = Tally::default();
+            assert!(!state.pass(), "{state}");
+        }
+        assert!(state
+            .to_string()
+            .contains(" seeded_unjudged=0 undo=1 params=1"));
+    }
+
+    #[test]
+    fn agreeing_records_off_the_known_list_print_nothing_and_pass() {
+        let mut state = compared();
         state.settle_as_output(
             CorpusKind::Supp,
             checks(&[(1, &[]), (2, &[])]),
@@ -223,9 +253,7 @@ mod tests {
 
     #[test]
     fn a_known_record_passes_while_it_disagrees() {
-        let mut state = StateTallies::default();
-        state.utxo.add(true, String::new);
-        state.params.add(true, String::new);
+        let mut state = compared();
         let known = KnownList::from([((Locus::AsOutput, supp(9)), "S3".to_string())]);
         let diff = "ledger=ab dolos=none input=00#1 services=FetchBlock";
         state.settle_as_output(CorpusKind::Supp, checks(&[(9, &[diff])]), &known);
@@ -268,9 +296,7 @@ mod tests {
 
     #[test]
     fn a_disagreement_off_the_known_list_fails_with_its_record() {
-        let mut state = StateTallies::default();
-        state.utxo.add(true, String::new);
-        state.params.add(true, String::new);
+        let mut state = compared();
         let diff = "ledger=ab dolos=none input=00#1 services=FetchBlock";
         state.settle_as_output(CorpusKind::Supp, checks(&[(9, &[diff])]), &KnownList::new());
         assert_eq!(state.as_output.disagree, vec![format!("supp#9 {diff}")]);

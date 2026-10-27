@@ -118,68 +118,101 @@ pub(super) async fn fetch_block(domain: &DomainAdapter, blocks: &[BlockHash]) ->
     served
 }
 
-/// The inputs FollowTip serves for the transactions of the blocks after the point, reading until it has applied the given number of blocks.
-pub(super) async fn follow_tip(domain: &DomainAdapter, from: &ChainPoint, blocks: usize) -> Served {
-    let cancel = CancellationToken::new();
-    let service = SyncServiceImpl::new(domain.clone(), CancelTokenImpl(cancel.clone()));
-    let request = s::FollowTipRequest {
-        intersect: vec![block_ref(from)],
-        field_mask: None,
-    };
-    let response = service.follow_tip(Request::new(request)).await;
-    let mut stream = response.unwrap().into_inner();
-    let mut served = Served::new();
-    let mut applied = 0;
-    while applied < blocks {
-        let Ok(Some(next)) = tokio::time::timeout(NEXT, stream.next()).await else {
-            break;
-        };
-        match next.unwrap().action {
-            Some(s::follow_tip_response::Action::Apply(block)) => {
-                add_block(&mut served, &block);
-                applied += 1;
-            }
-            Some(s::follow_tip_response::Action::Reset(_)) => {}
-            other => panic!("FollowTip from a point it holds serves {other:?}"),
-        }
-    }
-    cancel.cancel();
-    served
+/// Which tip event a stream read takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Event {
+    Apply,
+    Undo,
 }
 
-/// The inputs WatchTx serves for the transactions after the point, reading until it has applied the given number of transactions.
-pub(super) async fn watch_tx(domain: &DomainAdapter, from: &ChainPoint, txs: usize) -> Served {
-    let cancel = CancellationToken::new();
-    let service = WatchServiceImpl::new(domain.clone(), CancelTokenImpl(cancel.clone()));
-    let from = block_ref(from);
-    let request = w::WatchTxRequest {
-        intersect: vec![w::BlockRef {
-            slot: from.slot,
-            hash: from.hash,
-            height: 0,
-        }],
-        predicate: None,
-        field_mask: None,
-    };
-    let response = service.watch_tx(Request::new(request)).await;
-    let mut stream = response.unwrap().into_inner();
-    let mut served = Served::new();
-    let mut applied = 0;
-    while applied < txs {
-        let Ok(Some(next)) = tokio::time::timeout(NEXT, stream.next()).await else {
-            break;
-        };
-        match next.unwrap().action {
-            Some(w::watch_tx_response::Action::Apply(tx)) => {
-                let Some(w::any_chain_tx::Chain::Cardano(tx)) = &tx.chain else {
-                    panic!("a watched transaction is a Cardano transaction");
-                };
-                add_tx(&mut served, tx);
-                applied += 1;
-            }
-            other => panic!("WatchTx over blocks that hold transactions serves {other:?}"),
+type FollowStream =
+    <SyncServiceImpl<DomainAdapter, CancelTokenImpl> as s::sync_service_server::SyncService>::FollowTipStream;
+type WatchStream =
+    <WatchServiceImpl<DomainAdapter, CancelTokenImpl> as w::watch_service_server::WatchService>::WatchTxStream;
+
+/// A FollowTip stream and a WatchTx stream subscribed at one point.
+pub(super) struct Streams {
+    follow: FollowStream,
+    watch: WatchStream,
+    cancel: CancellationToken,
+}
+
+impl Streams {
+    /// Subscribes both streams at the point.
+    pub(super) async fn open(domain: &DomainAdapter, from: &ChainPoint) -> Self {
+        let cancel = CancellationToken::new();
+        let token = || CancelTokenImpl(cancel.clone());
+        let from = block_ref(from);
+        let follow = SyncServiceImpl::new(domain.clone(), token())
+            .follow_tip(Request::new(s::FollowTipRequest {
+                intersect: vec![from.clone()],
+                field_mask: None,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let watch = WatchServiceImpl::new(domain.clone(), token())
+            .watch_tx(Request::new(w::WatchTxRequest {
+                intersect: vec![w::BlockRef {
+                    slot: from.slot,
+                    hash: from.hash,
+                    height: 0,
+                }],
+                predicate: None,
+                field_mask: None,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        Streams {
+            follow,
+            watch,
+            cancel,
         }
     }
-    cancel.cancel();
-    served
+
+    /// The inputs each stream serves for the next blocks and transactions of the event, reading until the given counts arrive or a read waits too long.
+    pub(super) async fn read(
+        mut self,
+        event: Event,
+        blocks: usize,
+        txs: usize,
+    ) -> [(Service, Served); 2] {
+        use s::follow_tip_response::Action as F;
+        use w::watch_tx_response::Action as W;
+        let mut follow = Served::new();
+        let mut taken = 0;
+        while taken < blocks {
+            let Ok(Some(next)) = tokio::time::timeout(NEXT, self.follow.next()).await else {
+                break;
+            };
+            match (event, next.unwrap().action) {
+                (_, Some(F::Reset(_))) => {}
+                (Event::Apply, Some(F::Apply(block))) | (Event::Undo, Some(F::Undo(block))) => {
+                    add_block(&mut follow, &block);
+                    taken += 1;
+                }
+                (_, other) => panic!("FollowTip serves {other:?} where it reads {event:?}"),
+            }
+        }
+        let mut watch = Served::new();
+        let mut taken = 0;
+        while taken < txs {
+            let Ok(Some(next)) = tokio::time::timeout(NEXT, self.watch.next()).await else {
+                break;
+            };
+            match (event, next.unwrap().action) {
+                (Event::Apply, Some(W::Apply(tx))) | (Event::Undo, Some(W::Undo(tx))) => {
+                    let Some(w::any_chain_tx::Chain::Cardano(tx)) = &tx.chain else {
+                        panic!("a watched transaction is a Cardano transaction");
+                    };
+                    add_tx(&mut watch, tx);
+                    taken += 1;
+                }
+                (_, other) => panic!("WatchTx serves {other:?} where it reads {event:?}"),
+            }
+        }
+        self.cancel.cancel();
+        [(Service::FollowTip, follow), (Service::WatchTx, watch)]
+    }
 }
