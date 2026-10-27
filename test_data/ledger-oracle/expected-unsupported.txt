@@ -193,9 +193,6 @@ ic#843 certificate kind
 ic#845 certificate kind
 ic#847 certificate kind
 ic#848 certificate kind
-ic#851 native script guards
-ic#855 script guards
-ic#869 script guards
 ic#890 stateful or scripted subtransaction
 ic#898 stateful or scripted subtransaction
 ic#900 witness fields
