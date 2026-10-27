@@ -21,6 +21,7 @@ impl fmt::Display for Feature {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Locus {
     Validation,
+    AsOutput,
 }
 
 impl FromStr for Locus {
@@ -29,6 +30,7 @@ impl FromStr for Locus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "validation" => Ok(Locus::Validation),
+            "as_output" => Ok(Locus::AsOutput),
             other => Err(format!("unknown locus {other}")),
         }
     }

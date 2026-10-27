@@ -58,6 +58,13 @@ pub(super) struct Tip {
     number: u64,
 }
 
+impl Tip {
+    /// The header hash of the block.
+    pub(super) fn hash(&self) -> BlockHash {
+        self.hash
+    }
+}
+
 /// A block at the slot whose parent is the tip, holding each transaction with its scripts flag, and the tip it makes.
 pub(super) fn block(slot: u64, tip: Option<Tip>, txs: &[(&[u8], Phase2)]) -> (Tip, RawBlock) {
     let transactions = txs

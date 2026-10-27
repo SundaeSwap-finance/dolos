@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use thiserror::Error;
 
 /// A transaction output reference.
@@ -226,6 +228,21 @@ impl TxInputs {
             .flat_map(|s| &s.spend)
             .filter(|i| !self.spend.contains(i))
     }
+
+    /// The inputs the sub transactions name that the top level body names in none of its input sets.
+    pub fn sub_only(&self) -> BTreeSet<&TxIn> {
+        let top: BTreeSet<&TxIn> = self
+            .spend
+            .iter()
+            .chain(&self.collateral)
+            .chain(&self.reference)
+            .collect();
+        self.subs
+            .iter()
+            .flat_map(|s| s.spend.iter().chain(&s.reference))
+            .filter(|i| !top.contains(i))
+            .collect()
+    }
 }
 
 fn body(r: &mut Reader, mut on: impl FnMut(&mut Reader, u64) -> Result<bool>) -> Result<()> {
@@ -334,5 +351,26 @@ mod tests {
             read.child_only().collect::<Vec<_>>(),
             vec![&TxIn { tx: [2; 32], ix: 1 }]
         );
+    }
+
+    #[test]
+    fn sub_only_leaves_out_every_input_the_top_level_names() {
+        let i = |n: u8| TxIn { tx: [n; 32], ix: 0 };
+        let inputs = TxInputs {
+            spend: vec![i(1)],
+            collateral: vec![i(2)],
+            reference: vec![i(3)],
+            subs: vec![
+                SubInputs {
+                    spend: vec![i(1), i(2), i(4)],
+                    reference: vec![i(3)],
+                },
+                SubInputs {
+                    spend: vec![],
+                    reference: vec![i(5), i(4)],
+                },
+            ],
+        };
+        assert_eq!(inputs.sub_only(), BTreeSet::from([&i(4), &i(5)]));
     }
 }

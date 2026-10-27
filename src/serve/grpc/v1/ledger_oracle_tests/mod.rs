@@ -2,6 +2,7 @@
 
 mod params;
 mod seed;
+mod serve;
 mod validate;
 
 use std::{
@@ -10,7 +11,8 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use dolos_core::{SyncExt as _, TxoRef};
+use dolos_core::{BlockHash, ChainPoint, SyncExt as _, TxoRef};
+use itertools::Itertools as _;
 use ledger_oracle_judge::{
     cbor::{tx_inputs, TxIn},
     compare::{ByteVerdict, StateTallies, Tally},
@@ -22,6 +24,8 @@ use ledger_oracle_judge::{
         outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, ValidationTally,
     },
 };
+use pallas::ledger::traverse::{Era, MultiEraTx};
+use serve::{Served, Service};
 use tonic::Request;
 
 use super::{
@@ -163,7 +167,7 @@ impl Manifests {
         }
     }
 
-    /// Fails each entry for the corpus that names a record the judgement did not reach.
+    /// Fails each declared or validation known entry for the corpus that names a record the judgement did not reach.
     fn unjudged(&self, kind: CorpusKind, judged: &BTreeSet<RecordId>, tally: &mut ValidationTally) {
         let missed = |id: &RecordId| id.corpus == kind && !judged.contains(id);
         for (id, feature) in self.declared.iter().filter(|(id, _)| missed(id)) {
@@ -173,7 +177,9 @@ impl Manifests {
             };
             tally.add(*id, Outcome::Fail(fail));
         }
-        for ((_, id), row) in self.known.iter().filter(|((_, id), _)| missed(id)) {
+        let validation = |locus: &Locus| *locus == Locus::Validation;
+        let entries = self.known.iter();
+        for ((_, id), row) in entries.filter(|((locus, id), _)| validation(locus) && missed(id)) {
             let fail = Fail::KnownStale { row: row.clone() };
             tally.add(*id, Outcome::Fail(fail));
         }
@@ -225,16 +231,23 @@ fn missing_from_makers<'r>(
     (entries, made_by)
 }
 
-/// Submits each slot group of a run in order to a fresh mempool at the group slot, then rolls the block of its accepted records and compares the outputs.
-async fn validate_run(
+/// A block a run rolled, with the records it holds and their slot group.
+struct Rolled<'r> {
+    hash: BlockHash,
+    group: &'r [Record],
+    records: Vec<&'r Record>,
+}
+
+/// Submits each slot group of a run in order to a fresh mempool at the group slot, then rolls the block of its accepted records, compares the outputs and returns the blocks it rolled.
+async fn validate_run<'r>(
     base: &DomainAdapter,
     kind: CorpusKind,
-    run: &KeptRun,
+    run: &'r KeptRun,
     manifests: &Manifests,
     edits: &Edits<'_>,
     judged: &mut BTreeSet<RecordId>,
     tallies: &mut Judged,
-) {
+) -> Vec<Rolled<'r>> {
     let Judged {
         validation: tally,
         state,
@@ -245,6 +258,7 @@ async fn validate_run(
     };
     let makers = run.makers(kind);
     let mut tip = None;
+    let mut rolled = Vec::new();
     for records in run.groups() {
         let group = validate::group(base, records[0].slot);
         let mut seeding = BTreeSet::new();
@@ -275,11 +289,12 @@ async fn validate_run(
         let Some((last, post)) = accepted.clone().next_back() else {
             continue;
         };
-        let txs: Vec<_> = accepted
-            .filter_map(|(r, _)| {
-                let phase2 = (edits.block_tx)(id_of(r), r.phase2_valid)?;
-                Some((r.tx.0.as_slice(), phase2))
-            })
+        let included: Vec<(&Record, Phase2)> = accepted
+            .filter_map(|(r, _)| Some((r, (edits.block_tx)(id_of(r), r.phase2_valid)?)))
+            .collect();
+        let txs: Vec<_> = included
+            .iter()
+            .map(|(r, phase2)| (r.tx.0.as_slice(), *phase2))
             .collect();
         let (next, block) = validate::block(last.slot, tip, &txs);
         if let Err(e) = group.roll(block) {
@@ -289,8 +304,122 @@ async fn validate_run(
             continue;
         }
         tip = Some(next);
+        rolled.push(Rolled {
+            hash: next.hash(),
+            group: records,
+            records: included.into_iter().map(|(r, _)| r).collect(),
+        });
         let inputs = records.iter().flat_map(|r| &r.pre_utxo).map(|e| &e.input);
         compare_utxos(group.domain(), id_of(last), inputs, post, &mut state.utxo).await;
+    }
+    rolled
+}
+
+/// The output bytes each service serves for the blocks a run rolled, read from the seed point.
+async fn serve_rolled(
+    domain: &DomainAdapter,
+    seed: &ChainPoint,
+    rolled: &[Rolled<'_>],
+) -> [(Service, Served); 3] {
+    let hashes: Vec<BlockHash> = rolled.iter().map(|r| r.hash).collect();
+    let txs = rolled.iter().map(|r| r.records.len()).sum();
+    [
+        (
+            Service::FetchBlock,
+            serve::fetch_block(domain, &hashes).await,
+        ),
+        (
+            Service::FollowTip,
+            serve::follow_tip(domain, seed, hashes.len()).await,
+        ),
+        (Service::WatchTx, serve::watch_tx(domain, seed, txs).await),
+    ]
+}
+
+/// What each service serves for one input against the ledger's output bytes, grouping the services by each disagreeing verdict.
+fn served_verdicts(
+    tx: &[u8; 32],
+    input: &TxIn,
+    ledger: &[u8],
+    services: &[(Service, Served)],
+) -> BTreeMap<String, BTreeSet<Service>> {
+    let mut failures: BTreeMap<String, BTreeSet<Service>> = BTreeMap::new();
+    for (service, served) in services {
+        let verdicts: Vec<String> = match served.get(tx) {
+            None => vec!["not_served".to_string()],
+            Some(named) => {
+                let occurrences: Vec<_> = named.iter().filter(|(i, _)| i == input).collect();
+                if occurrences.is_empty() {
+                    vec!["not_named".to_string()]
+                } else {
+                    occurrences
+                        .into_iter()
+                        .filter_map(|(_, output)| ByteVerdict::of(Some(ledger), output.as_deref()))
+                        .filter(|v| !v.agrees())
+                        .map(|v| v.to_string())
+                        .collect()
+                }
+            }
+        };
+        for verdict in verdicts {
+            failures.entry(verdict).or_default().insert(*service);
+        }
+    }
+    failures
+}
+
+/// Counts each input a record of a rolled block names that an earlier record made, against what every service serves for it.
+fn compare_as_output(
+    kind: CorpusKind,
+    run: &KeptRun,
+    rolled: &[Rolled<'_>],
+    services: &[(Service, Served)],
+    state: &mut StateTallies,
+    checks: &mut BTreeMap<RecordId, Tally>,
+) {
+    let makers = run.makers(kind);
+    for block in rolled {
+        for record in &block.records {
+            let id = RecordId {
+                corpus: kind,
+                n: record.n,
+            };
+            let parsed = tx_inputs(&record.tx.0).unwrap_or_else(|e| panic!("TX {id} {e}"));
+            let sub_only = parsed.sub_only();
+            let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
+                .unwrap_or_else(|e| panic!("TX {id} {e}"));
+            let hash: [u8; 32] = *tx.hash();
+            let tally = checks.entry(id).or_default();
+            for input in named_inputs(id, record) {
+                let shown = show_input(&input);
+                match origin(&input, record, &makers, block.group) {
+                    InputOrigin::Seeded => {
+                        state.seeded_unjudged += 1;
+                        continue;
+                    }
+                    InputOrigin::AbsentFromPre => {
+                        tally.add(false, || format!("absent_from_pre input={shown}"));
+                        continue;
+                    }
+                    InputOrigin::InRun { .. } | InputOrigin::InGroup { .. } => {}
+                }
+                if sub_only.contains(&input) {
+                    state.in_run += 1;
+                }
+                let entry = record.pre_utxo.iter().find(|e| e.input == input);
+                let ledger = &entry
+                    .expect("an input made in the run is in the pre state")
+                    .output;
+                let failures = served_verdicts(&hash, &input, &ledger.0, services);
+                tally.add(failures.is_empty(), || {
+                    let lines = failures.iter().map(|(verdict, services)| {
+                        let mut names = services.iter().map(Service::to_string);
+                        format!("{verdict} input={shown} services={}", names.join(","))
+                    });
+                    lines.collect::<Vec<_>>().join(" and ")
+                });
+            }
+        }
     }
 }
 
@@ -316,6 +445,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
     let genesis = seed::genesis(epoch_size(corpus));
     let mut judged = Judged::default();
     let mut judged_ids = BTreeSet::new();
+    let mut as_output = BTreeMap::new();
     for run in corpus.kept() {
         let first = &run.records()[0];
         let id = RecordId {
@@ -338,7 +468,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
         let served = read_params(&seeded.domain).await;
         let expected = (edits.expected_params)(run.pparams());
         params::compare(id, &expected, &served, &mut judged.state.params);
-        validate_run(
+        let rolled = validate_run(
             &seeded.domain,
             corpus.kind,
             run,
@@ -348,8 +478,20 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             &mut judged,
         )
         .await;
+        let services = serve_rolled(&seeded.domain, seeded.seed.point(), &rolled).await;
+        compare_as_output(
+            corpus.kind,
+            run,
+            &rolled,
+            &services,
+            &mut judged.state,
+            &mut as_output,
+        );
     }
     manifests.unjudged(corpus.kind, &judged_ids, &mut judged.validation);
+    judged
+        .state
+        .settle_as_output(corpus.kind, as_output, &manifests.known);
     judged
 }
 
@@ -697,6 +839,33 @@ async fn a_tx_received_in_one_group_is_absent_from_the_next() {
         checked += 1;
     }
     assert!(checked > 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn the_collateral_return_supp9_spends_is_known_unserved() {
+    let line = "\nKNOWN row=S3 ids=supp#9 as_output ledger=";
+    let intact = judge_supp(|_| ()).await;
+    let text = intact.to_string();
+    assert!(text.contains(line), "{text}");
+    let known = text.lines().find(|l| l.starts_with(&line[1..])).unwrap();
+    assert!(known.contains(" dolos=none input="), "{known}");
+    for service in ["FetchBlock", "FollowTip", "WatchTx"] {
+        assert!(known.contains(service), "{known}");
+    }
+    assert!(intact.state.as_output.disagree.is_empty(), "{text}");
+    assert!(intact.state.as_output.compared > 0, "{text}");
+    let deleted = judge_supp(|m| {
+        m.known.remove(&(Locus::AsOutput, supp(9))).unwrap();
+    })
+    .await
+    .to_string();
+    assert!(!deleted.contains("\nKNOWN row=S3 "), "{deleted}");
+    assert!(deleted.contains("\nSTATE as_output disagree="), "{deleted}");
+    assert!(
+        deleted.contains("\nDIFF as_output supp#9 ledger="),
+        "{deleted}"
+    );
 }
 
 #[test]
