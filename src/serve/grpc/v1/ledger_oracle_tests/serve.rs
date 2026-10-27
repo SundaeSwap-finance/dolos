@@ -39,23 +39,19 @@ impl fmt::Display for Service {
     }
 }
 
-/// The output bytes one service serves for each input a transaction names, by transaction hash.
-pub(super) type Served = BTreeMap<[u8; 32], Vec<(TxIn, Option<Vec<u8>>)>>;
+/// The output one service serves for each input a transaction names, by transaction hash.
+pub(super) type Served = BTreeMap<[u8; 32], Vec<(TxIn, Option<cardano::TxOutput>)>>;
 
 fn hash32(bytes: &[u8]) -> [u8; 32] {
     bytes.try_into().expect("a served hash is 32 bytes")
 }
 
-fn served_input(input: &cardano::TxInput) -> (TxIn, Option<Vec<u8>>) {
+fn served_input(input: &cardano::TxInput) -> (TxIn, Option<cardano::TxOutput>) {
     let txin = TxIn {
         tx: hash32(&input.tx_hash),
         ix: input.output_index.into(),
     };
-    let output = input.as_output.as_ref().map(|o| {
-        let cbor = o.original_cbor.as_ref();
-        cbor.expect("a served output carries its bytes").to_vec()
-    });
-    (txin, output)
+    (txin, input.as_output.clone())
 }
 
 /// Adds the inputs a served transaction names, with the output served for each.

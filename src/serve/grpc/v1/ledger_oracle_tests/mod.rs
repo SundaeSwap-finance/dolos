@@ -1,6 +1,7 @@
 //! Judges what Dolos validates and serves against ledger corpora.
 
 mod live;
+mod output;
 mod params;
 mod seed;
 mod serve;
@@ -72,17 +73,6 @@ fn epoch_size(corpus: &Corpus) -> u64 {
         .epoch_size
 }
 
-/// The output bytes Dolos serves through ReadUtxos for each input it holds.
-async fn read_utxos<'a>(
-    domain: &DomainAdapter,
-    inputs: impl IntoIterator<Item = &'a TxIn>,
-) -> BTreeMap<TxIn, Vec<u8>> {
-    let items = read_utxo_data(domain, inputs).await.into_iter();
-    items
-        .map(|(input, item)| (input, item.native_bytes.to_vec()))
-        .collect()
-}
-
 /// The datum bytes Dolos serves through ReadUtxos for each input it holds.
 async fn read_datums<'a>(
     domain: &DomainAdapter,
@@ -142,7 +132,21 @@ async fn read_utxo_data<'a>(
         .collect()
 }
 
-/// Counts the ledger output, or its absence, at each input and each ledger entry against what Dolos serves there.
+/// The fields of a served output that state other values than the ledger's output bytes, the parsed state itself when Dolos serves none.
+fn parsed_differing(
+    id: RecordId,
+    ledger: &[u8],
+    parsed: Option<&cardano::TxOutput>,
+) -> Vec<&'static str> {
+    match parsed {
+        Some(parsed) => {
+            output::differing(ledger, parsed).unwrap_or_else(|e| panic!("OUTPUT {id} {e}"))
+        }
+        None => vec!["parsed_state"],
+    }
+}
+
+/// Counts the ledger output, or its absence, at each input and each ledger entry against the bytes and parsed fields Dolos serves there.
 async fn compare_utxos<'a>(
     domain: &DomainAdapter,
     id: RecordId,
@@ -156,16 +160,29 @@ async fn compare_utxos<'a>(
         .collect();
     let mut keys: BTreeSet<&TxIn> = inputs.into_iter().collect();
     keys.extend(expected.keys());
-    let served = read_utxos(domain, keys.iter().copied()).await;
+    let served = read_utxo_data(domain, keys.iter().copied()).await;
     for input in keys {
         let ledger = expected.get(input).copied();
-        let served = served.get(input).map(Vec::as_slice);
-        match ByteVerdict::of(ledger, served) {
-            None => tally.add(true, String::new),
-            Some(verdict) => tally.add(verdict.agrees(), || {
-                format!("{id} input={} {verdict}", show_input(input))
-            }),
-        }
+        let item = served.get(input);
+        let Some(verdict) = ByteVerdict::of(ledger, item.map(|i| i.native_bytes.as_ref())) else {
+            tally.add(true, String::new);
+            continue;
+        };
+        let fields = match (ledger, item) {
+            (Some(ledger), Some(item)) => {
+                let parsed = item.parsed_state.as_ref();
+                let parsed = parsed.map(|q::any_utxo_data::ParsedState::Cardano(output)| output);
+                parsed_differing(id, ledger, parsed)
+            }
+            (None, _) | (_, None) => Vec::new(),
+        };
+        tally.add(verdict.agrees() && fields.is_empty(), || {
+            let shown = show_input(input);
+            match fields.is_empty() {
+                true => format!("{id} input={shown} {verdict}"),
+                false => format!("{id} input={shown} {verdict} fields={}", fields.join(",")),
+            }
+        });
     }
 }
 
@@ -883,8 +900,29 @@ async fn serve_rolled(
     [(Service::FetchBlock, fetch), follow, watch]
 }
 
+/// The verdict on one served output against the ledger's output bytes, none when its bytes and parsed fields agree.
+fn served_verdict(
+    id: RecordId,
+    ledger: &[u8],
+    served: Option<&cardano::TxOutput>,
+) -> Option<String> {
+    let Some(served) = served else {
+        return Some(ByteVerdict::against(ledger, None).to_string());
+    };
+    let bytes = served.original_cbor.as_ref();
+    let bytes = bytes.expect("a served output carries its bytes");
+    let verdict = ByteVerdict::against(ledger, Some(bytes));
+    let fields = parsed_differing(id, ledger, Some(served));
+    match (verdict.agrees(), fields.is_empty()) {
+        (true, true) => None,
+        (_, true) => Some(verdict.to_string()),
+        (_, false) => Some(format!("{verdict} fields={}", fields.join(","))),
+    }
+}
+
 /// What each service serves for one input against the ledger's output bytes, grouping the services by each disagreeing verdict.
 fn served_verdicts(
+    id: RecordId,
     tx: &[u8; 32],
     input: &TxIn,
     ledger: &[u8],
@@ -901,9 +939,7 @@ fn served_verdicts(
                 } else {
                     occurrences
                         .into_iter()
-                        .filter_map(|(_, output)| ByteVerdict::of(Some(ledger), output.as_deref()))
-                        .filter(|v| !v.agrees())
-                        .map(|v| v.to_string())
+                        .filter_map(|(_, output)| served_verdict(id, ledger, output.as_ref()))
                         .collect()
                 }
             }
@@ -963,7 +999,7 @@ fn compare_served(
             let ledger = &entry
                 .expect("an input made in the run is in the pre state")
                 .output;
-            let failures = served_verdicts(&hash, &input, &ledger.0, services);
+            let failures = served_verdicts(id, &hash, &input, &ledger.0, services);
             tally.add(failures.is_empty(), || {
                 let lines = failures.iter().map(|(verdict, services)| {
                     let mut names = services.iter().map(Service::to_string);

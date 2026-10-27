@@ -78,7 +78,7 @@ fn batch_hashes(block: &s::AnyChainBlock) -> Vec<[u8; 32]> {
         .collect()
 }
 
-fn presence(output: Option<&Option<Vec<u8>>>) -> &'static str {
+fn presence(output: Option<&Option<cardano::TxOutput>>) -> &'static str {
     match output {
         None => "absent",
         Some(None) => "no_output",

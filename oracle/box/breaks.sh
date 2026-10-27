@@ -1,11 +1,11 @@
 #!/bin/sh
 # Judges the head of the oracle branch and three planted breaks of it, one oracle run each.
-# Usage: [REV=ref] [ARMS="head colret rodrigo-reverted rob-reverted"] breaks.sh
+# Usage: [REV=ref] [ARMS="head colret coin rodrigo-reverted rob-reverted"] breaks.sh
 # The branch is read from the bare repository $ROOT/dolos.git, fed from a git bundle.
 set -eu
 ROOT=${ROOT:-/opt/build/ledger-oracle-1027}
 REV=${REV:-feat/ledger-oracle}
-ARMS=${ARMS:-head colret rodrigo-reverted rob-reverted}
+ARMS=${ARMS:-head colret coin rodrigo-reverted rob-reverted}
 MIN_FREE_G=${MIN_FREE_G:-6}
 HERE=$(cd "$(dirname "$0")" && pwd)
 IMAGE="$HERE/in-image.sh"
@@ -37,6 +37,10 @@ plant_colret() {
   fi
 }
 
+plant_coin() {
+  git -C "$ROOT/$SCRATCH" apply "$HERE/plants/coin.diff"
+}
+
 plant_rob() {
   rm -rf "${ROOT:?}/$PALLAS"
   cp -a "$ROOT"/cargo-home/git/checkouts/pallas-*/"$pin_short" "$ROOT/$PALLAS"
@@ -51,6 +55,7 @@ caught() {
   case $arm in
     head) return 1 ;;
     colret) pattern='^(DIFF utxo .* ledger=none dolos=|DISAGREE supp#9 |KNOWN_STALE supp#9 row=S3 )' ;;
+    coin) pattern='^DIFF utxo .* fields=([a-z_]+,)*coin(,|$)' ;;
     rodrigo-reverted) pattern='^STATE as_output disagree=' ;;
     rob-reverted) pattern='^(UNSUPPORTED_UNEXPECTED|DISAGREE|REASON_MISMATCH|STALE_MANIFEST) ic#(851|861|1215|1233) ' ;;
   esac
@@ -74,6 +79,7 @@ for arm in $ARMS; do
   case $arm in
     head) ;;
     colret) plant_colret ;;
+    coin) plant_coin ;;
     rodrigo-reverted) plant_rodrigo ;;
     rob-reverted) plant_rob ; locked= ;;
     *) echo "unknown arm $arm" ; exit 2 ;;
