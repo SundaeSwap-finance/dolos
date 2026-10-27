@@ -1,0 +1,14 @@
+[package]
+name = "ledger-oracle-judge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+flate2 = "1.0.34"
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true

@@ -201,6 +201,7 @@ members = [
     "crates/mithril",
     "crates/snapshot",
     "crates/testing",
+    "crates/ledger-oracle-judge",
     "crates/minibf",
     "crates/redb3",
     "xtask", "crates/minikupo",
