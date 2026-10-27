@@ -1,26 +1,136 @@
-use std::sync::Arc;
-
-use dolos_core::{
-    ChainError, ChainPoint, Domain as _, DomainError, EraCbor, MempoolAwareUtxoStore,
-    StateStore as _, StateWriter as _, SubmitExt as _, TxHash, TxoRef, UtxoSetDelta,
+use std::{
+    fmt,
+    panic::{self, AssertUnwindSafe},
+    sync::{Arc, PoisonError},
 };
-use ledger_oracle_judge::{record::UtxoEntry, verdict::DolosVerdict};
-use pallas::ledger::validate::utils::ValidationError;
+
+use dolos_cardano::CardanoLogic;
+use dolos_core::{
+    BlockHash, BlockSlot, ChainError, ChainLogic as _, ChainPoint, Domain as _, DomainError,
+    EraCbor, MempoolAwareUtxoStore, RawBlock, StateStore as _, StateWriter as _, SubmitExt as _,
+    SyncExt as _, TxHash, TxoRef, UtxoSetDelta,
+};
+use ledger_oracle_judge::{
+    record::{Phase2, UtxoEntry},
+    verdict::DolosVerdict,
+};
+use pallas::{
+    codec::minicbor,
+    ledger::{
+        primitives::{
+            dijkstra::{
+                Block, BlockBody, BlockTransaction, Header, HeaderBody, HeaderVersionInfo,
+                MempoolTransaction, OperationalCert,
+            },
+            KeepRaw, MaybeIndefArray, Nullable, VrfCert,
+        },
+        traverse::MultiEraBlock,
+        validate::utils::ValidationError,
+    },
+};
 
 use super::seed::{txo_ref, DIJKSTRA};
 use crate::adapters::{DomainAdapter, MempoolBackend};
+
+/// The hard fork variant that tags a Dijkstra block.
+const DIJKSTRA_BLOCK: u16 = 8;
+
+/// Why Dolos did not apply a block.
+#[derive(Debug)]
+pub(super) enum RollFailure {
+    Error(DomainError),
+    Panic(String),
+}
+
+impl fmt::Display for RollFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RollFailure::Error(e) => write!(f, "error {e}"),
+            RollFailure::Panic(message) => write!(f, "panic {message}"),
+        }
+    }
+}
+
+/// The header hash and block number of the last block a run applied.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Tip {
+    hash: BlockHash,
+    number: u64,
+}
+
+/// A block at the slot whose parent is the tip, holding each transaction with its scripts flag, and the tip it makes.
+pub(super) fn block(slot: u64, tip: Option<Tip>, txs: &[(&[u8], Phase2)]) -> (Tip, RawBlock) {
+    let transactions = txs
+        .iter()
+        .map(|(raw, phase2)| {
+            let tx: MempoolTransaction =
+                minicbor::decode(raw).expect("a corpus transaction decodes");
+            let success = match phase2 {
+                Phase2::Valid => true,
+                Phase2::Invalid => false,
+            };
+            BlockTransaction {
+                success,
+                ..BlockTransaction::from(tx)
+            }
+        })
+        .collect();
+    let number = tip.map_or(1, |t| t.number + 1);
+    let header = Header {
+        header_body: HeaderBody {
+            block_number: number,
+            slot,
+            prev_hash: tip.map(|t| t.hash),
+            issuer_vkey: vec![0; 32].into(),
+            vrf_vkey: vec![0; 32].into(),
+            vrf_result: VrfCert(vec![0; 64].into(), vec![0; 80].into()),
+            block_body_size: 0,
+            block_body_hash: [0; 32].into(),
+            operational_cert: OperationalCert {
+                operational_cert_hot_vkey: vec![0; 32].into(),
+                operational_cert_sequence_number: 0,
+                operational_cert_kes_period: 0,
+                operational_cert_sigma: vec![0; 64].into(),
+            },
+            header_version_info: HeaderVersionInfo {
+                highest_supported_major_version: 12,
+                self_reported_software_tag: 0,
+            },
+            block_body_contains_leios_cert: false,
+            eb_announcement: Nullable::Null,
+        },
+        body_signature: vec![0; 448].into(),
+    };
+    let block = Block {
+        header: KeepRaw::from(header),
+        block_body: BlockBody {
+            transactions: MaybeIndefArray::Def(transactions),
+            leios_certificate: Nullable::Null,
+            peras_certificate: Nullable::Null,
+        },
+    };
+    let raw = minicbor::to_vec((DIJKSTRA_BLOCK, &block)).expect("a block encodes");
+    let hash = MultiEraBlock::decode(&raw)
+        .expect("a written block decodes")
+        .hash();
+    (Tip { hash, number }, Arc::new(raw))
+}
 
 /// A domain over the seeded stores with a mempool of its own and its cursor at one slot.
 pub(super) struct Group {
     domain: DomainAdapter,
 }
 
-/// The group for the records at one slot, whose mempool starts empty.
+/// The group for the records at one slot, whose mempool starts empty and whose cursor keeps the hash of the last applied block.
 pub(super) fn group(base: &DomainAdapter, slot: u64) -> Group {
+    let hash = base
+        .state()
+        .read_cursor()
+        .unwrap()
+        .and_then(|point| point.hash())
+        .unwrap_or_else(|| [0; 32].into());
     let writer = base.state().start_writer().unwrap();
-    writer
-        .set_cursor(ChainPoint::Specific(slot, [0; 32].into()))
-        .unwrap();
+    writer.set_cursor(ChainPoint::Specific(slot, hash)).unwrap();
     writer.commit().unwrap();
     let mut domain = base.clone();
     domain.mempool = MempoolBackend::Ephemeral(Default::default());
@@ -49,6 +159,40 @@ impl Group {
         let writer = self.domain.state().start_writer().unwrap();
         writer.apply_utxoset(&delta).unwrap();
         writer.commit().unwrap();
+    }
+
+    /// Applies one block through the live sync path, reopening the chain logic from the state after a panic.
+    pub(super) fn roll(&self, block: RawBlock) -> Result<BlockSlot, RollFailure> {
+        let rolled = panic::catch_unwind(AssertUnwindSafe(|| self.domain.roll_forward(block)));
+        let payload = match rolled {
+            Ok(result) => return result.map_err(RollFailure::Error),
+            Err(payload) => payload,
+        };
+        let logic = CardanoLogic::initialize::<DomainAdapter>(
+            Default::default(),
+            &self.domain.state,
+            &self.domain.genesis,
+        )
+        .unwrap();
+        *self
+            .domain
+            .chain
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = logic;
+        self.domain.chain.clear_poison();
+        let message = match payload.downcast::<String>() {
+            Ok(message) => *message,
+            Err(payload) => payload
+                .downcast_ref::<&str>()
+                .map_or("non text payload", |m| m)
+                .to_string(),
+        };
+        Err(RollFailure::Panic(message))
+    }
+
+    /// The domain the group submits to and rolls blocks into.
+    pub(super) fn domain(&self) -> &DomainAdapter {
+        &self.domain
     }
 
     /// Whether the group reads an output at the reference, from the stores or its mempool.

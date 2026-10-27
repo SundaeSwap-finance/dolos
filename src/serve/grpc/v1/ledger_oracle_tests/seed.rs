@@ -2,14 +2,19 @@ use std::sync::Arc;
 
 use dolos_cardano::{
     model::{EpochState, EpochValue, PParamValue},
-    SingletonEntity as _,
+    pallas_extras, CardanoDelta, ControlledAmountInc, SingletonEntity as _,
 };
 use dolos_core::{
-    config::CardanoConfig, ChainLogic as _, ChainPoint, Domain as _, EraCbor, Genesis,
-    StateStore as _, StateWriter as _, TxoRef, UtxoSetDelta, WalStore as _,
+    apply_delta_chunk, config::CardanoConfig, save_entities, ChainLogic as _, ChainPoint,
+    Domain as _, EntityMap, EraCbor, Genesis, StateStore as _, StateWriter as _, TxoRef,
+    UtxoSetDelta, WalStore as _,
 };
 use dolos_testing::toy_domain::ToyDomain;
 use ledger_oracle_judge::{cbor::TxIn, record::UtxoEntry};
+use pallas::ledger::{
+    addresses::{Address, ShelleyDelegationPart},
+    traverse::{Era, MultiEraOutput},
+};
 
 use crate::adapters::{
     ArchiveStoreBackend, DomainAdapter, MempoolBackend, StateStoreBackend, WalAdapter,
@@ -36,6 +41,25 @@ pub(super) fn genesis(epoch_size: u64) -> Arc<Genesis> {
 pub(super) fn txo_ref(input: &TxIn) -> TxoRef {
     let index = u32::try_from(input.ix).expect("a ledger output index fits an output reference");
     TxoRef(input.tx.into(), index)
+}
+
+/// The account deltas Dolos makes when a block produces the outputs, leaving out outputs at pointer addresses.
+fn controlled_amounts(pre: &[UtxoEntry], epoch: u64) -> Vec<CardanoDelta> {
+    pre.iter()
+        .filter_map(|e| {
+            let output = MultiEraOutput::decode(Era::Dijkstra, &e.output.0)
+                .expect("a seeded output decodes");
+            let address = output.address().expect("a seeded output has an address");
+            if let Address::Shelley(shelley) = &address {
+                if let ShelleyDelegationPart::Pointer(_) = shelley.delegation() {
+                    return None;
+                }
+            }
+            let (cred, is_pointer) = pallas_extras::address_as_stake_cred(&address)?;
+            let amount = output.value().coin();
+            Some(ControlledAmountInc::new(cred, is_pointer, amount, epoch).into())
+        })
+        .collect()
 }
 
 /// A chain point the write ahead log starts at, made only by seeding a run.
@@ -112,6 +136,12 @@ pub(super) fn seed(
         mempool: MempoolBackend::Ephemeral(Default::default()),
         tip_broadcast: tokio::sync::broadcast::channel(8).0,
     };
+    let mut deltas = controlled_amounts(pre, epoch);
+    let mut entities = EntityMap::default();
+    apply_delta_chunk::<DomainAdapter>(&mut entities, domain.state(), &mut deltas).unwrap();
+    let writer = domain.state().start_writer().unwrap();
+    save_entities::<DomainAdapter>(&writer, &entities).unwrap();
+    writer.commit().unwrap();
     domain.wal().reset_to(&point).unwrap();
     Seeded {
         domain,

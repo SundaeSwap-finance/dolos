@@ -16,7 +16,7 @@ use ledger_oracle_judge::{
     compare::{ByteVerdict, StateTallies, Tally},
     corpus::{self, Corpus},
     manifest::{self, Declared, Feature, KnownList, Locus},
-    record::{CorpusKind, LedgerOutcome, PParams, Record, RecordId, UtxoEntry},
+    record::{CorpusKind, LedgerOutcome, PParams, Phase2, Record, RecordId, UtxoEntry},
     run::{origin, InputOrigin, KeptRun},
     verdict::{
         outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, ValidationTally,
@@ -83,21 +83,30 @@ async fn read_utxos<'a>(
         .collect()
 }
 
-/// Counts each ledger entry against the output bytes Dolos serves for its input.
-async fn compare_utxos(
+/// Counts the ledger output, or its absence, at each input and each ledger entry against what Dolos serves there.
+async fn compare_utxos<'a>(
     domain: &DomainAdapter,
     id: RecordId,
+    inputs: impl IntoIterator<Item = &'a TxIn>,
     expected: &[UtxoEntry],
     tally: &mut Tally,
 ) {
-    let served = read_utxos(domain, expected.iter().map(|e| &e.input)).await;
-    for e in expected {
-        let served = served.get(&e.input).map(Vec::as_slice);
-        let verdict = ByteVerdict::of(Some(e.output.0.as_slice()), served)
-            .expect("the ledger side is present");
-        tally.add(verdict.agrees(), || {
-            format!("{id} input={} {verdict}", show_input(&e.input))
-        });
+    let expected: BTreeMap<&TxIn, &[u8]> = expected
+        .iter()
+        .map(|e| (&e.input, e.output.0.as_slice()))
+        .collect();
+    let mut keys: BTreeSet<&TxIn> = inputs.into_iter().collect();
+    keys.extend(expected.keys());
+    let served = read_utxos(domain, keys.iter().copied()).await;
+    for input in keys {
+        let ledger = expected.get(input).copied();
+        let served = served.get(input).map(Vec::as_slice);
+        match ByteVerdict::of(ledger, served) {
+            None => tally.add(true, String::new),
+            Some(verdict) => tally.add(verdict.agrees(), || {
+                format!("{id} input={} {verdict}", show_input(input))
+            }),
+        }
     }
 }
 
@@ -216,24 +225,31 @@ fn missing_from_makers<'r>(
     (entries, made_by)
 }
 
-/// Submits each slot group of a run in order, each to a fresh mempool at the group slot.
-fn validate_run(
+/// Submits each slot group of a run in order to a fresh mempool at the group slot, then rolls the block of its accepted records and compares the outputs.
+async fn validate_run(
     base: &DomainAdapter,
     kind: CorpusKind,
     run: &KeptRun,
     manifests: &Manifests,
+    edits: &Edits<'_>,
     judged: &mut BTreeSet<RecordId>,
-    tally: &mut ValidationTally,
+    tallies: &mut Judged,
 ) {
+    let Judged {
+        validation: tally,
+        state,
+    } = tallies;
+    let id_of = |record: &Record| RecordId {
+        corpus: kind,
+        n: record.n,
+    };
     let makers = run.makers(kind);
+    let mut tip = None;
     for records in run.groups() {
         let group = validate::group(base, records[0].slot);
         let mut seeding = BTreeSet::new();
         for record in records {
-            let id = RecordId {
-                corpus: kind,
-                n: record.n,
-            };
+            let id = id_of(record);
             let inputs = named_inputs(id, record);
             let (entries, made_by) =
                 missing_from_makers(&group, record, &inputs, &makers, records, &seeding);
@@ -252,24 +268,53 @@ fn validate_run(
             tally.add(id, judgement);
             judged.insert(id);
         }
+        let accepted = records.iter().filter_map(|r| match &r.outcome {
+            LedgerOutcome::Accepted { post_utxo, .. } => Some((r, post_utxo)),
+            LedgerOutcome::Refused { .. } => None,
+        });
+        let Some((last, post)) = accepted.clone().next_back() else {
+            continue;
+        };
+        let txs: Vec<_> = accepted
+            .filter_map(|(r, _)| {
+                let phase2 = (edits.block_tx)(id_of(r), r.phase2_valid)?;
+                Some((r.tx.0.as_slice(), phase2))
+            })
+            .collect();
+        let (next, block) = validate::block(last.slot, tip, &txs);
+        if let Err(e) = group.roll(block) {
+            let id = id_of(last);
+            state.utxo.add(false, || format!("{id} roll_forward {e}"));
+            // A failed block leaves the tip where it was, so the next block names that parent.
+            continue;
+        }
+        tip = Some(next);
+        let inputs = records.iter().flat_map(|r| &r.pre_utxo).map(|e| &e.input);
+        compare_utxos(group.domain(), id_of(last), inputs, post, &mut state.utxo).await;
     }
 }
 
-/// The pre state of a run unchanged.
-fn unedited(_first: RecordId, pre: &[UtxoEntry]) -> Vec<UtxoEntry> {
-    pre.to_vec()
+/// What a planted check changes in the seed, the expected parameters and the blocks of one judgement.
+struct Edits<'a> {
+    pre: Box<dyn Fn(RecordId, &[UtxoEntry]) -> Vec<UtxoEntry> + 'a>,
+    expected_params: Box<dyn Fn(&PParams) -> PParams + 'a>,
+    block_tx: Box<dyn Fn(RecordId, Phase2) -> Option<Phase2> + 'a>,
+}
+
+impl Default for Edits<'_> {
+    fn default() -> Self {
+        Edits {
+            pre: Box::new(|_, pre| pre.to_vec()),
+            expected_params: Box::new(PParams::clone),
+            block_tx: Box::new(|_, phase2| Some(phase2)),
+        }
+    }
 }
 
 /// Judges every kept run of a corpus, each seeded from its first pre state.
-async fn judge(
-    corpus: &Corpus,
-    manifests: &Manifests,
-    edit_pre: impl Fn(RecordId, &[UtxoEntry]) -> Vec<UtxoEntry>,
-    edit_expected_params: impl Fn(&PParams) -> PParams,
-) -> Judged {
+async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Judged {
     let genesis = seed::genesis(epoch_size(corpus));
     let mut judged = Judged::default();
-    let tallies = &mut judged.state;
     let mut judged_ids = BTreeSet::new();
     for run in corpus.kept() {
         let first = &run.records()[0];
@@ -281,19 +326,28 @@ async fn judge(
             .epoch()
             .unwrap_or_else(|| panic!("RUN {id} has no epoch"));
         let pparams = params::seed_values(run.pparams()).unwrap_or_else(|e| panic!("{e}"));
-        let seeded = seed::seed(&genesis, epoch, &pparams, &edit_pre(id, &first.pre_utxo));
-        compare_utxos(&seeded.domain, id, &first.pre_utxo, &mut tallies.utxo).await;
+        let seeded = seed::seed(&genesis, epoch, &pparams, &(edits.pre)(id, &first.pre_utxo));
+        compare_utxos(
+            &seeded.domain,
+            id,
+            [],
+            &first.pre_utxo,
+            &mut judged.state.utxo,
+        )
+        .await;
         let served = read_params(&seeded.domain).await;
-        let expected = edit_expected_params(run.pparams());
-        params::compare(id, &expected, &served, &mut tallies.params);
+        let expected = (edits.expected_params)(run.pparams());
+        params::compare(id, &expected, &served, &mut judged.state.params);
         validate_run(
             &seeded.domain,
             corpus.kind,
             run,
             manifests,
+            edits,
             &mut judged_ids,
-            &mut judged.validation,
-        );
+            &mut judged,
+        )
+        .await;
     }
     manifests.unjudged(corpus.kind, &judged_ids, &mut judged.validation);
     judged
@@ -303,13 +357,7 @@ async fn judge(
 async fn judge_supp(edit: impl FnOnce(&mut Manifests)) -> Judged {
     let mut manifests = Manifests::committed();
     edit(&mut manifests);
-    judge(
-        &load(CorpusKind::Supp),
-        &manifests,
-        unedited,
-        PParams::clone,
-    )
-    .await
+    judge(&load(CorpusKind::Supp), &manifests, &Edits::default()).await
 }
 
 fn supp(n: u32) -> RecordId {
@@ -327,7 +375,7 @@ async fn ledger_oracle() {
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind);
         println!("{corpus}");
-        let tallies = judge(&corpus, &manifests, unedited, PParams::clone).await;
+        let tallies = judge(&corpus, &manifests, &Edits::default()).await;
         println!("{tallies}");
         pass &= tallies.pass();
     }
@@ -341,23 +389,28 @@ async fn ledger_oracle() {
 async fn dropping_one_seed_pair_prints_utxo_disagree() {
     let corpus = load(CorpusKind::Supp);
     let manifests = Manifests::committed();
-    let intact = judge(&corpus, &manifests, unedited, PParams::clone).await;
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
     assert!(intact.state.utxo.compared > 0);
     assert!(intact.state.utxo.disagree.is_empty(), "{intact}");
     let dropped = AtomicBool::new(false);
-    let planted = judge(
-        &corpus,
-        &manifests,
-        |_, pre| {
+    let edits = Edits {
+        pre: Box::new(|_, pre| {
             let skip = !dropped.swap(true, Ordering::Relaxed);
             pre.iter().skip(usize::from(skip)).cloned().collect()
-        },
-        PParams::clone,
-    )
-    .await;
-    let text = planted.to_string();
-    assert!(text.contains("STATE utxo disagree=1\n"), "{text}");
-    assert!(text.contains("ledger="), "{text}");
+        }),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
+    let first = &corpus.kept().next().unwrap().records()[0];
+    let pair = &first.pre_utxo[0];
+    let line = format!(
+        "{} input={} ledger={} dolos=none",
+        supp(first.n),
+        show_input(&pair.input),
+        hex::encode(&pair.output.0)
+    );
+    assert!(planted.state.utxo.disagree.contains(&line), "{planted}");
+    assert!(planted.to_string().contains("\nSTATE utxo disagree="));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -365,19 +418,22 @@ async fn dropping_one_seed_pair_prints_utxo_disagree() {
 async fn one_changed_cost_model_entry_prints_params_disagree() {
     let corpus = load(CorpusKind::Supp);
     let manifests = Manifests::committed();
-    let intact = judge(&corpus, &manifests, unedited, PParams::clone).await;
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
     assert!(intact.state.params.compared > 0);
     assert!(intact.state.params.disagree.is_empty(), "{intact}");
     let changed = AtomicBool::new(false);
-    let planted = judge(&corpus, &manifests, unedited, |pparams| {
-        let mut pparams = pparams.clone();
-        if !changed.swap(true, Ordering::Relaxed) {
-            let entry = &mut pparams.0["costModels"]["PlutusV1"][0];
-            *entry = (entry.as_i64().unwrap() + 1).into();
-        }
-        pparams
-    })
-    .await;
+    let edits = Edits {
+        expected_params: Box::new(|pparams| {
+            let mut pparams = pparams.clone();
+            if !changed.swap(true, Ordering::Relaxed) {
+                let entry = &mut pparams.0["costModels"]["PlutusV1"][0];
+                *entry = (entry.as_i64().unwrap() + 1).into();
+            }
+            pparams
+        }),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
     let text = planted.to_string();
     assert!(text.contains("STATE params disagree=1\n"), "{text}");
     assert!(text.contains("costModels.PlutusV1[0] ledger="), "{text}");
@@ -459,7 +515,7 @@ async fn a_known_entry_naming_an_agreeing_or_unjudged_record_prints_known_stale(
 async fn a_maker_that_fails_leaves_its_dependents_disagreeing() {
     let corpus = load(CorpusKind::Ic);
     let committed = Manifests::committed();
-    let intact = judge(&corpus, &committed, unedited, PParams::clone).await;
+    let intact = judge(&corpus, &committed, &Edits::default()).await;
     let maker = intact
         .validation
         .dependent
@@ -482,7 +538,7 @@ async fn a_maker_that_fails_leaves_its_dependents_disagreeing() {
     assert!(disagrees(&intact).is_empty(), "{intact}");
     let mut failing = committed.clone();
     failing.declared.remove(&maker).unwrap();
-    let patched = judge(&corpus, &failing, unedited, PParams::clone).await;
+    let patched = judge(&corpus, &failing, &Edits::default()).await;
     assert!(
         patched
             .validation
@@ -513,16 +569,13 @@ async fn dropping_the_seeded_input_under_a_metadata_refusal_prints_reason_mismat
         n: first.n,
     };
     let line = "\nREASON_MISMATCH ic#1311 ";
-    let intact = judge(&corpus, &manifests, unedited, PParams::clone).await;
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
     assert!(!intact.to_string().contains(line), "{intact}");
-    let planted = judge(
-        &corpus,
-        &manifests,
-        |id, pre| if id == first { vec![] } else { pre.to_vec() },
-        PParams::clone,
-    )
-    .await
-    .to_string();
+    let edits = Edits {
+        pre: Box::new(|id, pre| if id == first { vec![] } else { pre.to_vec() }),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await.to_string();
     assert!(
         planted.contains(&format!(
             "{line}ledger=refused[SubMissingTxMetadata] ledger_class=metadata \
@@ -548,6 +601,66 @@ async fn deleting_the_v1_known_entry_prints_its_reason_mismatch() {
              ledger_class=inputs dolos=refused[PreservationOfValue] dolos_class=value"
         ),
         "{deleted}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn leaving_an_accepted_tx_out_of_its_block_prints_utxo_disagree() {
+    let corpus = load(CorpusKind::Supp);
+    let manifests = Manifests::committed();
+    let left_out = corpus
+        .kept()
+        .flat_map(|run| run.groups().filter_map(<[Record]>::last))
+        .find(|r| matches!(r.outcome, LedgerOutcome::Accepted { .. }))
+        .map(|r| supp(r.n))
+        .expect("a group ends in an accepted record");
+    let missing = |judged: &Judged| {
+        let prefix = format!("{left_out} input=");
+        let lines = judged.state.utxo.disagree.iter();
+        lines
+            .filter(|d| d.starts_with(&prefix) && d.ends_with(" dolos=none"))
+            .count()
+    };
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    assert_eq!(missing(&intact), 0, "{intact}");
+    let edits = Edits {
+        block_tx: Box::new(|id, phase2| (id != left_out).then_some(phase2)),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
+    assert!(missing(&planted) > 0, "{left_out} {planted}");
+    assert!(planted.to_string().contains("\nSTATE utxo disagree="));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn supp8_written_as_phase2_valid_leaves_the_input_of_supp9_missing() {
+    let corpus = load(CorpusKind::Supp);
+    let supp8 = corpus
+        .kept()
+        .flat_map(KeptRun::records)
+        .find(|r| r.n == 8)
+        .expect("supp#8 is in a kept run");
+    assert_eq!(supp8.phase2_valid, Phase2::Invalid);
+    assert!(matches!(supp8.outcome, LedgerOutcome::Accepted { .. }));
+    let manifests = Manifests::committed();
+    let line = "\nDISAGREE supp#9 ";
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    assert!(!intact.to_string().contains(line), "{intact}");
+    let edits = Edits {
+        block_tx: Box::new(|id, phase2| match id == supp(8) {
+            true => Some(Phase2::Valid),
+            false => Some(phase2),
+        }),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await.to_string();
+    assert!(
+        planted.contains(&format!(
+            "{line}ledger=accepted dolos=refused[InputNotInUTxO]"
+        )),
+        "{planted}"
     );
 }
 
@@ -614,12 +727,12 @@ async fn a_seed_output_compared_as_bytes_names_the_first_differing_byte() {
         n: first.n,
     };
     let mut equal = Tally::default();
-    compare_utxos(&seeded.domain, id, &first.pre_utxo[..1], &mut equal).await;
+    compare_utxos(&seeded.domain, id, [], &first.pre_utxo[..1], &mut equal).await;
     assert_eq!((equal.compared, equal.disagree.len()), (1, 0));
     let mut flipped = first.pre_utxo[..1].to_vec();
     flipped[0].output.0[3] ^= 1;
     let mut differ = Tally::default();
-    compare_utxos(&seeded.domain, id, &flipped, &mut differ).await;
+    compare_utxos(&seeded.domain, id, [], &flipped, &mut differ).await;
     assert_eq!(differ.disagree.len(), 1);
     assert!(
         differ.disagree[0].ends_with("differ at byte 3"),
