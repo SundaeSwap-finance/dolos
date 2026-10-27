@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use dolos_cardano::{model::EpochState, SingletonEntity as _};
+use dolos_cardano::{
+    model::{EpochState, EpochValue, PParamValue},
+    SingletonEntity as _,
+};
 use dolos_core::{
     config::CardanoConfig, ChainLogic as _, ChainPoint, Domain as _, EraCbor, Genesis,
     StateStore as _, StateWriter as _, TxoRef, UtxoSetDelta, WalStore as _,
@@ -52,8 +55,13 @@ pub(super) struct Seeded {
     _toy: ToyDomain,
 }
 
-/// Seeds a domain with the given outputs at the first slot of the epoch.
-pub(super) fn seed(genesis: &Arc<Genesis>, epoch: u64, pre: &[UtxoEntry]) -> Seeded {
+/// Seeds a domain with the given parameters and outputs at the first slot of the epoch.
+pub(super) fn seed(
+    genesis: &Arc<Genesis>,
+    epoch: u64,
+    pparams: &[PParamValue],
+    pre: &[UtxoEntry],
+) -> Seeded {
     let delta = UtxoSetDelta {
         produced_utxo: pre
             .iter()
@@ -74,6 +82,11 @@ pub(super) fn seed(genesis: &Arc<Genesis>, epoch: u64, pre: &[UtxoEntry]) -> See
     let point = ChainPoint::Specific(slot, [0; 32].into());
     let mut state = dolos_cardano::load_epoch::<ToyDomain>(toy.state()).unwrap();
     state.number = epoch;
+    let live = state.pparams.unwrap_live_mut();
+    for value in pparams {
+        live.set(value.clone());
+    }
+    state.pparams = EpochValue::with_live(epoch, live.clone());
     let writer = toy.state().start_writer().unwrap();
     writer
         .write_entity_typed(&EpochState::singleton_key(), &state)
@@ -82,9 +95,12 @@ pub(super) fn seed(genesis: &Arc<Genesis>, epoch: u64, pre: &[UtxoEntry]) -> See
     writer.commit().unwrap();
 
     let state = StateStoreBackend::Memory(toy.state().clone());
-    let chain =
-        dolos_cardano::CardanoLogic::initialize::<DomainAdapter>(Default::default(), &state, genesis)
-            .unwrap();
+    let chain = dolos_cardano::CardanoLogic::initialize::<DomainAdapter>(
+        Default::default(),
+        &state,
+        genesis,
+    )
+    .unwrap();
     let domain = DomainAdapter {
         storage_config: Arc::new(toy.storage_config().clone()),
         sync_config: Arc::new(toy.sync_config().clone()),

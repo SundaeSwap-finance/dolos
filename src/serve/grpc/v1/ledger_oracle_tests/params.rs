@@ -1,0 +1,512 @@
+use std::collections::BTreeMap;
+
+use dolos_cardano::model::PParamValue as P;
+use ledger_oracle_judge::{
+    compare::Tally,
+    params::{first_difference, Canon},
+    record::{PParams, RecordId},
+};
+use pallas::ledger::primitives::{
+    conway::{DRepVotingThresholds, PoolVotingThresholds},
+    ExUnitPrices, ExUnits, RationalNumber,
+};
+
+use super::super::spec::cardano as u5c;
+
+/// The pool voting threshold names in the order Dolos serves them.
+const POOL_THRESHOLDS: [&str; 5] = [
+    "motionNoConfidence",
+    "committeeNormal",
+    "committeeNoConfidence",
+    "hardForkInitiation",
+    "ppSecurityGroup",
+];
+
+/// The DRep voting threshold names in the order Dolos serves them.
+const DREP_THRESHOLDS: [&str; 10] = [
+    "motionNoConfidence",
+    "committeeNormal",
+    "committeeNoConfidence",
+    "updateToConstitution",
+    "hardForkInitiation",
+    "ppNetworkGroup",
+    "ppEconomicGroup",
+    "ppTechnicalGroup",
+    "ppGovGroup",
+    "treasuryWithdrawal",
+];
+
+/// The cost model language names in the order of their ledger language index.
+const LANGUAGES: [&str; 4] = ["PlutusV1", "PlutusV2", "PlutusV3", "PlutusV4"];
+
+/// How one ledger parameter is seeded into Dolos and read back from ReadParams.
+struct Param {
+    seed: fn(&Canon) -> Vec<P>,
+    served: fn(&u5c::PParams) -> Canon,
+}
+
+fn int(c: &Canon) -> u64 {
+    match c {
+        Canon::Int(n) => u64::try_from(*n).expect("a ledger count fits a u64"),
+        other => panic!("PARAMS expected an integer, found {other}"),
+    }
+}
+
+fn small(c: &Canon) -> u32 {
+    u32::try_from(int(c)).expect("a ledger count fits a u32")
+}
+
+fn ratio(c: &Canon) -> RationalNumber {
+    let (numerator, denominator) = match c {
+        Canon::Int(n) => (*n, 1),
+        Canon::Ratio(n, d) => (*n, *d),
+        other => panic!("PARAMS expected a ratio, found {other}"),
+    };
+    RationalNumber {
+        numerator: u64::try_from(numerator).expect("a ledger ratio is not negative"),
+        denominator: u64::try_from(denominator).expect("a ledger denominator fits a u64"),
+    }
+}
+
+fn field<'a>(c: &'a Canon, name: &str) -> &'a Canon {
+    match c {
+        Canon::Map(fields) => fields
+            .get(name)
+            .unwrap_or_else(|| panic!("PARAMS field {name} missing from {c}")),
+        other => panic!("PARAMS expected a map with {name}, found {other}"),
+    }
+}
+
+fn units(c: &Canon) -> ExUnits {
+    ExUnits {
+        mem: int(field(c, "memory")),
+        steps: int(field(c, "steps")),
+    }
+}
+
+fn costs(c: &Canon) -> Vec<i64> {
+    match c {
+        Canon::List(items) => items
+            .iter()
+            .map(|i| match i {
+                Canon::Int(n) => i64::try_from(*n).expect("a cost model entry fits an i64"),
+                other => panic!("PARAMS expected a cost model entry, found {other}"),
+            })
+            .collect(),
+        other => panic!("PARAMS expected a cost model, found {other}"),
+    }
+}
+
+fn cost_models(c: &Canon) -> Vec<P> {
+    let Canon::Map(models) = c else {
+        panic!("PARAMS expected cost models, found {c}")
+    };
+    let mut out = Vec::new();
+    let mut unknown = BTreeMap::new();
+    for (name, model) in models {
+        match name.as_str() {
+            "PlutusV1" => out.push(P::CostModelsPlutusV1(costs(model))),
+            "PlutusV2" => out.push(P::CostModelsPlutusV2(costs(model))),
+            "PlutusV3" => out.push(P::CostModelsPlutusV3(costs(model))),
+            other => {
+                let index = LANGUAGES
+                    .iter()
+                    .position(|l| *l == other)
+                    .unwrap_or_else(|| panic!("PARAMS unmapped key=costModels.{other}"));
+                unknown.insert(index as u64, costs(model));
+            }
+        }
+    }
+    out.push(P::CostModelsUnknown(unknown));
+    out
+}
+
+fn drep_thresholds(c: &Canon) -> Vec<P> {
+    let t = |name| ratio(field(c, name));
+    vec![P::DrepVotingThresholds(DRepVotingThresholds {
+        motion_no_confidence: t("motionNoConfidence"),
+        committee_normal: t("committeeNormal"),
+        committee_no_confidence: t("committeeNoConfidence"),
+        update_constitution: t("updateToConstitution"),
+        hard_fork_initiation: t("hardForkInitiation"),
+        pp_network_group: t("ppNetworkGroup"),
+        pp_economic_group: t("ppEconomicGroup"),
+        pp_technical_group: t("ppTechnicalGroup"),
+        pp_governance_group: t("ppGovGroup"),
+        treasury_withdrawal: t("treasuryWithdrawal"),
+    })]
+}
+
+fn pool_thresholds(c: &Canon) -> Vec<P> {
+    let t = |name| ratio(field(c, name));
+    vec![P::PoolVotingThresholds(PoolVotingThresholds {
+        motion_no_confidence: t("motionNoConfidence"),
+        committee_normal: t("committeeNormal"),
+        committee_no_confidence: t("committeeNoConfidence"),
+        hard_fork_initiation: t("hardForkInitiation"),
+        security_voting_threshold: t("ppSecurityGroup"),
+    })]
+}
+
+fn n(value: u64) -> Canon {
+    Canon::Int(value.into())
+}
+
+fn big(b: &Option<u5c::BigInt>) -> Canon {
+    let magnitude = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .fold(0i128, |acc, b| acc * 256 + i128::from(*b))
+    };
+    match b.as_ref().and_then(|b| b.big_int.as_ref()) {
+        Some(u5c::big_int::BigInt::Int(v)) => Canon::Int((*v).into()),
+        Some(u5c::big_int::BigInt::BigUInt(bytes)) => Canon::Int(magnitude(bytes)),
+        Some(u5c::big_int::BigInt::BigNInt(bytes)) => Canon::Int(-1 - magnitude(bytes)),
+        None => Canon::Null,
+    }
+}
+
+fn rat(r: &Option<u5c::RationalNumber>) -> Canon {
+    r.as_ref()
+        .and_then(|r| Canon::ratio(r.numerator.into(), r.denominator.into()))
+        .unwrap_or(Canon::Null)
+}
+
+fn opt(value: Option<u64>) -> Canon {
+    value.map_or(Canon::Null, n)
+}
+
+fn ex(u: &Option<u5c::ExUnits>) -> Canon {
+    match u {
+        Some(u) => Canon::Map(
+            [
+                ("memory".to_string(), n(u.memory)),
+                ("steps".to_string(), n(u.steps)),
+            ]
+            .into(),
+        ),
+        None => Canon::Null,
+    }
+}
+
+fn thresholds(t: &Option<u5c::VotingThresholds>, names: &[&str]) -> Canon {
+    match t {
+        Some(t) if t.thresholds.len() == names.len() => Canon::Map(
+            names
+                .iter()
+                .zip(&t.thresholds)
+                .map(|(name, r)| (name.to_string(), rat(&Some(r.clone()))))
+                .collect(),
+        ),
+        Some(t) => Canon::List(t.thresholds.iter().map(|r| rat(&Some(r.clone()))).collect()),
+        None => Canon::Null,
+    }
+}
+
+fn served_models(m: &Option<u5c::CostModels>) -> Canon {
+    let Some(m) = m else { return Canon::Null };
+    let list = |c: &Option<u5c::CostModel>| {
+        c.as_ref()
+            .map(|c| Canon::List(c.values.iter().map(|v| Canon::Int((*v).into())).collect()))
+    };
+    Canon::Map(
+        LANGUAGES
+            .iter()
+            .zip([&m.plutus_v1, &m.plutus_v2, &m.plutus_v3, &m.plutus_v4])
+            .filter_map(|(name, c)| Some((name.to_string(), list(c)?)))
+            .collect(),
+    )
+}
+
+fn served_prices(p: &u5c::PParams) -> Canon {
+    match &p.prices {
+        Some(x) => Canon::Map(
+            [
+                ("priceMemory".to_string(), rat(&x.memory)),
+                ("priceSteps".to_string(), rat(&x.steps)),
+            ]
+            .into(),
+        ),
+        None => Canon::Null,
+    }
+}
+
+fn served_version(p: &u5c::PParams) -> Canon {
+    match &p.protocol_version {
+        Some(v) => Canon::Map(
+            [
+                ("major".to_string(), n(v.major.into())),
+                ("minor".to_string(), n(v.minor.into())),
+            ]
+            .into(),
+        ),
+        None => Canon::Null,
+    }
+}
+
+/// The seed and served forms of a ledger parameter, none when the key is unmapped.
+fn param(key: &str) -> Option<Param> {
+    let (seed, served): (fn(&Canon) -> Vec<P>, fn(&u5c::PParams) -> Canon) = match key {
+        "collateralPercentage" => (
+            |c| vec![P::CollateralPercentage(small(c))],
+            |p| n(p.collateral_percentage),
+        ),
+        "committeeMaxTermLength" => (
+            |c| vec![P::CommitteeTermLimit(int(c))],
+            |p| n(p.committee_term_limit),
+        ),
+        "committeeMinSize" => (
+            |c| vec![P::MinCommitteeSize(int(c))],
+            |p| n(p.min_committee_size.into()),
+        ),
+        "costModels" => (cost_models, |p| served_models(&p.cost_models)),
+        "dRepActivity" => (
+            |c| vec![P::DrepInactivityPeriod(int(c))],
+            |p| n(p.drep_inactivity_period),
+        ),
+        "dRepDeposit" => (|c| vec![P::DrepDeposit(int(c))], |p| big(&p.drep_deposit)),
+        "dRepVotingThresholds" => (drep_thresholds, |p| {
+            thresholds(&p.drep_voting_thresholds, &DREP_THRESHOLDS)
+        }),
+        "executionUnitPrices" => (
+            |c| {
+                vec![P::ExecutionCosts(ExUnitPrices {
+                    mem_price: ratio(field(c, "priceMemory")),
+                    step_price: ratio(field(c, "priceSteps")),
+                })]
+            },
+            served_prices,
+        ),
+        "govActionDeposit" => (
+            |c| vec![P::GovernanceActionDeposit(int(c))],
+            |p| big(&p.governance_action_deposit),
+        ),
+        "govActionLifetime" => (
+            |c| vec![P::GovernanceActionValidityPeriod(int(c))],
+            |p| n(p.governance_action_validity_period),
+        ),
+        "leiosAnnouncementPeriodLength" => (
+            |c| vec![P::LeiosAnnouncementPeriodLength(int(c))],
+            |p| opt(p.leios_announcement_period_length),
+        ),
+        "leiosCommitteeSize" => (
+            |c| vec![P::LeiosCommitteeSize(int(c))],
+            |p| opt(p.leios_committee_size.map(u64::from)),
+        ),
+        "leiosDiffusionPeriodLength" => (
+            |c| vec![P::LeiosDiffusionPeriodLength(int(c))],
+            |p| opt(p.leios_diffusion_period_length),
+        ),
+        "leiosQuorumStakeThreshold" => (
+            |c| vec![P::LeiosQuorumStakeThreshold(ratio(c))],
+            |p| rat(&p.leios_quorum_stake_threshold),
+        ),
+        "leiosVotePeriodLength" => (
+            |c| vec![P::LeiosVotePeriodLength(int(c))],
+            |p| opt(p.leios_vote_period_length),
+        ),
+        "maxBlockBodySize" => (
+            |c| vec![P::MaxBlockBodySize(int(c))],
+            |p| n(p.max_block_body_size),
+        ),
+        "maxBlockExecutionUnits" => (
+            |c| vec![P::MaxBlockExUnits(units(c))],
+            |p| ex(&p.max_execution_units_per_block),
+        ),
+        "maxBlockHeaderSize" => (
+            |c| vec![P::MaxBlockHeaderSize(int(c))],
+            |p| n(p.max_block_header_size),
+        ),
+        "maxCollateralInputs" => (
+            |c| vec![P::MaxCollateralInputs(small(c))],
+            |p| n(p.max_collateral_inputs),
+        ),
+        "maxEndorserBlockExecutionUnits" => (
+            |c| vec![P::MaxEndorserBlockExUnits(units(c))],
+            |p| ex(&p.max_endorser_block_execution_units),
+        ),
+        "maxEndorserBlockReferencesSize" => (
+            |c| vec![P::MaxEndorserBlockReferencesSize(int(c))],
+            |p| opt(p.max_endorser_block_references_size),
+        ),
+        "maxEndorserBlockTxsSize" => (
+            |c| vec![P::MaxEndorserBlockTxsSize(int(c))],
+            |p| opt(p.max_endorser_block_txs_size),
+        ),
+        "maxPledgeLeverage" => (
+            |c| {
+                vec![P::MaxPledgeLeverage(match c {
+                    Canon::Null => None,
+                    other => Some(ratio(other)),
+                })]
+            },
+            |p| rat(&p.max_pledge_leverage),
+        ),
+        "maxRefScriptSizePerBlock" => (
+            |c| vec![P::MaxRefScriptSizePerBlock(int(c))],
+            |p| opt(p.max_ref_script_size_per_block),
+        ),
+        "maxRefScriptSizePerEndorserBlock" => (
+            |c| vec![P::MaxRefScriptSizePerEndorserBlock(int(c))],
+            |p| opt(p.max_ref_script_size_per_endorser_block),
+        ),
+        "maxRefScriptSizePerTx" => (
+            |c| vec![P::MaxRefScriptSizePerTx(int(c))],
+            |p| opt(p.max_ref_script_size_per_tx),
+        ),
+        "maxTxExecutionUnits" => (
+            |c| vec![P::MaxTxExUnits(units(c))],
+            |p| ex(&p.max_execution_units_per_transaction),
+        ),
+        "maxTxSize" => (
+            |c| vec![P::MaxTransactionSize(int(c))],
+            |p| n(p.max_tx_size),
+        ),
+        "maxValueSize" => (|c| vec![P::MaxValueSize(small(c))], |p| n(p.max_value_size)),
+        "minFeeRefScriptCostPerByte" => (
+            |c| vec![P::MinFeeRefScriptCostPerByte(ratio(c))],
+            |p| rat(&p.min_fee_script_ref_cost_per_byte),
+        ),
+        "minPoolCost" => (|c| vec![P::MinPoolCost(int(c))], |p| big(&p.min_pool_cost)),
+        "minPoolMargin" => (
+            |c| vec![P::MinPoolMargin(ratio(c))],
+            |p| rat(&p.min_pool_margin),
+        ),
+        "monetaryExpansion" => (
+            |c| vec![P::ExpansionRate(ratio(c))],
+            |p| rat(&p.monetary_expansion),
+        ),
+        "perasBootstrapRound" => (
+            |c| {
+                vec![P::PerasBootstrapRound(match c {
+                    Canon::Null => None,
+                    other => Some(int(other)),
+                })]
+            },
+            |p| opt(p.peras_bootstrap_round),
+        ),
+        "perasCertBoost" => (
+            |c| vec![P::PerasCertBoost(int(c))],
+            |p| opt(p.peras_cert_boost.map(u64::from)),
+        ),
+        "perasHealingFactor" => (
+            |c| vec![P::PerasHealingFactor(ratio(c))],
+            |p| rat(&p.peras_healing_factor),
+        ),
+        "perasMinCandidateBlockAge" => (
+            |c| vec![P::PerasMinCandidateBlockAge(int(c))],
+            |p| opt(p.peras_min_candidate_block_age),
+        ),
+        "perasQuorumThresholdSafetyMargin" => (
+            |c| vec![P::PerasQuorumThresholdSafetyMargin(ratio(c))],
+            |p| rat(&p.peras_quorum_threshold_safety_margin),
+        ),
+        "perasTargetCommitteeSize" => (
+            |c| vec![P::PerasTargetCommitteeSize(int(c))],
+            |p| opt(p.peras_target_committee_size.map(u64::from)),
+        ),
+        "poolPledgeInfluence" => (
+            |c| vec![P::PoolPledgeInfluence(ratio(c))],
+            |p| rat(&p.pool_influence),
+        ),
+        "poolRetireMaxEpoch" => (
+            |c| vec![P::MaximumEpoch(int(c))],
+            |p| n(p.pool_retirement_epoch_bound),
+        ),
+        "poolVotingThresholds" => (pool_thresholds, |p| {
+            thresholds(&p.pool_voting_thresholds, &POOL_THRESHOLDS)
+        }),
+        "protocolVersion" => (
+            |c| {
+                vec![P::ProtocolVersion((
+                    int(field(c, "major")),
+                    int(field(c, "minor")),
+                ))]
+            },
+            served_version,
+        ),
+        "refInputsCostPerDatumByte" => (
+            |c| vec![P::RefInputsCostPerDatumByte(int(c))],
+            |p| big(&p.ref_inputs_cost_per_datum_byte),
+        ),
+        "refInputsCostPerMultiAssetPolicy" => (
+            |c| vec![P::RefInputsCostPerMultiAssetPolicy(int(c))],
+            |p| big(&p.ref_inputs_cost_per_multi_asset_policy),
+        ),
+        "refScriptCostMultiplier" => (
+            |c| vec![P::RefScriptCostMultiplier(ratio(c))],
+            |p| rat(&p.ref_script_cost_multiplier),
+        ),
+        "refScriptCostStride" => (
+            |c| vec![P::RefScriptCostStride(int(c))],
+            |p| opt(p.ref_script_cost_stride),
+        ),
+        "stakeAddressDeposit" => (
+            |c| vec![P::KeyDeposit(int(c))],
+            |p| big(&p.stake_key_deposit),
+        ),
+        "stakePoolDeposit" => (|c| vec![P::PoolDeposit(int(c))], |p| big(&p.pool_deposit)),
+        "stakePoolTargetNum" => (
+            |c| vec![P::DesiredNumberOfStakePools(small(c))],
+            |p| n(p.desired_number_of_pools),
+        ),
+        "treasuryCut" => (
+            |c| vec![P::TreasuryGrowthRate(ratio(c))],
+            |p| rat(&p.treasury_expansion),
+        ),
+        "txFeeFixed" => (|c| vec![P::MinFeeB(int(c))], |p| big(&p.min_fee_constant)),
+        "txFeePerByte" => (
+            |c| vec![P::MinFeeA(int(c))],
+            |p| big(&p.min_fee_coefficient),
+        ),
+        "utxoCostPerByte" => (
+            |c| vec![P::AdaPerUtxoByte(int(c))],
+            |p| big(&p.coins_per_utxo_byte),
+        ),
+        _ => return None,
+    };
+    Some(Param { seed, served })
+}
+
+fn canon(key: &str, value: &serde_json::Value) -> Result<Canon, String> {
+    Canon::of_json(key, value).map_err(|e| e.to_string())
+}
+
+/// The Dolos parameter values that seed a run, or the first key with no mapping or no exact form.
+pub(super) fn seed_values(pparams: &PParams) -> Result<Vec<P>, String> {
+    let mut out = Vec::new();
+    for (key, value) in &pparams.0 {
+        let param = param(key).ok_or_else(|| format!("PARAMS unmapped key={key}"))?;
+        out.extend((param.seed)(&canon(key, value)?));
+    }
+    Ok(out)
+}
+
+/// Counts each ledger parameter of a run against the value Dolos serves for it.
+pub(super) fn compare(id: RecordId, pparams: &PParams, served: &u5c::PParams, tally: &mut Tally) {
+    for (key, value) in &pparams.0 {
+        let param = param(key).unwrap_or_else(|| panic!("PARAMS unmapped key={key}"));
+        let ledger = canon(key, value).unwrap_or_else(|e| panic!("{e}"));
+        let difference = first_difference(key, &ledger, &(param.served)(served));
+        tally.add(difference.is_none(), || {
+            format!("{id} {}", difference.unwrap_or_default())
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unmapped_key_fails_the_seed() {
+        let mut map = serde_json::Map::new();
+        map.insert("maxTxSize".into(), 16384.into());
+        assert!(seed_values(&PParams(map.clone())).is_ok());
+        map.insert("notAParameter".into(), 1.into());
+        assert_eq!(
+            seed_values(&PParams(map)).err().as_deref(),
+            Some("PARAMS unmapped key=notAParameter")
+        );
+    }
+}

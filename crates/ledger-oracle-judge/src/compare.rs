@@ -70,11 +70,13 @@ impl Tally {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct StateTallies {
     pub utxo: Tally,
+    pub params: Tally,
 }
 
 impl StateTallies {
-    fn named(&self) -> [(&'static str, &Tally); 1] {
-        [("utxo", &self.utxo)]
+    fn named(&self) -> [(&'static str, &Tally); 2] {
+        let StateTallies { utxo, params } = self;
+        [("utxo", utxo), ("params", params)]
     }
 
     /// Whether every comparison looked at something and agreed on all of it.
@@ -117,9 +119,14 @@ mod tests {
 
     #[test]
     fn byte_verdict_prints_each_side() {
-        assert_eq!(ByteVerdict::of(Some(b"\x01"), Some(b"\x01")), Some(ByteVerdict::Equal));
         assert_eq!(
-            ByteVerdict::of(Some(b"\x01\x02"), Some(b"\x01\x03")).unwrap().to_string(),
+            ByteVerdict::of(Some(b"\x01"), Some(b"\x01")),
+            Some(ByteVerdict::Equal)
+        );
+        assert_eq!(
+            ByteVerdict::of(Some(b"\x01\x02"), Some(b"\x01\x03"))
+                .unwrap()
+                .to_string(),
             "differ at byte 1"
         );
         assert_eq!(

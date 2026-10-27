@@ -310,7 +310,10 @@ mod tests {
     fn txin_reads_a_tagged_input_and_refuses_a_short_id() {
         assert_eq!(txin(&input(true, 7, 3)), Ok(TxIn { tx: [7; 32], ix: 3 }));
         let short = [0x82, 0x41, 0x00, 0x00];
-        assert_eq!(txin(&short).unwrap_err().what, "expected a 32 byte transaction id");
+        assert_eq!(
+            txin(&short).unwrap_err().what,
+            "expected a 32 byte transaction id"
+        );
     }
 
     #[test]

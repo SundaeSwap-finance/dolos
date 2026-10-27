@@ -1,21 +1,28 @@
 //! Judges what Dolos validates and serves against ledger corpora.
 
+mod params;
 mod seed;
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use dolos_core::SyncExt as _;
 use ledger_oracle_judge::{
     cbor::TxIn,
     compare::{ByteVerdict, StateTallies, Tally},
     corpus::{self, Corpus},
-    record::{CorpusKind, RecordId, UtxoEntry},
+    record::{CorpusKind, PParams, RecordId, UtxoEntry},
 };
 use tonic::Request;
 
 use super::{
     query::QueryServiceImpl,
-    spec::query::{self as q, query_service_server::QueryService as _},
+    spec::{
+        cardano,
+        query::{self as q, query_service_server::QueryService as _},
+    },
 };
 use crate::adapters::DomainAdapter;
 
@@ -57,7 +64,11 @@ async fn read_utxos<'a>(
         .map(|item| {
             let r = item.txo_ref.expect("ReadUtxos names each output it serves");
             let input = TxIn {
-                tx: r.hash.as_ref().try_into().expect("a served hash is 32 bytes"),
+                tx: r
+                    .hash
+                    .as_ref()
+                    .try_into()
+                    .expect("a served hash is 32 bytes"),
                 ix: r.index.into(),
             };
             (input, item.native_bytes.to_vec())
@@ -87,8 +98,27 @@ fn show_input(input: &TxIn) -> String {
     format!("{}#{}", hex::encode(input.tx), input.ix)
 }
 
+/// The Cardano parameters Dolos serves through ReadParams.
+async fn read_params(domain: &DomainAdapter) -> cardano::PParams {
+    let values = QueryServiceImpl::new(domain.clone())
+        .read_params(Request::new(q::ReadParamsRequest { field_mask: None }))
+        .await
+        .unwrap()
+        .into_inner()
+        .values
+        .expect("ReadParams answers with values");
+    match values.params {
+        Some(q::any_chain_params::Params::Cardano(p)) => p,
+        None => panic!("ReadParams answers with Cardano parameters"),
+    }
+}
+
 /// The state tallies of seeding every kept run of a corpus and reading its first pre state back.
-async fn judge(corpus: &Corpus, edit_pre: impl Fn(&[UtxoEntry]) -> Vec<UtxoEntry>) -> StateTallies {
+async fn judge(
+    corpus: &Corpus,
+    edit_pre: impl Fn(&[UtxoEntry]) -> Vec<UtxoEntry>,
+    edit_expected_params: impl Fn(&PParams) -> PParams,
+) -> StateTallies {
     let genesis = seed::genesis(epoch_size(corpus));
     let mut tallies = StateTallies::default();
     for run in corpus.kept() {
@@ -100,8 +130,12 @@ async fn judge(corpus: &Corpus, edit_pre: impl Fn(&[UtxoEntry]) -> Vec<UtxoEntry
         let epoch = run
             .epoch()
             .unwrap_or_else(|| panic!("RUN {id} has no epoch"));
-        let seeded = seed::seed(&genesis, epoch, &edit_pre(&first.pre_utxo));
+        let pparams = params::seed_values(run.pparams()).unwrap_or_else(|e| panic!("{e}"));
+        let seeded = seed::seed(&genesis, epoch, &pparams, &edit_pre(&first.pre_utxo));
         compare_utxos(&seeded.domain, id, &first.pre_utxo, &mut tallies.utxo).await;
+        let served = read_params(&seeded.domain).await;
+        let expected = edit_expected_params(run.pparams());
+        params::compare(id, &expected, &served, &mut tallies.params);
     }
     tallies
 }
@@ -113,7 +147,7 @@ async fn ledger_oracle() {
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind);
         println!("{corpus}");
-        let tallies = judge(&corpus, <[UtxoEntry]>::to_vec).await;
+        let tallies = judge(&corpus, <[UtxoEntry]>::to_vec, PParams::clone).await;
         println!("{tallies}");
         pass &= tallies.pass();
     }
@@ -126,18 +160,44 @@ async fn ledger_oracle() {
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn dropping_one_seed_pair_prints_utxo_disagree() {
     let corpus = load(CorpusKind::Supp);
-    let intact = judge(&corpus, <[UtxoEntry]>::to_vec).await;
+    let intact = judge(&corpus, <[UtxoEntry]>::to_vec, PParams::clone).await;
     assert!(intact.utxo.compared > 0);
     assert!(intact.utxo.disagree.is_empty(), "{intact}");
-    let dropped = std::sync::atomic::AtomicBool::new(false);
-    let planted = judge(&corpus, |pre| {
-        let skip = !dropped.swap(true, std::sync::atomic::Ordering::Relaxed);
-        pre.iter().skip(usize::from(skip)).cloned().collect()
-    })
+    let dropped = AtomicBool::new(false);
+    let planted = judge(
+        &corpus,
+        |pre| {
+            let skip = !dropped.swap(true, Ordering::Relaxed);
+            pre.iter().skip(usize::from(skip)).cloned().collect()
+        },
+        PParams::clone,
+    )
     .await;
     let text = planted.to_string();
     assert!(text.contains("STATE utxo disagree=1\n"), "{text}");
     assert!(text.contains("ledger="), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn one_changed_cost_model_entry_prints_params_disagree() {
+    let corpus = load(CorpusKind::Supp);
+    let intact = judge(&corpus, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    assert!(intact.params.compared > 0);
+    assert!(intact.params.disagree.is_empty(), "{intact}");
+    let changed = AtomicBool::new(false);
+    let planted = judge(&corpus, <[UtxoEntry]>::to_vec, |pparams| {
+        let mut pparams = pparams.clone();
+        if !changed.swap(true, Ordering::Relaxed) {
+            let entry = &mut pparams.0["costModels"]["PlutusV1"][0];
+            *entry = (entry.as_i64().unwrap() + 1).into();
+        }
+        pparams
+    })
+    .await;
+    let text = planted.to_string();
+    assert!(text.contains("STATE params disagree=1\n"), "{text}");
+    assert!(text.contains("costModels.PlutusV1[0] ledger="), "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -147,7 +207,7 @@ async fn a_seed_output_compared_as_bytes_names_the_first_differing_byte() {
     let run = corpus.kept().next().unwrap();
     let first = &run.records()[0];
     let genesis = seed::genesis(epoch_size(&corpus));
-    let seeded = seed::seed(&genesis, run.epoch().unwrap(), &first.pre_utxo);
+    let seeded = seed::seed(&genesis, run.epoch().unwrap(), &[], &first.pre_utxo);
     let id = RecordId {
         corpus: corpus.kind,
         n: first.n,
@@ -173,7 +233,12 @@ async fn the_seed_point_is_a_rollback_target() {
     let corpus = load(CorpusKind::Supp);
     let run = corpus.kept().next().unwrap();
     let genesis = seed::genesis(epoch_size(&corpus));
-    let seeded = seed::seed(&genesis, run.epoch().unwrap(), &run.records()[0].pre_utxo);
+    let seeded = seed::seed(
+        &genesis,
+        run.epoch().unwrap(),
+        &[],
+        &run.records()[0].pre_utxo,
+    );
     let rolled = seeded.domain.rollback(seeded.seed.point());
     assert!(rolled.is_ok(), "{rolled:?}");
 }

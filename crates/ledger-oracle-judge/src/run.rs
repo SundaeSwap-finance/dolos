@@ -16,7 +16,10 @@ impl ExcludeReason {
 
     /// Whether the protocol parameters change inside the run.
     pub fn pparams(self) -> bool {
-        matches!(self, ExcludeReason::PParams | ExcludeReason::EpochAndPParams)
+        matches!(
+            self,
+            ExcludeReason::PParams | ExcludeReason::EpochAndPParams
+        )
     }
 }
 

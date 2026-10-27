@@ -104,7 +104,9 @@ pub fn records(v: Verified) -> Result<Vec<Record>, LoadErrors> {
             Ok(record) => out.push(record),
             Err(e) => {
                 let text = e.to_string();
-                let reason = text.rsplit_once(" at line ").map_or(text.as_str(), |(r, _)| r);
+                let reason = text
+                    .rsplit_once(" at line ")
+                    .map_or(text.as_str(), |(r, _)| r);
                 reasons.entry(reason.to_string()).or_insert((0, i + 1)).0 += 1;
             }
         }
@@ -247,7 +249,9 @@ mod tests {
         assert!(verify(CorpusKind::Ic, &bytes, IC_SHA256).is_ok());
         bytes[100] ^= 1;
         let e = verify(CorpusKind::Ic, &bytes, IC_SHA256).unwrap_err();
-        assert!(e.to_string().starts_with("CORPUS ic sha mismatch expected=8b227044"));
+        assert!(e
+            .to_string()
+            .starts_with("CORPUS ic sha mismatch expected=8b227044"));
     }
 
     #[test]
@@ -298,7 +302,10 @@ mod tests {
 
     #[test]
     fn cbor_reader_input_totals_equal_an_independent_reader() {
-        assert_eq!(input_totals(CorpusKind::Ic), [1476, 83, 3, 376, 378, 16, 377]);
+        assert_eq!(
+            input_totals(CorpusKind::Ic),
+            [1476, 83, 3, 376, 378, 16, 377]
+        );
         assert_eq!(input_totals(CorpusKind::Supp), [35, 2, 1, 6, 8, 0, 8]);
     }
 }
