@@ -6,6 +6,7 @@ mod serve;
 mod validate;
 
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fmt,
     sync::atomic::{AtomicBool, Ordering},
@@ -29,10 +30,19 @@ use ledger_oracle_judge::{
         outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, ValidationTally,
     },
 };
-use pallas::ledger::traverse::{Era, MultiEraTx};
+use pallas::{
+    codec::{
+        minicbor,
+        utils::{KeepRaw, Nullable},
+    },
+    ledger::{
+        primitives::dijkstra,
+        traverse::{Era, MultiEraTx},
+    },
+};
 use seed::SeedPoint;
 use serve::{Event, Served, Service};
-use tonic::Request;
+use tonic::{Request, Status};
 
 use super::{
     query::QueryServiceImpl,
@@ -350,6 +360,229 @@ fn dolos_accounts(domain: &DomainAdapter) -> BTreeMap<Credential, Account> {
         .collect()
 }
 
+/// The block and transaction bytes Dolos serves through ReadTx for a transaction hash.
+struct ServedTx {
+    block: BlockAt,
+    bytes: Vec<u8>,
+}
+
+/// The slot and hash of a block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BlockAt {
+    slot: u64,
+    hash: [u8; 32],
+}
+
+impl fmt::Display for BlockAt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "slot={},block={}",
+            self.slot,
+            hex::encode(&self.hash[..4])
+        )
+    }
+}
+
+/// What Dolos serves through ReadTx for a transaction hash, nothing when it answers not found, or the status it answers with otherwise.
+async fn read_tx(domain: &DomainAdapter, hash: &[u8; 32]) -> Result<Option<ServedTx>, Status> {
+    let request = q::ReadTxRequest {
+        hash: hash.to_vec().into(),
+        ..Default::default()
+    };
+    let answer = QueryServiceImpl::new(domain.clone())
+        .read_tx(Request::new(request))
+        .await;
+    let tx = match answer {
+        Ok(answer) => answer
+            .into_inner()
+            .tx
+            .expect("ReadTx answers with a transaction"),
+        Err(status) if status.code() == tonic::Code::NotFound => return Ok(None),
+        Err(status) => return Err(status),
+    };
+    let block = tx.block_ref.expect("ReadTx names the block");
+    let hash = block
+        .hash
+        .as_ref()
+        .try_into()
+        .expect("a served block hash is 32 bytes");
+    Ok(Some(ServedTx {
+        block: BlockAt {
+            slot: block.slot,
+            hash,
+        },
+        bytes: tx.native_bytes.to_vec(),
+    }))
+}
+
+/// The raw body, witness set and auxiliary data of a Dijkstra transaction, with whether the block producer marks it successful.
+#[derive(Debug, PartialEq, Eq)]
+struct TxParts {
+    body: Vec<u8>,
+    witness: Vec<u8>,
+    auxiliary: Option<Vec<u8>>,
+    success: bool,
+}
+
+fn raw_auxiliary(aux: &Nullable<KeepRaw<'_, dijkstra::AuxiliaryData>>) -> Option<Vec<u8>> {
+    match aux {
+        Nullable::Some(aux) => Some(aux.raw_cbor().to_vec()),
+        Nullable::Null | Nullable::Undefined => None,
+    }
+}
+
+impl TxParts {
+    /// The parts of a ledger transaction, marked successful when the ledger ran its scripts to success.
+    fn ledger(bytes: &[u8], phase2: Phase2) -> Result<Self, String> {
+        let tx: dijkstra::MempoolTransaction =
+            minicbor::decode(bytes).map_err(|e| e.to_string())?;
+        Ok(TxParts {
+            body: tx.transaction_body.raw_cbor().to_vec(),
+            witness: tx.transaction_witness_set.raw_cbor().to_vec(),
+            auxiliary: raw_auxiliary(&tx.auxiliary_data),
+            success: phase2 == Phase2::Valid,
+        })
+    }
+
+    /// The parts of a transaction in the four element form a block carries.
+    fn block(bytes: &[u8]) -> Result<Self, String> {
+        let tx: dijkstra::BlockTransaction = minicbor::decode(bytes).map_err(|e| e.to_string())?;
+        Ok(TxParts {
+            body: tx.transaction_body.raw_cbor().to_vec(),
+            witness: tx.transaction_witness_set.raw_cbor().to_vec(),
+            auxiliary: raw_auxiliary(&tx.auxiliary_data),
+            success: tx.success,
+        })
+    }
+
+    /// The names of the parts that differ between two transactions.
+    fn differing(&self, other: &TxParts) -> Vec<&'static str> {
+        let parts = [
+            ("body", self.body == other.body),
+            ("witness", self.witness == other.witness),
+            ("auxiliary", self.auxiliary == other.auxiliary),
+            ("success", self.success == other.success),
+        ];
+        parts
+            .into_iter()
+            .filter(|(_, same)| !same)
+            .map(|(name, _)| name)
+            .collect()
+    }
+}
+
+/// The block and transaction the ledger's records say ReadTx answers a hash with.
+#[derive(Clone, Copy)]
+struct ExpectedTx<'r> {
+    slot: u64,
+    block: Option<[u8; 32]>,
+    tx: &'r [u8],
+    phase2: Phase2,
+}
+
+/// A transaction hash the ledger's records name, top level or sub transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum TxName {
+    Top([u8; 32]),
+    Sub([u8; 32]),
+}
+
+impl fmt::Display for TxName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TxName::Top(h) => write!(f, "tx={}", hex::encode(h)),
+            TxName::Sub(h) => write!(f, "sub_tx={}", hex::encode(h)),
+        }
+    }
+}
+
+/// Counts each transaction hash of a run against what ReadTx serves for it, the block and transaction of the accepted record that carries it or nothing when only refused records do.
+async fn compare_read_tx(
+    domain: &DomainAdapter,
+    kind: CorpusKind,
+    run: &KeptRun,
+    rolled: &[Rolled<'_>],
+    tally: &mut Tally,
+) {
+    let blocks: BTreeMap<u64, [u8; 32]> = rolled
+        .iter()
+        .filter_map(|r| match &r.point {
+            ChainPoint::Specific(slot, hash) => Some((*slot, **hash)),
+            _ => None,
+        })
+        .collect();
+    let mut expected: BTreeMap<TxName, (RecordId, Option<ExpectedTx>)> = BTreeMap::new();
+    for record in run.records() {
+        let id = RecordId {
+            corpus: kind,
+            n: record.n,
+        };
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
+            .unwrap_or_else(|e| panic!("TX {id} {e}"));
+        let mut names = vec![TxName::Top(*tx.hash())];
+        if let MultiEraTx::Dijkstra(x) = &tx {
+            let subs = x.transaction_body.sub_transactions.iter();
+            let subs = subs.flat_map(|subs| subs.iter());
+            names.extend(subs.map(|sub| {
+                let sub = MultiEraTx::DijkstraSub(Box::new(Cow::Owned(sub.clone())), x.success);
+                TxName::Sub(*sub.hash())
+            }));
+        }
+        let ledger = match &record.outcome {
+            LedgerOutcome::Accepted { .. } => Some(ExpectedTx {
+                slot: record.slot,
+                block: blocks.get(&record.slot).copied(),
+                tx: &record.tx.0,
+                phase2: record.phase2_valid,
+            }),
+            LedgerOutcome::Refused { .. } => None,
+        };
+        for name in names {
+            let entry = expected.entry(name).or_insert((id, None));
+            if let Some(ledger) = ledger {
+                *entry = (id, Some(ledger));
+            }
+        }
+    }
+    for (name, (id, ledger)) in expected {
+        let hash = match name {
+            TxName::Top(h) | TxName::Sub(h) => h,
+        };
+        let shown = match &ledger {
+            Some(e) => match e.block {
+                Some(hash) => BlockAt { slot: e.slot, hash }.to_string(),
+                None => format!("slot={},block=none", e.slot),
+            },
+            None => "none".to_string(),
+        };
+        let (agrees, dolos) = match (&ledger, read_tx(domain, &hash).await) {
+            (_, Err(status)) => (false, format!("status={:?}", status.code())),
+            (None, Ok(None)) => (true, "none".to_string()),
+            (Some(_), Ok(None)) => (false, "none".to_string()),
+            (None, Ok(Some(served))) => (false, served.block.to_string()),
+            (Some(e), Ok(Some(served))) => {
+                let ledger =
+                    TxParts::ledger(e.tx, e.phase2).unwrap_or_else(|err| panic!("TX {id} {err}"));
+                let differing = match TxParts::block(&served.bytes) {
+                    Ok(parts) => ledger.differing(&parts).join(","),
+                    Err(err) => format!("undecoded {err}"),
+                };
+                let block = served.block;
+                let same_block = block.slot == e.slot && e.block == Some(block.hash);
+                let dolos = match differing.is_empty() {
+                    true => block.to_string(),
+                    false => format!("{block} differing={differing}"),
+                };
+                (same_block && differing.is_empty(), dolos)
+            }
+        };
+        tally.add(agrees, || {
+            format!("{id} {name} ledger={shown} dolos={dolos}")
+        });
+    }
+}
+
 /// The output bytes each service serves for the blocks a run rolled, streamed from the seed point.
 async fn serve_rolled(
     domain: &DomainAdapter,
@@ -601,6 +834,14 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             edits,
             &mut judged_ids,
             &mut judged,
+        )
+        .await;
+        compare_read_tx(
+            &seeded.domain,
+            corpus.kind,
+            run,
+            &rolled,
+            &mut judged.state.readtx,
         )
         .await;
         let services = serve_rolled(&seeded.domain, &seeded.seed, &rolled).await;
@@ -1019,6 +1260,37 @@ async fn rolling_back_each_block_serves_the_inputs_earlier_blocks_made() {
         .filter(|d| !d.contains(" in_group made_by="))
         .join("\n");
     assert!(other.is_empty(), "{text}\nUNDO\n{other}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn an_accepted_tx_left_out_of_its_block_is_not_found_by_read_tx() {
+    let corpus = load(CorpusKind::Supp);
+    let manifests = Manifests::committed();
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    assert!(intact.state.readtx.compared > 0, "{intact}");
+    assert!(intact.state.readtx.disagree.is_empty(), "{intact}");
+    let left_out = corpus
+        .kept()
+        .flat_map(|run| run.groups().filter_map(<[Record]>::last))
+        .find(|r| matches!(r.outcome, LedgerOutcome::Accepted { .. }))
+        .map(|r| supp(r.n))
+        .expect("a group ends in an accepted record");
+    let edits = Edits {
+        block_tx: Box::new(|id, phase2| (id != left_out).then_some(phase2)),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
+    let prefix = format!("{left_out} tx=");
+    let lines: Vec<&String> = planted
+        .state
+        .readtx
+        .disagree
+        .iter()
+        .filter(|d| d.starts_with(&prefix))
+        .collect();
+    assert_eq!(lines.len(), 1, "{planted}");
+    assert!(lines[0].ends_with(" dolos=none"), "{planted}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

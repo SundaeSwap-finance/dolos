@@ -81,18 +81,20 @@ pub struct StateTallies {
     pub accounts: Tally,
     pub undo: Tally,
     pub params: Tally,
+    pub readtx: Tally,
     pub known: Vec<String>,
     pub known_stale: Vec<String>,
 }
 
 impl StateTallies {
-    fn named(&self) -> [(&'static str, &Tally); 5] {
+    fn named(&self) -> [(&'static str, &Tally); 6] {
         [
             ("utxo", &self.utxo),
             ("as_output", &self.as_output),
             ("accounts", &self.accounts),
             ("undo", &self.undo),
             ("params", &self.params),
+            ("readtx", &self.readtx),
         ]
     }
 
@@ -151,14 +153,20 @@ impl fmt::Display for StateTallies {
             accounts,
             undo,
             params,
+            readtx,
             known,
             known_stale,
         } = self;
         write!(
             f,
             "STATE compared utxo={} as_output={} of in_run={in_run} \
-             seeded_unjudged={seeded_unjudged} accounts={} undo={} params={}",
-            utxo.compared, as_output.compared, accounts.compared, undo.compared, params.compared
+             seeded_unjudged={seeded_unjudged} accounts={} undo={} params={} readtx={}",
+            utxo.compared,
+            as_output.compared,
+            accounts.compared,
+            undo.compared,
+            params.compared,
+            readtx.compared
         )?;
         for line in known {
             write!(f, "\nKNOWN {line}")?;
@@ -218,6 +226,7 @@ mod tests {
         state.accounts.add(true, String::new);
         state.undo.add(true, String::new);
         state.params.add(true, String::new);
+        state.readtx.add(true, String::new);
         state
     }
 
@@ -226,12 +235,13 @@ mod tests {
         let mut state = compared();
         state.as_output.add(true, String::new);
         assert!(state.pass(), "{state}");
-        let empties: [fn(&mut StateTallies) -> &mut Tally; 5] = [
+        let empties: [fn(&mut StateTallies) -> &mut Tally; 6] = [
             |s| &mut s.utxo,
             |s| &mut s.as_output,
             |s| &mut s.accounts,
             |s| &mut s.undo,
             |s| &mut s.params,
+            |s| &mut s.readtx,
         ];
         for empty in empties {
             let mut state = state.clone();
@@ -240,7 +250,7 @@ mod tests {
         }
         assert!(state
             .to_string()
-            .contains(" seeded_unjudged=0 accounts=1 undo=1 params=1"));
+            .contains(" seeded_unjudged=0 accounts=1 undo=1 params=1 readtx=1"));
     }
 
     #[test]
