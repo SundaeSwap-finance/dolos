@@ -7,6 +7,7 @@ use crate::{
     manifest::Feature,
     record::{FailurePath, LedgerOutcome, NonEmpty, Phase2, RecordId},
     refusal::RefusalClass,
+    row::Row,
 };
 
 /// What Dolos answered when one transaction was submitted to it.
@@ -64,7 +65,7 @@ pub enum Pass {
     Agree,
     UnsupportedExpected { label: String },
     RefuseUnsupported { label: String },
-    Known { row: String, shown: String },
+    Known { row: Row, shown: String },
 }
 
 /// A judgement of one record that fails the arm.
@@ -88,7 +89,7 @@ pub enum Fail {
         dolos: String,
     },
     KnownStale {
-        row: String,
+        row: Row,
     },
 }
 
@@ -168,14 +169,14 @@ pub fn outcome(
 }
 
 /// The outcome of a record on the known list, which passes only while the record still fails.
-pub fn with_known(outcome: Outcome, row: Option<&String>) -> Outcome {
+pub fn with_known(outcome: Outcome, row: Option<&Row>) -> Outcome {
     match (row, outcome) {
         (None, outcome) => outcome,
-        (Some(row), Outcome::Fail(fail)) => Outcome::Pass(Pass::Known {
-            row: row.clone(),
+        (Some(&row), Outcome::Fail(fail)) => Outcome::Pass(Pass::Known {
+            row,
             shown: fail.to_string(),
         }),
-        (Some(row), Outcome::Pass(_)) => Outcome::Fail(Fail::KnownStale { row: row.clone() }),
+        (Some(&row), Outcome::Pass(_)) => Outcome::Fail(Fail::KnownStale { row }),
     }
 }
 
@@ -196,7 +197,7 @@ pub struct ValidationTally {
     pub agree: usize,
     pub unsupported_expected: BTreeMap<String, usize>,
     pub refuse_unsupported: Vec<(RecordId, String)>,
-    pub known: Vec<(RecordId, String, String)>,
+    pub known: Vec<(RecordId, Row, String)>,
     pub disagree: Vec<(RecordId, String)>,
     pub reason_mismatch: Vec<(RecordId, String)>,
     pub unsupported_unexpected: Vec<(RecordId, String)>,
@@ -506,7 +507,7 @@ mod tests {
 
     #[test]
     fn a_known_record_passes_while_it_fails_and_fails_once_it_agrees() {
-        let row = "V2".to_string();
+        let row = Row::V2;
         let failing = outcome(
             &accepted(),
             Phase2::Valid,
@@ -521,7 +522,7 @@ mod tests {
         assert_eq!(
             with_known(failing, Some(&row)),
             Outcome::Pass(Pass::Known {
-                row: row.clone(),
+                row,
                 shown: "ledger=accepted dolos=refused[InputNotInUTxO]".into()
             })
         );

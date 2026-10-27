@@ -208,6 +208,7 @@ impl fmt::Display for StateTallies {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::row::Row;
 
     #[test]
     fn first_difference_names_the_byte_or_the_shorter_length() {
@@ -289,7 +290,7 @@ mod tests {
     #[test]
     fn a_known_record_passes_while_it_disagrees() {
         let mut state = compared();
-        let known = KnownList::from([((Locus::AsOutput, supp(9)), "S3".to_string())]);
+        let known = KnownList::from([((Locus::AsOutput, supp(9)), Row::S3)]);
         let diff = "ledger=ab dolos=none input=00#1 services=FetchBlock";
         state.settle_as_output(CorpusKind::Supp, checks(&[(9, &[diff])]), &known);
         assert_eq!(
@@ -304,8 +305,8 @@ mod tests {
     fn a_known_record_that_agrees_or_was_not_compared_is_stale() {
         let mut state = StateTallies::default();
         let known = KnownList::from([
-            ((Locus::AsOutput, supp(9)), "S3".to_string()),
-            ((Locus::AsOutput, supp(10)), "S3".to_string()),
+            ((Locus::AsOutput, supp(9)), Row::S3),
+            ((Locus::AsOutput, supp(10)), Row::S3),
             (
                 (
                     Locus::AsOutput,
@@ -314,9 +315,9 @@ mod tests {
                         n: 9,
                     },
                 ),
-                "S3".to_string(),
+                Row::S3,
             ),
-            ((Locus::Validation, supp(11)), "V1".to_string()),
+            ((Locus::Validation, supp(11)), Row::V1),
         ]);
         state.settle_as_output(CorpusKind::Supp, checks(&[(9, &[])]), &known);
         assert_eq!(

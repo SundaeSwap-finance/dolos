@@ -27,6 +27,7 @@ use ledger_oracle_judge::{
     corpus::{self, Corpus},
     manifest::{self, Declared, Feature, KnownList, Locus},
     record::{CorpusKind, LedgerOutcome, PParams, Phase2, Record, RecordId, UtxoEntry},
+    row::Row,
     run::{origin, InputOrigin, KeptRun},
     verdict::{
         outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, ValidationTally,
@@ -231,7 +232,7 @@ impl Manifests {
         let validation = |locus: &Locus| *locus == Locus::Validation;
         let entries = self.known.iter();
         for ((_, id), row) in entries.filter(|((locus, id), _)| validation(locus) && missed(id)) {
-            let fail = Fail::KnownStale { row: row.clone() };
+            let fail = Fail::KnownStale { row: *row };
             tally.add(*id, Outcome::Fail(fail));
         }
     }
@@ -1243,10 +1244,8 @@ async fn a_known_entry_naming_an_agreeing_or_unjudged_record_prints_known_stale(
     let intact = judge_supp(|_| ()).await.validation.to_string();
     assert!(!intact.contains("supp#0 "), "{intact}");
     let named = judge_supp(|m| {
-        m.known
-            .insert((Locus::Validation, supp(0)), "V9".to_string());
-        m.known
-            .insert((Locus::Validation, supp(999)), "V9".to_string());
+        m.known.insert((Locus::Validation, supp(0)), Row::V9);
+        m.known.insert((Locus::Validation, supp(999)), Row::V9);
     })
     .await
     .to_string();

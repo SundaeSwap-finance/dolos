@@ -2,7 +2,10 @@ use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use thiserror::Error;
 
-use crate::record::{CorpusKind, RecordId};
+use crate::{
+    record::{CorpusKind, RecordId},
+    row::{coverage, Check, Row},
+};
 
 const EXPECTED: &str = include_str!("../../../test_data/ledger-oracle/expected-unsupported.txt");
 const KNOWN: &str = include_str!("../../../test_data/ledger-oracle/known.txt");
@@ -22,6 +25,25 @@ impl fmt::Display for Feature {
 pub enum Locus {
     Validation,
     AsOutput,
+}
+
+impl Locus {
+    /// The comparison the locus names.
+    pub fn check(self) -> Check {
+        match self {
+            Locus::Validation => Check::Validation,
+            Locus::AsOutput => Check::AsOutput,
+        }
+    }
+}
+
+impl fmt::Display for Locus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Locus::Validation => "validation",
+            Locus::AsOutput => "as_output",
+        })
+    }
 }
 
 impl FromStr for Locus {
@@ -64,7 +86,7 @@ impl FromStr for RecordId {
 pub type Declared = BTreeMap<RecordId, Feature>;
 
 /// The catalog row each known disagreement is filed under, by locus and record.
-pub type KnownList = BTreeMap<(Locus, RecordId), String>;
+pub type KnownList = BTreeMap<(Locus, RecordId), Row>;
 
 fn lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
     text.lines()
@@ -93,16 +115,19 @@ pub fn parse_known(file: &'static str, text: &str) -> Result<KnownList, Manifest
     for (line, l) in lines(text) {
         let error = |reason: String| ManifestError { file, line, reason };
         let mut words = l.split(' ');
-        let row = words.next().unwrap_or_default();
+        let row: Row = words.next().unwrap_or_default().parse().map_err(error)?;
         let locus: Locus = words
             .next()
             .ok_or(error("no locus".into()))?
             .parse()
             .map_err(error)?;
+        if !coverage(row).checks().contains(&locus.check()) {
+            return Err(error(format!("row {row} is not judged by {locus}")));
+        }
         let mut ids = 0;
         for id in words {
             let id: RecordId = id.parse().map_err(error)?;
-            if known.insert((locus, id), row.to_string()).is_some() {
+            if known.insert((locus, id), row).is_some() {
                 return Err(error(format!("{id} known twice")));
             }
             ids += 1;
@@ -143,6 +168,16 @@ mod tests {
                 line: 2,
                 reason: "supp#5 known twice".into()
             }
+        );
+    }
+
+    #[test]
+    fn a_known_row_names_a_catalog_row_its_locus_judges() {
+        let reason = |text| parse_known("k", text).unwrap_err().reason;
+        assert_eq!(reason("V99 validation supp#5"), "unknown row V99");
+        assert_eq!(
+            reason("S13 validation supp#5"),
+            "row S13 is not judged by validation"
         );
     }
 
