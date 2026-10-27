@@ -39,10 +39,16 @@ const DREP_THRESHOLDS: [&str; 10] = [
 /// The cost model language names in the order of their ledger language index.
 const LANGUAGES: [&str; 4] = ["PlutusV1", "PlutusV2", "PlutusV3", "PlutusV4"];
 
+/// The Dolos updates a ledger parameter value seeds.
+type SeedFn = fn(&Canon) -> Vec<P>;
+
+/// The ledger parameter value ReadParams serves.
+type ServedFn = fn(&u5c::PParams) -> Canon;
+
 /// How one ledger parameter is seeded into Dolos and read back from ReadParams.
 struct Param {
-    seed: fn(&Canon) -> Vec<P>,
-    served: fn(&u5c::PParams) -> Canon,
+    seed: SeedFn,
+    served: ServedFn,
 }
 
 fn int(c: &Canon) -> u64 {
@@ -246,7 +252,7 @@ fn served_version(p: &u5c::PParams) -> Canon {
 
 /// The seed and served forms of a ledger parameter, none when the key is unmapped.
 fn param(key: &str) -> Option<Param> {
-    let (seed, served): (fn(&Canon) -> Vec<P>, fn(&u5c::PParams) -> Canon) = match key {
+    let (seed, served): (SeedFn, ServedFn) = match key {
         "collateralPercentage" => (
             |c| vec![P::CollateralPercentage(small(c))],
             |p| n(p.collateral_percentage),

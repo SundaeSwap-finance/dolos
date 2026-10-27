@@ -740,6 +740,9 @@ fn output_script(output: &MultiEraOutput<'_>) -> Option<([u8; 28], ScriptLanguag
     Some((*script.hash(), script.language()))
 }
 
+/// The language and place of a script an accepted record carries, none for a script the ledger does not hold.
+type LedgerScript = Option<(ScriptLanguage, ScriptAt)>;
+
 /// Counts each script hash of a run against what the script lookup serves for it, the language from the witnesses or produced outputs of an accepted record, or nothing otherwise.
 async fn compare_scripts(
     domain: &DomainAdapter,
@@ -747,8 +750,7 @@ async fn compare_scripts(
     run: &KeptRun,
     tally: &mut Tally,
 ) {
-    let mut expected: BTreeMap<[u8; 28], (RecordId, Option<(ScriptLanguage, ScriptAt)>)> =
-        BTreeMap::new();
+    let mut expected: BTreeMap<[u8; 28], (RecordId, LedgerScript)> = BTreeMap::new();
     for record in run.records() {
         let id = RecordId {
             corpus: kind,
@@ -1007,9 +1009,12 @@ async fn sweep(
     accounts::compare(id, &first.accounts_pre, &dolos_accounts(domain), tally);
 }
 
+/// The pre state a planted check seeds for a record in place of its own.
+type PreEdit<'a> = Box<dyn Fn(RecordId, &[UtxoEntry]) -> Vec<UtxoEntry> + 'a>;
+
 /// What a planted check changes in the seed, the expected parameters and the blocks of one judgement.
 struct Edits<'a> {
-    pre: Box<dyn Fn(RecordId, &[UtxoEntry]) -> Vec<UtxoEntry> + 'a>,
+    pre: PreEdit<'a>,
     accounts_pre: Box<dyn Fn(&LedgerAccounts) -> LedgerAccounts + 'a>,
     expected_params: Box<dyn Fn(&PParams) -> PParams + 'a>,
     block_tx: Box<dyn Fn(RecordId, Phase2) -> Option<Phase2> + 'a>,
