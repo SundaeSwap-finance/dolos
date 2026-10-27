@@ -84,3 +84,80 @@ pub(crate) fn sub_transaction_block() -> SubTransactionBlock {
         sub_bytes: pallas::codec::minicbor::to_vec(sub).unwrap(),
     }
 }
+
+/// Synthetic serving fixture derived from the captured ranking block. Only its
+/// batch is retained, parent reference inputs are removed, and the producer
+/// verdict is selectable. The original capture is never rewritten. Signatures
+/// and header commitments are not valid for this wrapper; this tests mapping,
+/// not ledger acceptance. The resolved outputs below are synthetic too.
+pub(crate) fn child_only_inputs(
+    success: bool,
+) -> (dolos_core::RawBlock, pallas::interop::utxorpc::UtxoMap) {
+    use pallas::{
+        codec::minicbor,
+        ledger::primitives::{KeepRaw, MaybeIndefArray},
+    };
+
+    let raw = hex::decode(
+        include_str!("../../test_data/musashi-w36/ranking-sub-transaction.block").trim(),
+    )
+    .unwrap();
+    let block = MultiEraBlock::decode(&raw).unwrap();
+    let mut native = block.as_dijkstra().unwrap().clone();
+    let mut parent = native.block_body.transactions.last().unwrap().clone();
+    let mut body = parent.transaction_body.unwrap();
+    assert!(body.sub_transactions.is_some());
+    body.reference_inputs = None;
+    parent.transaction_body = KeepRaw::from(body);
+    parent.success = success;
+    native.block_body.transactions = MaybeIndefArray::Def(vec![parent]);
+    let raw = minicbor::to_vec((8u16, native)).unwrap();
+    let block = MultiEraBlock::decode(&raw).unwrap();
+    let mut outputs = pallas::interop::utxorpc::UtxoMap::new();
+    for (_, tx) in dolos_core::applied_txs(&block) {
+        let marker = if tx.as_dijkstra_sub().is_some() {
+            42
+        } else {
+            41
+        };
+        let mut address = vec![0x60];
+        address.extend([marker; 28]);
+        // A synthetic output with an address and asset unique to child inputs.
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.map(2)
+            .unwrap()
+            .u8(0)
+            .unwrap()
+            .bytes(&address)
+            .unwrap()
+            .u8(1)
+            .unwrap()
+            .array(2)
+            .unwrap()
+            .u64(9_000_000)
+            .unwrap()
+            .map(1)
+            .unwrap()
+            .bytes(&[marker; 28])
+            .unwrap()
+            .map(1)
+            .unwrap()
+            .bytes(b"child-input")
+            .unwrap()
+            .u64(7)
+            .unwrap();
+        let output = e.into_writer();
+        for input in tx
+            .inputs()
+            .into_iter()
+            .chain(tx.collateral())
+            .chain(tx.reference_inputs())
+        {
+            outputs.insert(
+                (*input.hash(), input.index() as u32),
+                (block.era(), output.clone()),
+            );
+        }
+    }
+    (Arc::new(raw), outputs)
+}

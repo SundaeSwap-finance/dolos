@@ -1,0 +1,299 @@
+{
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_BUILD_JOBS": "3",
+    "CARGO_TARGET_DIR": "/home/rodrigo/projects/dolos/target/utxorpc-subtransactions/fixed"
+  },
+  "workspace_checks": [
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 152.48,
+      "log": "target/utxorpc-subtransactions/clippy.log",
+      "tests": null,
+      "failed_tests": [],
+      "sha256": "f3cde2e59a69acf3b910b19906b1e4f64b9e1c35570d170c724dbca6b99eab1a"
+    },
+    {
+      "name": "build",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 239.56,
+      "log": "target/utxorpc-subtransactions/build.log",
+      "tests": null,
+      "failed_tests": [],
+      "sha256": "a66880beb935b0bf6dfcd9c20cadd4dcb3f40593506830776a220890490b6312"
+    },
+    {
+      "name": "tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-fail-fast"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 328.16,
+      "log": "target/utxorpc-subtransactions/tests.log",
+      "tests": {
+        "passed": 1996,
+        "failed": 0,
+        "ignored": 37
+      },
+      "failed_tests": [],
+      "sha256": "5a7b6136230785833e1624ac223258acffad1dba6ef423e12d133fbf25f9a02b"
+    },
+    {
+      "name": "strict-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--exclude",
+        "dolos-minibf",
+        "--exclude",
+        "dolos-minikupo",
+        "--exclude",
+        "dolos-trp",
+        "--no-fail-fast"
+      ],
+      "exit_code": 101,
+      "elapsed_seconds": 113.72,
+      "log": "target/utxorpc-subtransactions/strict-tests.log",
+      "tests": {
+        "passed": 1426,
+        "failed": 16,
+        "ignored": 42
+      },
+      "failed_tests": [
+        "serve::grpc::v1::query::tests::read_tx_of_an_unknown_hash_is_not_found",
+        "serve::grpc::v1::query::tests::read_tx_answers_a_sub_transaction_hash_with_its_parent",
+        "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+        "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+        "every_lookup_by_hash_finds_each_sub_transaction",
+        "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+        "minibf_serves_each_sub_transaction_by_its_own_hash",
+        "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+        "minibf_address_routes_count_each_sub_transaction",
+        "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+        "the_spender_of_a_sub_transaction_input_is_that_sub_transaction",
+        "minibf_block_routes_count_each_sub_transaction",
+        "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+        "minibf_resolves_an_input_a_sub_transaction_made",
+        "minikupo_matches_the_outputs_of_a_sub_transaction",
+        "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends"
+      ],
+      "sha256": "385432618587d3147e72ca36e7b69221b3fe0abd110592381f655b9287c2e353"
+    }
+  ],
+  "schema_version": 1,
+  "date": "2026-10-26",
+  "toolchains": {
+    "dolos": {
+      "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+      "cargo": "1.97.0 (c980f4866 2026-06-30)"
+    },
+    "sundae_sync_v2": {
+      "rustc": "1.98.1 (48a229cea 2026-09-01)",
+      "cargo": "1.98.1 (797e8a9bc 2026-08-05)"
+    }
+  },
+  "focused": {
+    "command": "cargo test --offline --locked -p dolos --lib --no-default-features --features grpc serve::grpc::block_context::tests -- --nocapture",
+    "baseline": {
+      "exit_code": 101,
+      "passed": 4,
+      "failed": 1,
+      "reason": "child-only input has as_output: None",
+      "log": "evidence/baseline.txt"
+    },
+    "fixed": {
+      "exit_code": 0,
+      "passed": 5,
+      "failed": 0,
+      "log": "evidence/fixed.txt"
+    },
+    "separate_build_directories": [
+      "target/utxorpc-subtransactions/baseline",
+      "target/utxorpc-subtransactions/fixed"
+    ],
+    "identical_test_sources_verified": true,
+    "baseline_preparation_patch_checked": true,
+    "patch_apply_option": "--unidiff-zero"
+  },
+  "paired_consumer": {
+    "server_test": "serve::grpc::v1::subtransaction_tests::sundae_sync_consumes_child_inputs_over_v1",
+    "consumer_test": "dolos_child_inputs_survive_fetch_follow_and_undo",
+    "baseline_exit_code": 101,
+    "baseline_reason": "child-only dependency must resolve",
+    "fixed_exit_code": 0,
+    "logs": [
+      "evidence/consumer-baseline.txt",
+      "evidence/consumer-fixed.txt"
+    ],
+    "transport": "actual Dolos v1 sync service on ephemeral loopback port; separate sundae-sync-v2 Follower process",
+    "scope": [
+      "FetchBlock",
+      "DumpHistory",
+      "FollowTip Apply/Undo",
+      "child input and reference input enrichment",
+      "child hashes",
+      "input-only address and token filter positive/negative controls"
+    ],
+    "ledger_rollback_replayed": false,
+    "aws_used": false
+  },
+  "consumer_suite": {
+    "command": "cargo test --offline --locked --all-features --no-fail-fast",
+    "exit_code": 0,
+    "passed": 135,
+    "failed": 0,
+    "ignored": 2,
+    "log": "target/utxorpc-subtransactions/consumer-suite.log",
+    "summary": "evidence/consumer-suite.txt",
+    "ignored_note": "new paired test was separately executed; older live capture test remains ignored"
+  },
+  "formatting": {
+    "consumer": "pass",
+    "changed_dolos_rust": "pass",
+    "dolos_workspace": "existing formatting differences",
+    "unchanged_files": [
+      {
+        "path": "crates/cardano/src/forks.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/cardano/src/roll/batch.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/cardano/tests/genesis_stake_pools.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/core/src/sync.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/minibf/src/routes/scripts.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "src/bin/dolos/daemon.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "src/serve/grpc/v1beta/watch.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "src/sync/leios.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "src/sync/pull.rs",
+        "unchanged_from_HEAD": true
+      }
+    ]
+  },
+  "known_findings": {
+    "strict_failure_names_match_recorded_baseline": true,
+    "strict_baseline_report": "../subtransaction-dependencies/verification.json#known_findings.strict_failures",
+    "strict_failure_kind": "epoch-coherence assertion in crates/cardano/src/model/epoch_value.rs:236",
+    "clippy": "exit 0 with existing warnings; not warning-free",
+    "clippy_source_comparison": [
+      {
+        "path": "crates/cardano/src/roll/dreps.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/cardano/src/utxoset.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/fjall/src/archive/mod.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/minibf/src/routes/accounts.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/redb3/src/state/mod.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "crates/redb3/src/state/utxoset.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "src/prelude.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "tests/archive_segments.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "tests/musashi_pipeline_replay.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "xtask/src/perf/storage/codec.rs",
+        "unchanged_from_HEAD": true
+      },
+      {
+        "path": "xtask/src/perf/storage/node.rs",
+        "unchanged_from_HEAD": true
+      }
+    ],
+    "build": "existing proc-macro-error2 future-compatibility notice"
+  },
+  "integrity": {
+    "captured_byte_checksums_verified": true,
+    "baseline_preparation_patch_applies": true,
+    "test_source_identity_verified": true,
+    "production_file_sha256": "01e167bfb2e8d71308ddf21cc3e69a5e5921e54575661fc6ae2c39f035660c7d"
+  },
+  "evidence_sha256": {
+    "evidence/baseline-tests.patch": "ce09a3ef72819eec7c7293d4640848d35d48a30eaf8576aca85ff780cb35d793",
+    "evidence/baseline.txt": "7f9201b7fa65a4bc35500bcd975f8ca060826329d4d6b65a0d067866cbe8457e",
+    "evidence/consumer-baseline.txt": "f3b73b4ffd7bbf352a45efcc6b8611177d44a8319ded220c87110d9ebb851130",
+    "evidence/consumer-fixed.txt": "2e91e45ddd38643496013118ff355ae8094f3d508e0a9352dbc2eaf4edaea2a0",
+    "evidence/consumer-suite.txt": "01aa58fc48f4f8b4f74206968a206617daa8d1190d348b28a22f98e84078d9e0",
+    "evidence/fixed.txt": "52ec5fd225f5a4e55fd334b73af37c5db0618b5e635b96a6868b2599dc3086ad",
+    "evidence/network-sample.json": "4f0341e3fa09c2de552ca85945e3c5101bdeca1adcbe4ac0c2b777c98377e690",
+    "evidence/test-source-sha256.json": "353b44ad73dc4cca3f8a8c10b85d11efce24625df299efc311bdd7359b32afd9"
+  },
+  "limits": [
+    "Native network capture reproducing child-only dependency omission unavailable; failing fixture is explicitly synthetic.",
+    "Captured producer/consumer pair passes both baseline and fixed code.",
+    "No running service restarted or live AWS/deployment integration performed.",
+    "Registry round-trip suite not applicable; macOS/Windows unavailable.",
+    "No Pallas dependency change, signing, submission, commit, tag or remote write."
+  ]
+}

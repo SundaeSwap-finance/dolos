@@ -1,0 +1,25 @@
+   Compiling dolos v2.0.0-alpha.0 (/home/rodrigo/projects/dolos)
+    Finished `test` profile [unoptimized] target(s) in 29.89s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/lib.rs (target/utxorpc-subtransactions/baseline/debug/deps/dolos-476d5ce162bfcda2)
+
+running 5 tests
+
+thread 'serve::grpc::block_context::tests::child_only_spending_and_reference_inputs_are_resolved_once' (59) panicked at src/serve/grpc/block_context.rs:189:17:
+child-only input must resolve: TxInput { tx_hash: b"\xd2\xfaeh\x06a\x13\xf7\x8e\xef\xdc\x89\x02[A\x9a\x8eh\xdb\x15\xee\xf7\x0e\x9a\x8c\xbe\xa3\xb4\xed\x87\xd8\xb6", output_index: 0, as_output: None, redeemer: Some(Redeemer { purpose: Spend, payload: Some(PlutusData { plutus_data: Some(BoundedBytes(b"\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab")) }), index: 0, ex_units: Some(ExUnits { steps: 500000000, memory: 1000000 }), original_cbor: b"\x82\x82\0\0\x82X\x1c\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\xab\x82\x1a\0\x0fB@\x1a\x1d\xcde\0" }) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test serve::grpc::block_context::tests::child_only_spending_and_reference_inputs_are_resolved_once ... FAILED
+test serve::grpc::block_context::tests::bulk_failure_falls_back_to_per_transaction_resolution ... ok
+test serve::grpc::block_context::tests::new_response_does_not_reuse_previous_resolution ... ok
+test serve::grpc::block_context::tests::resolves_once_and_preserves_both_wire_versions ... ok
+test serve::grpc::block_context::tests::captured_child_spend_resolves_the_original_captured_output ... ok
+
+failures:
+
+failures:
+    serve::grpc::block_context::tests::child_only_spending_and_reference_inputs_are_resolved_once
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 265 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p dolos --lib`

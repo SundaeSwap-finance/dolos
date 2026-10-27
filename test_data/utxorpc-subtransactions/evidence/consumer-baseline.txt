@@ -1,0 +1,30 @@
+
+running 1 test
+
+running 1 test
+test dolos_child_inputs_survive_fetch_follow_and_undo ... FAILED
+
+failures:
+
+failures:
+    dolos_child_inputs_survive_fetch_follow_and_undo
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+thread 'dolos_child_inputs_survive_fetch_follow_and_undo' (2795858) panicked at tests/dolos_subtransactions.rs:28:9:
+child-only dependency must resolve
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+thread 'serve::grpc::v1::subtransaction_tests::sundae_sync_consumes_child_inputs_over_v1' (2795853) panicked at src/serve/grpc/v1/subtransaction_tests.rs:119:5:
+sundae-sync consumer failed: exit status: 101
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test serve::grpc::v1::subtransaction_tests::sundae_sync_consumes_child_inputs_over_v1 ... FAILED
+
+failures:
+
+failures:
+    serve::grpc::v1::subtransaction_tests::sundae_sync_consumes_child_inputs_over_v1
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 269 filtered out; finished in 0.12s

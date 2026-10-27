@@ -1,0 +1,305 @@
+--- a/src/serve/grpc/block_context.rs
++++ b/src/serve/grpc/block_context.rs
+@@ -67 +67 @@
+-    use pallas::interop::utxorpc::{v1alpha, v1beta};
++    use pallas::interop::utxorpc::{v1, v1alpha, v1beta};
+@@ -167 +167,83 @@
+-}
++
++    #[test]
++    fn child_only_spending_and_reference_inputs_are_resolved_once() {
++        // Both successful and failed parents are mapped for inspection. Their
++        // producer verdict governs whether a consumer applies child effects.
++        for success in [true, false] {
++            let (raw, outputs) = crate::tests::musashi::child_only_inputs(success);
++            let context = CountingContext {
++                calls: Arc::default(),
++                outputs: Arc::new(Mutex::new(outputs)),
++                fail_bulk: false,
++            };
++            let block = MultiEraBlock::decode(&raw).unwrap();
++            let expected = v1::Mapper::new(context.clone()).map_block(&block);
++            context.calls.store(0, Ordering::Relaxed);
++            let mapped =
++                v1::Mapper::new(BlockContext::new(context.clone(), &block)).map_block(&block);
++            let parent = &mapped.body.as_ref().unwrap().tx[0];
++            let child = &parent.sub_transactions[0];
++            assert_eq!(parent.successful, success);
++            assert_eq!((child.inputs.len(), child.reference_inputs.len()), (1, 1));
++            for input in child.inputs.iter().chain(&child.reference_inputs) {
++                assert!(
++                    input.as_output.is_some(),
++                    "child-only input must resolve: {input:?}"
++                );
++            }
++            assert_eq!(mapped, expected);
++            assert_eq!(context.calls.load(Ordering::Relaxed), 1);
++
++            // A partial successful lookup is legitimate. A later response must
++            // resolve afresh, including after an undo or archive/state change.
++            context.outputs.lock().unwrap().clear();
++            let after =
++                v1::Mapper::new(BlockContext::new(context.clone(), &block)).map_block(&block);
++            assert_ne!(mapped, after);
++            assert_eq!(after, v1::Mapper::new(context.clone()).map_block(&block));
++        }
++    }
++
++    #[test]
++    fn captured_child_spend_resolves_the_original_captured_output() {
++        let producer = hex::decode(
++            include_str!(
++                "../../../test_data/musashi-w36/ranking-sub-transaction-two-outputs.block"
++            )
++            .trim(),
++        )
++        .unwrap();
++        let consumer = hex::decode(
++            include_str!(
++                "../../../test_data/musashi-w36/ranking-spends-sub-transaction-output.block"
++            )
++            .trim(),
++        )
++        .unwrap();
++        let source = MultiEraBlock::decode(&producer).unwrap();
++        let outputs = dolos_core::applied_txs(&source)
++            .into_iter()
++            .flat_map(|(_, tx)| {
++                tx.outputs()
++                    .iter()
++                    .enumerate()
++                    .map(|(i, o)| ((tx.hash(), i as u32), (source.era(), o.encode())))
++                    .collect::<Vec<_>>()
++            })
++            .collect();
++        let context = CountingContext {
++            calls: Arc::default(),
++            outputs: Arc::new(Mutex::new(outputs)),
++            fail_bulk: false,
++        };
++        let block = MultiEraBlock::decode(&consumer).unwrap();
++        let expected = v1::Mapper::new(context.clone()).map_block(&block);
++        context.calls.store(0, Ordering::Relaxed);
++        let mapped = v1::Mapper::new(BlockContext::new(context.clone(), &block)).map_block(&block);
++        let child = &mapped.body.as_ref().unwrap().tx[205].sub_transactions[0];
++        assert_eq!(child.inputs.len(), 1);
++        assert!(child.inputs[0].as_output.is_some());
++        assert_eq!(mapped, expected);
++        assert_eq!(context.calls.load(Ordering::Relaxed), 1);
++    }
++}
+--- a/src/tests/musashi.rs
++++ b/src/tests/musashi.rs
+@@ -86,0 +87,77 @@
++
++/// Synthetic serving fixture derived from the captured ranking block. Only its
++/// batch is retained, parent reference inputs are removed, and the producer
++/// verdict is selectable. The original capture is never rewritten. Signatures
++/// and header commitments are not valid for this wrapper; this tests mapping,
++/// not ledger acceptance. The resolved outputs below are synthetic too.
++pub(crate) fn child_only_inputs(
++    success: bool,
++) -> (dolos_core::RawBlock, pallas::interop::utxorpc::UtxoMap) {
++    use pallas::{
++        codec::minicbor,
++        ledger::primitives::{KeepRaw, MaybeIndefArray},
++    };
++
++    let raw = hex::decode(
++        include_str!("../../test_data/musashi-w36/ranking-sub-transaction.block").trim(),
++    )
++    .unwrap();
++    let block = MultiEraBlock::decode(&raw).unwrap();
++    let mut native = block.as_dijkstra().unwrap().clone();
++    let mut parent = native.block_body.transactions.last().unwrap().clone();
++    let mut body = parent.transaction_body.unwrap();
++    assert!(body.sub_transactions.is_some());
++    body.reference_inputs = None;
++    parent.transaction_body = KeepRaw::from(body);
++    parent.success = success;
++    native.block_body.transactions = MaybeIndefArray::Def(vec![parent]);
++    let raw = minicbor::to_vec((8u16, native)).unwrap();
++    let block = MultiEraBlock::decode(&raw).unwrap();
++    let mut outputs = pallas::interop::utxorpc::UtxoMap::new();
++    for (_, tx) in dolos_core::applied_txs(&block) {
++        let marker = if tx.as_dijkstra_sub().is_some() {
++            42
++        } else {
++            41
++        };
++        let mut address = vec![0x60];
++        address.extend([marker; 28]);
++        // A synthetic output with an address and asset unique to child inputs.
++        let mut e = minicbor::Encoder::new(Vec::new());
++        e.map(2)
++            .unwrap()
++            .u8(0)
++            .unwrap()
++            .bytes(&address)
++            .unwrap()
++            .u8(1)
++            .unwrap()
++            .array(2)
++            .unwrap()
++            .u64(9_000_000)
++            .unwrap()
++            .map(1)
++            .unwrap()
++            .bytes(&[marker; 28])
++            .unwrap()
++            .map(1)
++            .unwrap()
++            .bytes(b"child-input")
++            .unwrap()
++            .u64(7)
++            .unwrap();
++        let output = e.into_writer();
++        for input in tx
++            .inputs()
++            .into_iter()
++            .chain(tx.collateral())
++            .chain(tx.reference_inputs())
++        {
++            outputs.insert(
++                (*input.hash(), input.index() as u32),
++                (block.era(), output.clone()),
++            );
++        }
++    }
++    (Arc::new(raw), outputs)
++}
+--- a/src/serve/grpc/v1/mod.rs
++++ b/src/serve/grpc/v1/mod.rs
+@@ -4,0 +5,3 @@
++
++#[cfg(test)]
++mod subtransaction_tests;
+--- /dev/null
++++ b/src/serve/grpc/v1/subtransaction_tests.rs
+@@ -0,0 +1,126 @@
++//! Paired test with sundae-sync-v2's real follower and filters. All stores and
++//! the RPC listener belong to this test; no running node or AWS service is used.
++use std::{sync::Arc, time::Duration};
++
++use dolos_core::{
++    ArchiveIndexDelta, ArchiveStore, ArchiveWriter, ChainLogic, ChainPoint, Domain, EraCbor,
++    StateWriter, TipEvent, UtxoSetDelta, WalStore,
++};
++use dolos_testing::toy_domain::ToyDomain;
++use pallas::ledger::traverse::MultiEraBlock;
++
++use crate::{
++    adapters::{ArchiveStoreBackend, DomainAdapter, MempoolBackend, StateStoreBackend, WalAdapter},
++    serve::CancelTokenImpl,
++};
++
++#[tokio::test]
++#[ignore = "requires SUNDAE_SYNC_SUBTX_TEST_BIN; see test_data/utxorpc-subtransactions/README.md"]
++async fn sundae_sync_consumes_child_inputs_over_v1() {
++    use super::{spec, sync::SyncServiceImpl};
++    use dolos_core::StateStore;
++
++    let executable = std::env::var("SUNDAE_SYNC_SUBTX_TEST_BIN")
++        .expect("build sundae-sync-v2's dolos_subtransactions test and set its executable path");
++    let (raw, outputs) = crate::tests::musashi::child_only_inputs(true);
++    let seed = UtxoSetDelta {
++        produced_utxo: outputs
++            .into_iter()
++            .map(|(r, (era, cbor))| (r.into(), Arc::new(EraCbor(era.into(), cbor))))
++            .collect(),
++        ..Default::default()
++    };
++    let toy = ToyDomain::new(Some(seed), None);
++    let state = StateStoreBackend::Memory(toy.state().clone());
++    let genesis = toy.genesis();
++    let chain = dolos_cardano::CardanoLogic::initialize::<DomainAdapter>(
++        Default::default(),
++        &state,
++        &genesis,
++    )
++    .unwrap();
++    let domain = DomainAdapter {
++        storage_config: Arc::new(toy.storage_config().clone()),
++        sync_config: Arc::new(toy.sync_config().clone()),
++        genesis,
++        chain: Arc::new(std::sync::RwLock::new(chain)),
++        state,
++        archive: ArchiveStoreBackend::Memory(toy.archive().clone()),
++        wal: WalAdapter::Redb(toy.wal().clone()),
++        mempool: MempoolBackend::Ephemeral(Default::default()),
++        tip_broadcast: tokio::sync::broadcast::channel(8).0,
++    };
++    domain.wal().reset_to(&ChainPoint::Origin).unwrap();
++    let block = MultiEraBlock::decode(&raw).unwrap();
++    let point = ChainPoint::Specific(block.slot(), block.hash());
++    let writer = domain.archive().start_writer().unwrap();
++    writer.apply(&point, &raw).unwrap();
++    writer
++        .apply_index(&[ArchiveIndexDelta {
++            slot: block.slot(),
++            block_hash: block.hash().to_vec(),
++            block_number: Some(block.number()),
++            tx_hashes: dolos_core::applied_txs(&block)
++                .iter()
++                .map(|(_, tx)| tx.hash().to_vec())
++                .collect(),
++            tags: vec![],
++        }])
++        .unwrap();
++    writer.commit().unwrap();
++    let writer = domain.state().start_writer().unwrap();
++    writer.set_cursor(point.clone()).unwrap();
++    writer.commit().unwrap();
++
++    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let uri = format!("http://{}", listener.local_addr().unwrap());
++    let incoming = futures_util::stream::unfold(listener, |listener| async {
++        Some((listener.accept().await.map(|(socket, _)| socket), listener))
++    });
++    let service = spec::sync::sync_service_server::SyncServiceServer::new(SyncServiceImpl::new(
++        domain.clone(),
++        CancelTokenImpl::default(),
++    ));
++    let server = tokio::spawn(
++        tonic::transport::Server::builder()
++            .add_service(service)
++            .serve_with_incoming(incoming),
++    );
++    // Abort background tasks even if a test assertion fails.
++    let server = tokio_util::task::AbortOnDropHandle::new(server);
++    let events = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
++        while domain.tip_broadcast.receiver_count() == 0 {
++            tokio::time::sleep(Duration::from_millis(10)).await;
++        }
++        domain.notify_tip(TipEvent::Apply(point.clone(), raw.clone()));
++        domain.notify_tip(TipEvent::Undo(point, raw));
++    }));
++    let output = tokio::time::timeout(
++        Duration::from_secs(30),
++        tokio::process::Command::new(executable)
++            .args([
++                "dolos_child_inputs_survive_fetch_follow_and_undo",
++                "--exact",
++                "--ignored",
++                "--nocapture",
++            ])
++            .env("DOLOS_SUBTX_TEST_URI", uri)
++            .kill_on_drop(true)
++            .output(),
++    )
++    .await
++    .expect("sundae-sync consumer timed out")
++    .unwrap();
++    eprintln!(
++        "{}{}",
++        String::from_utf8_lossy(&output.stdout),
++        String::from_utf8_lossy(&output.stderr)
++    );
++    assert!(
++        output.status.success(),
++        "sundae-sync consumer failed: {}",
++        output.status
++    );
++    events.await.unwrap();
++    drop(server);
++}

@@ -3,6 +3,9 @@ pub mod submit;
 pub mod sync;
 pub mod watch;
 
+#[cfg(test)]
+mod subtransaction_tests;
+
 pub(super) use pallas::interop::utxorpc::v1::spec;
 
 /// The value an optional pattern field constrains a match to, none when it is

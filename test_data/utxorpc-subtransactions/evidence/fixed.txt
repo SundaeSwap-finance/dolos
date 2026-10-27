@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized] target(s) in 4m 00s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/lib.rs (target/utxorpc-subtransactions/fixed/debug/deps/dolos-476d5ce162bfcda2)
+
+running 5 tests
+test serve::grpc::block_context::tests::bulk_failure_falls_back_to_per_transaction_resolution ... ok
+test serve::grpc::block_context::tests::new_response_does_not_reuse_previous_resolution ... ok
+test serve::grpc::block_context::tests::resolves_once_and_preserves_both_wire_versions ... ok
+test serve::grpc::block_context::tests::child_only_spending_and_reference_inputs_are_resolved_once ... ok
+test serve::grpc::block_context::tests::captured_child_spend_resolves_the_original_captured_output ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 265 filtered out; finished in 0.08s

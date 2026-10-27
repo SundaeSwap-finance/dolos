@@ -19,11 +19,19 @@ impl<C: LedgerContext> BlockContext<C> {
             .txs()
             .iter()
             .flat_map(|tx| {
-                tx.inputs()
-                    .into_iter()
-                    .chain(tx.collateral())
-                    .chain(tx.reference_inputs())
-                    .map(|i| (*i.hash(), i.index() as u32))
+                // The v1 mapper resolves every child separately. Its inputs
+                // need not also occur in the parent's reference inputs.
+                std::iter::once(tx)
+                    .chain(tx.sub_transactions().iter())
+                    .flat_map(|member| {
+                        member
+                            .inputs()
+                            .into_iter()
+                            .chain(member.collateral())
+                            .chain(member.reference_inputs())
+                            .map(|i| (*i.hash(), i.index() as u32))
+                            .collect::<Vec<_>>()
+                    })
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -64,7 +72,7 @@ impl<C: LedgerContext> LedgerContext for BlockContext<C> {
 mod tests {
     use super::*;
     use dolos_testing::synthetic::{build_synthetic_blocks, SyntheticBlockConfig};
-    use pallas::interop::utxorpc::{v1alpha, v1beta};
+    use pallas::interop::utxorpc::{v1, v1alpha, v1beta};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
@@ -163,5 +171,87 @@ mod tests {
         let prepared = BlockContext::new(context.clone(), &block);
         assert!(prepared.resolved.is_none());
         assert_eq!(v1alpha::Mapper::new(prepared).map_block(&block), expected);
+    }
+
+    #[test]
+    fn child_only_spending_and_reference_inputs_are_resolved_once() {
+        // Both successful and failed parents are mapped for inspection. Their
+        // producer verdict governs whether a consumer applies child effects.
+        for success in [true, false] {
+            let (raw, outputs) = crate::tests::musashi::child_only_inputs(success);
+            let context = CountingContext {
+                calls: Arc::default(),
+                outputs: Arc::new(Mutex::new(outputs)),
+                fail_bulk: false,
+            };
+            let block = MultiEraBlock::decode(&raw).unwrap();
+            let expected = v1::Mapper::new(context.clone()).map_block(&block);
+            context.calls.store(0, Ordering::Relaxed);
+            let mapped =
+                v1::Mapper::new(BlockContext::new(context.clone(), &block)).map_block(&block);
+            let parent = &mapped.body.as_ref().unwrap().tx[0];
+            let child = &parent.sub_transactions[0];
+            assert_eq!(parent.successful, success);
+            assert_eq!((child.inputs.len(), child.reference_inputs.len()), (1, 1));
+            for input in child.inputs.iter().chain(&child.reference_inputs) {
+                assert!(
+                    input.as_output.is_some(),
+                    "child-only input must resolve: {input:?}"
+                );
+            }
+            assert_eq!(mapped, expected);
+            assert_eq!(context.calls.load(Ordering::Relaxed), 1);
+
+            // A partial successful lookup is legitimate. A later response must
+            // resolve afresh, including after an undo or archive/state change.
+            context.outputs.lock().unwrap().clear();
+            let after =
+                v1::Mapper::new(BlockContext::new(context.clone(), &block)).map_block(&block);
+            assert_ne!(mapped, after);
+            assert_eq!(after, v1::Mapper::new(context.clone()).map_block(&block));
+        }
+    }
+
+    #[test]
+    fn captured_child_spend_resolves_the_original_captured_output() {
+        let producer = hex::decode(
+            include_str!(
+                "../../../test_data/musashi-w36/ranking-sub-transaction-two-outputs.block"
+            )
+            .trim(),
+        )
+        .unwrap();
+        let consumer = hex::decode(
+            include_str!(
+                "../../../test_data/musashi-w36/ranking-spends-sub-transaction-output.block"
+            )
+            .trim(),
+        )
+        .unwrap();
+        let source = MultiEraBlock::decode(&producer).unwrap();
+        let outputs = dolos_core::applied_txs(&source)
+            .into_iter()
+            .flat_map(|(_, tx)| {
+                tx.outputs()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, o)| ((tx.hash(), i as u32), (source.era(), o.encode())))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let context = CountingContext {
+            calls: Arc::default(),
+            outputs: Arc::new(Mutex::new(outputs)),
+            fail_bulk: false,
+        };
+        let block = MultiEraBlock::decode(&consumer).unwrap();
+        let expected = v1::Mapper::new(context.clone()).map_block(&block);
+        context.calls.store(0, Ordering::Relaxed);
+        let mapped = v1::Mapper::new(BlockContext::new(context.clone(), &block)).map_block(&block);
+        let child = &mapped.body.as_ref().unwrap().tx[205].sub_transactions[0];
+        assert_eq!(child.inputs.len(), 1);
+        assert!(child.inputs[0].as_output.is_some());
+        assert_eq!(mapped, expected);
+        assert_eq!(context.calls.load(Ordering::Relaxed), 1);
     }
 }

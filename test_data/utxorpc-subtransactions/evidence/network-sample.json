@@ -1,0 +1,41 @@
+{
+  "tip": {
+    "time": 1793045589,
+    "height": 34035,
+    "hash": "f3773668feef766eed3e74c7dd35bc45f65e1ff4537c8d4a4166edd7e34f15bb",
+    "slot": 763989,
+    "epoch": 35,
+    "epoch_slot": 7989,
+    "slot_leader": "pool187a7fvjryyc83r59tgct7j7wuthdc3t09zv4f57za6vcqcfmtz4",
+    "size": 87797,
+    "tx_count": 354,
+    "output": "208924036400000",
+    "fees": "70800000",
+    "block_vrf": "vrf_vk1tpq6kd4a5z8j5sn3e5sexjxuwuzr2cth442en7xqk7963fv7kw0spj4yxj",
+    "op_cert": "5394fdcc4fcc22bd76aae059453b669900d08df30e4b64bfafb24ffa63044a62",
+    "op_cert_counter": "0",
+    "previous_block": "d09665539c55021ccda8b5d9b274131bfeecf136ee5d5e03469c47bd10b7f545",
+    "next_block": null,
+    "confirmations": 0
+  },
+  "blocks_sampled": 50,
+  "transactions_decoded": 2462,
+  "sampling": "last 100 transactions per block, descending height",
+  "batches": [],
+  "failures": [],
+  "failure_count": 0,
+  "sample_completed_at_utc": "2026-10-26T20:12:53.700000+00:00",
+  "source": "local Dolos MiniBlockfrost /blocks/{height}/txs/cbor, read-only",
+  "tool": "ad hoc Python CBOR inspection; not a ledger validator",
+  "tool_revision": "unknown (uncommitted script)",
+  "tool_sources": [
+    {
+      "path": "target/utxorpc-subtransactions/scan-subtx.py",
+      "sha256": "a59248678f3f03d29473da5d32e47b5638a8817e8cb6229b92272c3a5c83f54c"
+    },
+    {
+      "path": "target/utxorpc-subtransactions/inspect-subtx.py",
+      "sha256": "bd392212d89690c11e7d3e3725059541d9f348341571676fad8006860925015e"
+    }
+  ]
+}

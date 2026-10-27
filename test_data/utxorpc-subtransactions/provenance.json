@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "network": "Musashi prototype-2026w36",
+  "network_magic": 164,
+  "era": "Dijkstra",
+  "dolos_baseline": "16e112d7a9864bfa44c93b2a84227456908ccacb",
+  "pallas_dependency": "a1b0f52561af46106b800bc800a8d3f932e06663",
+  "utxorpc_spec_dependency": "4bef71401bae7e9fc80b9d24379be0f9078b0ff5",
+  "consumer_branch": "musashi",
+  "consumer_baseline": "82d9adaf6496fb571e680c764adad652ff700873",
+  "consumer_pallas_dependency": "00f2df7d827dca6fa4e7f7019f5a0b3f2e6e05b1",
+  "historical_parameters": "not used for mapping; unavailable in this fixture set",
+  "historical_full_utxo_state": "unknown; only producer outputs are used in the captured-pair check",
+  "capture_provenance": "../musashi-w36/provenance.toml",
+  "captured_files": [
+    {
+      "path": "../musashi-w36/ranking-sub-transaction.block",
+      "kind": "captured",
+      "decoded_bytes": 50838,
+      "sha256": "e4353c2b906d4ed29d564cfe55a33dd60fd35797ab9b5c916a6c1d9438b26bef",
+      "slot": 854292,
+      "block_hash": "435a2d49007479dedc45e27f5054158aabd2cfdabf4860877416588287243cb6",
+      "harvested_at": "2026-09-21T05:31:00Z",
+      "tool_rev": "the chunk secondary index read at its fixed 56 byte entry layout, the block bounded by its own offset and the next entry's, with the slot, the header hash and the CRC32 checked against the index row",
+      "node_image": "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+    },
+    {
+      "path": "../musashi-w36/ranking-sub-transaction-two-outputs.block",
+      "kind": "captured",
+      "decoded_bytes": 88499,
+      "sha256": "a5bc21234ba551617e46895b19f0b3baeb011a6d25b1ece7abb01d04ec656771",
+      "slot": 1032954,
+      "block_hash": "4eef873084a917feff38bf65e4ecf58021d1d9bcf98fac95ffbcb5cee02fcc98",
+      "harvested_at": "2026-09-21T05:31:00Z",
+      "tool_rev": "the chunk secondary index read at its fixed 56 byte entry layout, the block bounded by its own offset and the next entry's, with the slot, the header hash and the CRC32 checked against the index row",
+      "node_image": "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+    },
+    {
+      "path": "../musashi-w36/ranking-spends-sub-transaction-output.block",
+      "kind": "captured",
+      "decoded_bytes": 45446,
+      "sha256": "ac064a409d637a6979f716d4ee0ec6ac73a8d9d7d057f60178f9b046006f8c3a",
+      "slot": 1282549,
+      "block_hash": "0a573ae3b05a2c1579c96a40b128a78567e1ac725aa45dbd782e3f78b17906bc",
+      "harvested_at": "2026-09-25T19:38:24Z",
+      "tool_rev": "the chunk secondary index read at its fixed 56 byte entry layout, the block bounded by its own offset and the next entry's, with the slot, the header hash and the CRC32 checked against the index row",
+      "node_image": "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:prototype-2026w36 sha256:0df972de2193f9299af4df409fde2b7ea56188ddfe2c3b77aa661e23b226a566"
+    }
+  ],
+  "synthetic_fixture": {
+    "generator": "../../src/tests/musashi.rs::child_only_inputs",
+    "changes": [
+      "retain only last parent from ranking-sub-transaction.block",
+      "remove parent reference_inputs",
+      "select parent success flag",
+      "supply synthetic resolved outputs with address/policy marker 42 for children and 41 for parent"
+    ],
+    "valid_ledger_block": false
+  },
+  "limitations": [
+    "Captured pair passes baseline: parent repeats child spending input as a reference input.",
+    "Child-only failure reproduction is synthetic, not a captured network batch.",
+    "Paired server/consumer test injects Apply and Undo; it does not replay ledger rollback.",
+    "No live AWS integration or native script validation claim."
+  ],
+  "expected_behavior": "Child spending and reference inputs have the same as_output values as uncached mapping; one deduplicated lookup per block response; missing outputs remain absent.",
+  "captured_dependency": {
+    "producing_parent": "d04727b7a026cf5b310c0e86a2920c6d23067c0062ac783d7f4f90905a2293bb",
+    "producing_child": "31dae9d64e767c94be97acdeac9fb60ff5322a96ead4dabd187d880e03220dc1",
+    "output_index": 1,
+    "consumer_parent_index": 205
+  },
+  "remote_tips_checked_read_only": {
+    "dolos/leios-musashi": "16e112d7a9864bfa44c93b2a84227456908ccacb",
+    "pallas/leios-musashi": "f3419a3a1e3e7c33d0b9027343089b5030ec8ef3",
+    "sundae-sync-v2/musashi": "82d9adaf6496fb571e680c764adad652ff700873"
+  },
+  "consumer_test": {
+    "path": "sundae-sync-v2/tests/dolos_subtransactions.rs",
+    "sha256": "98ef22408df6a54760da0ea29fc01e560f9d9b834a4438f7611394d73ee86534"
+  }
+}
