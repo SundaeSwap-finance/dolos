@@ -109,6 +109,7 @@ toml = "0.8.13"
 dolos-cardano = { path = "crates/cardano" }
 dolos-core = { path = "crates/core" }
 dolos-testing = { path = "crates/testing" }
+ledger-oracle-judge = { path = "crates/ledger-oracle-judge" }
 bech32 = { workspace = true }
 hex = { workspace = true }
 pallas = { workspace = true }

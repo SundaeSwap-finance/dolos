@@ -1787,6 +1787,7 @@ dependencies = [
  "inquire",
  "itertools 0.14.0",
  "lazy_static",
+ "ledger-oracle-judge",
  "log",
  "miette",
  "nix",
