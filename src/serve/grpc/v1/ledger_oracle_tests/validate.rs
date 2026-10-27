@@ -33,10 +33,8 @@ impl Group {
 
     /// Whether the group reads an output at the reference, from the stores or its mempool.
     pub(super) fn sees(&self, txo: TxoRef) -> bool {
-        let utxos = MempoolAwareUtxoStore::<DomainAdapter>::new(
-            self.domain.state(),
-            self.domain.mempool(),
-        );
+        let utxos =
+            MempoolAwareUtxoStore::<DomainAdapter>::new(self.domain.state(), self.domain.mempool());
         !utxos.get_utxos([txo].into()).unwrap().is_empty()
     }
 }

@@ -5,7 +5,7 @@ mod seed;
 mod validate;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -15,9 +15,10 @@ use ledger_oracle_judge::{
     cbor::TxIn,
     compare::{ByteVerdict, StateTallies, Tally},
     corpus::{self, Corpus},
+    manifest::{self, Declared, Feature, KnownList, Locus},
     record::{CorpusKind, LedgerOutcome, PParams, RecordId, UtxoEntry},
     run::KeptRun,
-    verdict::{outcome, DolosVerdict, ValidationTally},
+    verdict::{outcome, with_known, DolosVerdict, Fail, Outcome, ValidationTally},
 };
 use tonic::Request;
 
@@ -136,8 +137,47 @@ impl fmt::Display for Judged {
     }
 }
 
+/// The declared support and the known list a judgement reads.
+#[derive(Debug, Clone)]
+struct Manifests {
+    declared: Declared,
+    known: KnownList,
+}
+
+impl Manifests {
+    fn committed() -> Self {
+        Manifests {
+            declared: manifest::declared().unwrap_or_else(|e| panic!("{e}")),
+            known: manifest::known().unwrap_or_else(|e| panic!("{e}")),
+        }
+    }
+
+    /// Fails each entry for the corpus that names a record the judgement did not reach.
+    fn unjudged(&self, kind: CorpusKind, judged: &BTreeSet<RecordId>, tally: &mut ValidationTally) {
+        let missed = |id: &RecordId| id.corpus == kind && !judged.contains(id);
+        for (id, feature) in self.declared.iter().filter(|(id, _)| missed(id)) {
+            let fail = Fail::StaleManifest {
+                declared: feature.to_string(),
+                dolos: "not_judged".to_string(),
+            };
+            tally.add(*id, Outcome::Fail(fail));
+        }
+        for ((_, id), row) in self.known.iter().filter(|((_, id), _)| missed(id)) {
+            let fail = Fail::KnownStale { row: row.clone() };
+            tally.add(*id, Outcome::Fail(fail));
+        }
+    }
+}
+
 /// Submits each slot group of a run in order, each to a fresh mempool at the group slot.
-fn validate_run(base: &DomainAdapter, kind: CorpusKind, run: &KeptRun, tally: &mut ValidationTally) {
+fn validate_run(
+    base: &DomainAdapter,
+    kind: CorpusKind,
+    run: &KeptRun,
+    manifests: &Manifests,
+    judged: &mut BTreeSet<RecordId>,
+    tally: &mut ValidationTally,
+) {
     for records in run.groups() {
         let group = validate::group(base, records[0].slot);
         for record in records {
@@ -146,7 +186,11 @@ fn validate_run(base: &DomainAdapter, kind: CorpusKind, run: &KeptRun, tally: &m
                 n: record.n,
             };
             let dolos = validate::verdict(&group.receive(&record.tx.0));
-            tally.add(id, outcome(&record.outcome, record.phase2_valid, &dolos));
+            let declared = manifests.declared.get(&id);
+            let judgement = outcome(&record.outcome, record.phase2_valid, &dolos, declared);
+            let known = manifests.known.get(&(Locus::Validation, id));
+            tally.add(id, with_known(judgement, known));
+            judged.insert(id);
         }
     }
 }
@@ -154,12 +198,14 @@ fn validate_run(base: &DomainAdapter, kind: CorpusKind, run: &KeptRun, tally: &m
 /// Judges every kept run of a corpus, each seeded from its first pre state.
 async fn judge(
     corpus: &Corpus,
+    manifests: &Manifests,
     edit_pre: impl Fn(&[UtxoEntry]) -> Vec<UtxoEntry>,
     edit_expected_params: impl Fn(&PParams) -> PParams,
 ) -> Judged {
     let genesis = seed::genesis(epoch_size(corpus));
     let mut judged = Judged::default();
     let tallies = &mut judged.state;
+    let mut judged_ids = BTreeSet::new();
     for run in corpus.kept() {
         let first = &run.records()[0];
         let id = RecordId {
@@ -175,19 +221,48 @@ async fn judge(
         let served = read_params(&seeded.domain).await;
         let expected = edit_expected_params(run.pparams());
         params::compare(id, &expected, &served, &mut tallies.params);
-        validate_run(&seeded.domain, corpus.kind, run, &mut judged.validation);
+        validate_run(
+            &seeded.domain,
+            corpus.kind,
+            run,
+            manifests,
+            &mut judged_ids,
+            &mut judged.validation,
+        );
     }
+    manifests.unjudged(corpus.kind, &judged_ids, &mut judged.validation);
     judged
+}
+
+/// Judges the supplement corpus under edited manifests.
+async fn judge_supp(edit: impl FnOnce(&mut Manifests)) -> Judged {
+    let mut manifests = Manifests::committed();
+    edit(&mut manifests);
+    judge(
+        &load(CorpusKind::Supp),
+        &manifests,
+        <[UtxoEntry]>::to_vec,
+        PParams::clone,
+    )
+    .await
+}
+
+fn supp(n: u32) -> RecordId {
+    RecordId {
+        corpus: CorpusKind::Supp,
+        n,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn ledger_oracle() {
     let mut pass = true;
+    let manifests = Manifests::committed();
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind);
         println!("{corpus}");
-        let tallies = judge(&corpus, <[UtxoEntry]>::to_vec, PParams::clone).await;
+        let tallies = judge(&corpus, &manifests, <[UtxoEntry]>::to_vec, PParams::clone).await;
         println!("{tallies}");
         pass &= tallies.pass();
     }
@@ -200,12 +275,14 @@ async fn ledger_oracle() {
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn dropping_one_seed_pair_prints_utxo_disagree() {
     let corpus = load(CorpusKind::Supp);
-    let intact = judge(&corpus, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    let manifests = Manifests::committed();
+    let intact = judge(&corpus, &manifests, <[UtxoEntry]>::to_vec, PParams::clone).await;
     assert!(intact.state.utxo.compared > 0);
     assert!(intact.state.utxo.disagree.is_empty(), "{intact}");
     let dropped = AtomicBool::new(false);
     let planted = judge(
         &corpus,
+        &manifests,
         |pre| {
             let skip = !dropped.swap(true, Ordering::Relaxed);
             pre.iter().skip(usize::from(skip)).cloned().collect()
@@ -222,11 +299,12 @@ async fn dropping_one_seed_pair_prints_utxo_disagree() {
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn one_changed_cost_model_entry_prints_params_disagree() {
     let corpus = load(CorpusKind::Supp);
-    let intact = judge(&corpus, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    let manifests = Manifests::committed();
+    let intact = judge(&corpus, &manifests, <[UtxoEntry]>::to_vec, PParams::clone).await;
     assert!(intact.state.params.compared > 0);
     assert!(intact.state.params.disagree.is_empty(), "{intact}");
     let changed = AtomicBool::new(false);
-    let planted = judge(&corpus, <[UtxoEntry]>::to_vec, |pparams| {
+    let planted = judge(&corpus, &manifests, <[UtxoEntry]>::to_vec, |pparams| {
         let mut pparams = pparams.clone();
         if !changed.swap(true, Ordering::Relaxed) {
             let entry = &mut pparams.0["costModels"]["PlutusV1"][0];
@@ -242,19 +320,73 @@ async fn one_changed_cost_model_entry_prints_params_disagree() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
-async fn the_v2_record_disagrees_and_its_maker_agrees() {
-    let judged = judge(
-        &load(CorpusKind::Supp),
-        <[UtxoEntry]>::to_vec,
-        PParams::clone,
-    )
-    .await;
-    let text = judged.to_string();
+async fn the_v2_record_is_known_and_its_maker_agrees() {
+    let text = judge_supp(|_| ()).await.to_string();
     assert!(!text.contains(" supp#1 "), "{text}");
+    assert!(!text.contains("\nDISAGREE supp#2 "), "{text}");
+    assert!(
+        text.contains("\nKNOWN row=V2 ids=supp#2 ledger=accepted dolos=refused[InputNotInUTxO]"),
+        "{text}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn deleting_the_v2_known_entry_prints_its_disagreement() {
+    let text = judge_supp(|m| {
+        m.known.remove(&(Locus::Validation, supp(2))).unwrap();
+    })
+    .await
+    .to_string();
+    assert!(!text.contains("\nKNOWN row=V2 "), "{text}");
     assert!(
         text.contains("\nDISAGREE supp#2 ledger=accepted dolos=refused[InputNotInUTxO]"),
         "{text}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn deleting_one_declared_entry_prints_unsupported_unexpected() {
+    let label = "stateful or scripted subtransaction";
+    let intact = judge_supp(|_| ()).await.to_string();
+    assert!(
+        !intact.contains("UNSUPPORTED_UNEXPECTED supp#14 "),
+        "{intact}"
+    );
+    let deleted = judge_supp(|m| {
+        assert_eq!(m.declared.remove(&supp(14)), Some(Feature(label.into())));
+        m.declared.insert(supp(999), Feature(label.into()));
+    })
+    .await
+    .to_string();
+    assert!(
+        deleted.contains(&format!("\nUNSUPPORTED_UNEXPECTED supp#14 label={label}")),
+        "{deleted}"
+    );
+    assert!(
+        deleted.contains(&format!(
+            "\nSTALE_MANIFEST supp#999 declared={label} dolos=not_judged"
+        )),
+        "{deleted}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn a_known_entry_naming_an_agreeing_or_unjudged_record_prints_known_stale() {
+    let intact = judge_supp(|_| ()).await.to_string();
+    assert!(!intact.contains("supp#0 "), "{intact}");
+    let named = judge_supp(|m| {
+        m.known
+            .insert((Locus::Validation, supp(0)), "V9".to_string());
+        m.known
+            .insert((Locus::Validation, supp(999)), "V9".to_string());
+    })
+    .await
+    .to_string();
+    assert!(named.contains("\nKNOWN_STALE supp#0 row=V9"), "{named}");
+    assert!(named.contains("\nKNOWN_STALE supp#999 row=V9"), "{named}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
