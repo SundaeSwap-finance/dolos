@@ -13,6 +13,7 @@ use dolos_core::{
 };
 use ledger_oracle_judge::{
     record::{Phase2, UtxoEntry},
+    refusal::{DolosClass, RefusalClass},
     verdict::DolosVerdict,
 };
 use pallas::{
@@ -26,7 +27,7 @@ use pallas::{
             KeepRaw, MaybeIndefArray, Nullable, VrfCert,
         },
         traverse::MultiEraBlock,
-        validate::utils::ValidationError,
+        validate::utils::{PostAlonzoError, ValidationError},
     },
 };
 
@@ -253,7 +254,10 @@ impl Group {
 
 /// The verdict for one submission.
 pub(super) fn verdict(result: &Result<TxHash, DomainError>) -> DolosVerdict {
-    let refused = |kind: &str| DolosVerdict::Refused(kind.to_string());
+    let refused = |kind: &str| DolosVerdict::Refused {
+        kind: kind.to_string(),
+        class: DolosClass::NoRule,
+    };
     let e = match result {
         Ok(_) => return DolosVerdict::Accepted,
         Err(DomainError::ChainError(e)) => e,
@@ -303,10 +307,90 @@ fn variant_name(debug: String) -> String {
     debug[..end].to_string()
 }
 
+/// The class of a post Alonzo validation error by its variant.
+fn post_alonzo_class(e: &PostAlonzoError) -> DolosClass {
+    use PostAlonzoError as P;
+    use RefusalClass as C;
+    let class = match e {
+        P::InputNotInUTxO | P::ReferenceInputNotInUTxO | P::TxInsEmpty => C::Inputs,
+        P::PreservationOfValue
+        | P::NegativeValue
+        | P::MinLovelaceUnreached
+        | P::MaxValSizeExceeded => C::Value,
+        P::FeeBelowMin | P::MaxTxSizeExceeded | P::UnknownTxSize => C::FeeAndSize,
+        P::VKWitnessMissing | P::VKWrongSignature | P::ReqSignerMissing => C::Witness,
+        P::ScriptWitnessMissing
+        | P::NativeScriptDenial
+        | P::ScriptIntegrityHash
+        | P::RedeemerMissing
+        | P::UnneededRedeemer
+        | P::UnneededNativeScript => C::Script,
+        P::DatumMissing | P::UnneededDatum => C::Datum,
+        P::MetadataHash => C::Metadata,
+        P::BlockPrecedesValInt | P::BlockExceedsValInt => C::Interval,
+        P::TxWrongNetworkID | P::OutputWrongNetworkID => C::Network,
+        P::CollateralMissing
+        | P::CollateralNotInUTxO
+        | P::CollateralMinLovelace
+        | P::NonLovelaceCollateral
+        | P::TooManyCollaterals
+        | P::CollateralNotVKeyLocked
+        | P::CollateralAnnotation => C::Collateral,
+        P::UnsupportedNativeScript
+        | P::InputDecoding
+        | P::CollateralWrongAssets
+        | P::AddressDecoding
+        | P::TxExUnitsExceeded
+        | P::MintingLacksPolicy(_)
+        | P::UnneededPlutusV1Script
+        | P::UnneededPlutusV2Script
+        | P::UnneededPlutusV3Script
+        | P::ReqSignerWrongSig
+        | P::UnsupportedPlutusLanguage => return DolosClass::NoRule,
+        _ => return DolosClass::Unknown,
+    };
+    DolosClass::Rule(class)
+}
+
+/// The class of a validation error by its variant.
+fn validation_class(v: &ValidationError) -> DolosClass {
+    use RefusalClass as C;
+    use ValidationError as V;
+    let class = match v {
+        V::PostAlonzo(e) => return post_alonzo_class(e),
+        V::DijkstraInputAlreadySpent => C::Inputs,
+        V::DijkstraReferenceScriptsTooLarge => C::FeeAndSize,
+        V::DijkstraMalformedScript => C::Script,
+        V::DijkstraInvalidMetadata => C::Metadata,
+        V::DijkstraInvalidWithdrawal(_) | V::DijkstraCertificateStateUnavailable => {
+            C::AccountAndWithdrawal
+        }
+        V::DijkstraInvalidCertificate(_) => C::CertificateAndGovernance,
+        V::DijkstraUnsupported(_)
+        | V::DijkstraMissingParameters(_)
+        | V::DijkstraAccountStateUnavailable(_)
+        | V::TxAndProtParamsDiffer
+        | V::PParamsByronDoesntNeedAccountState
+        | V::EnvMissingAccountState
+        | V::UnknownProtParams
+        | V::Byron(_)
+        | V::ShelleyMA(_)
+        | V::Alonzo(_) => return DolosClass::NoRule,
+        _ => return DolosClass::Unknown,
+    };
+    DolosClass::Rule(class)
+}
+
 fn validation_verdict(v: &ValidationError) -> DolosVerdict {
     match v {
         ValidationError::DijkstraUnsupported(label) => DolosVerdict::Unsupported(label.to_string()),
-        ValidationError::PostAlonzo(e) => DolosVerdict::Refused(variant_name(format!("{e:?}"))),
-        other => DolosVerdict::Refused(variant_name(format!("{other:?}"))),
+        ValidationError::PostAlonzo(e) => DolosVerdict::Refused {
+            kind: variant_name(format!("{e:?}")),
+            class: validation_class(v),
+        },
+        other => DolosVerdict::Refused {
+            kind: variant_name(format!("{other:?}")),
+            class: validation_class(other),
+        },
     }
 }

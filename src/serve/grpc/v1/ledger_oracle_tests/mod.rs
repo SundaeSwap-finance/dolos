@@ -1896,18 +1896,41 @@ async fn a_seeded_reward_changed_by_one_prints_accounts_disagree() {
 }
 
 #[test]
-fn a_dolos_refusal_is_named_by_its_kind() {
-    let refused: Result<dolos_core::TxHash, _> = Err(dolos_core::DomainError::ChainError(
-        dolos_core::ChainError::Phase1ValidationRejected(
-            pallas::ledger::validate::utils::ValidationError::PostAlonzo(
-                pallas::ledger::validate::utils::PostAlonzoError::InputNotInUTxO,
-            ),
+fn a_dolos_refusal_is_named_by_its_kind_and_classed_by_its_variant() {
+    use dolos_core::{ChainError as C, DomainError};
+    use ledger_oracle_judge::refusal::{DolosClass, RefusalClass};
+    use pallas::ledger::validate::utils::{PostAlonzoError as P, ValidationError as V};
+    let refused = |e: C| validate::verdict(&Err(DomainError::ChainError(e)));
+    let expected = |kind: &str, class| DolosVerdict::Refused {
+        kind: kind.to_string(),
+        class,
+    };
+    let inputs = DolosClass::Rule(RefusalClass::Inputs);
+    let cases = [
+        (
+            C::Phase1ValidationRejected(V::PostAlonzo(P::InputNotInUTxO)),
+            expected("InputNotInUTxO", inputs),
         ),
-    ));
-    assert_eq!(
-        validate::verdict(&refused),
-        DolosVerdict::Refused("InputNotInUTxO".to_string())
-    );
+        (
+            C::Phase1ValidationRejected(V::PostAlonzo(P::UnsupportedPlutusLanguage)),
+            expected("UnsupportedPlutusLanguage", DolosClass::NoRule),
+        ),
+        (
+            C::Phase1ValidationRejected(V::DijkstraInputAlreadySpent),
+            expected("DijkstraInputAlreadySpent", inputs),
+        ),
+        (
+            C::Phase1ValidationRejected(V::DijkstraMissingParameters("cost models")),
+            expected("DijkstraMissingParameters", DolosClass::NoRule),
+        ),
+        (
+            C::NoActiveEpoch,
+            expected("NoActiveEpoch", DolosClass::NoRule),
+        ),
+    ];
+    for (error, verdict) in cases {
+        assert_eq!(refused(error), verdict);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

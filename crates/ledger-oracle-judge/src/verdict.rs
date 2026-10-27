@@ -7,7 +7,7 @@ use std::{
 use crate::{
     manifest::Feature,
     record::{FailurePath, LedgerOutcome, NonEmpty, Phase2, RecordId},
-    refusal::RefusalClass,
+    refusal::{DolosClass, RefusalClass},
     row::Row,
 };
 
@@ -17,7 +17,7 @@ pub enum DolosVerdict {
     Accepted,
     Phase2Rejected,
     Unsupported(String),
-    Refused(String),
+    Refused { kind: String, class: DolosClass },
 }
 
 impl fmt::Display for DolosVerdict {
@@ -26,7 +26,7 @@ impl fmt::Display for DolosVerdict {
             DolosVerdict::Accepted => write!(f, "accepted"),
             DolosVerdict::Phase2Rejected => write!(f, "phase2_rejected"),
             DolosVerdict::Unsupported(label) => write!(f, "unsupported[{label}]"),
-            DolosVerdict::Refused(kind) => write!(f, "refused[{kind}]"),
+            DolosVerdict::Refused { kind, .. } => write!(f, "refused[{kind}]"),
         }
     }
 }
@@ -44,17 +44,25 @@ pub fn show_ledger(outcome: &LedgerOutcome, phase2: Phase2) -> String {
 }
 
 /// The outcome of a refusal by both sides, which agrees when the node's class is one of the ledger's.
-fn refusal_outcome(failure_names: &NonEmpty<FailurePath>, ledger: String, kind: &str) -> Outcome {
+fn refusal_outcome(
+    failure_names: &NonEmpty<FailurePath>,
+    ledger: String,
+    kind: &str,
+    class: Option<RefusalClass>,
+) -> Outcome {
     let ledger_classes: BTreeSet<RefusalClass> = failure_names.iter().map(|p| p.class).collect();
-    match RefusalClass::of_dolos_kind(kind) {
+    match class {
         Some(class) if ledger_classes.contains(&class) => Outcome::Pass(Pass::Agree),
-        dolos_class => {
+        Some(_) | None => {
             let ledger_classes: Vec<&str> = ledger_classes.iter().map(|c| c.name()).collect();
             Outcome::Fail(Fail::ReasonMismatch {
                 ledger,
                 ledger_classes: ledger_classes.join(","),
                 dolos: format!("refused[{kind}]"),
-                dolos_class: dolos_class.map_or("none", RefusalClass::name).to_string(),
+                dolos_class: class
+                    .map_or(DolosClass::NoRule, DolosClass::Rule)
+                    .name()
+                    .to_string(),
             })
         }
     }
@@ -92,6 +100,9 @@ pub enum Fail {
     KnownStale {
         row: Row,
     },
+    UnknownRefusal {
+        dolos: String,
+    },
 }
 
 impl fmt::Display for Fail {
@@ -113,6 +124,7 @@ impl fmt::Display for Fail {
                 write!(f, "declared={declared} dolos={dolos}")
             }
             Fail::KnownStale { row } => write!(f, "row={row}"),
+            Fail::UnknownRefusal { dolos } => write!(f, "dolos={dolos}"),
         }
     }
 }
@@ -155,6 +167,17 @@ pub fn outcome(
         })
     };
     match (ledger, phase2, dolos, declared) {
+        (
+            _,
+            _,
+            D::Refused {
+                class: DolosClass::Unknown,
+                ..
+            },
+            _,
+        ) => Outcome::Fail(Fail::UnknownRefusal {
+            dolos: dolos.to_string(),
+        }),
         (L::Accepted { .. }, _, D::Unsupported(l), Some(f)) if *l == f.0 => {
             Outcome::Pass(Pass::UnsupportedExpected { label: l.clone() })
         }
@@ -164,7 +187,7 @@ pub fn outcome(
         (L::Refused { .. }, _, D::Unsupported(l), _) => {
             Outcome::Pass(Pass::RefuseUnsupported { label: l.clone() })
         }
-        (_, _, D::Accepted | D::Phase2Rejected | D::Refused(_), Some(f)) => {
+        (_, _, D::Accepted | D::Phase2Rejected | D::Refused { .. }, Some(f)) => {
             Outcome::Fail(Fail::StaleManifest {
                 declared: f.to_string(),
                 dolos: dolos.to_string(),
@@ -174,12 +197,27 @@ pub fn outcome(
         | (L::Accepted { .. }, Phase2::Invalid, D::Phase2Rejected, None) => {
             Outcome::Pass(Pass::Agree)
         }
-        (L::Refused { failure_names, .. }, _, D::Refused(kind), None) => {
-            refusal_outcome(failure_names, show_ledger(ledger, phase2), kind)
-        }
+        (
+            L::Refused { failure_names, .. },
+            _,
+            D::Refused {
+                kind,
+                class: DolosClass::Rule(c),
+            },
+            None,
+        ) => refusal_outcome(failure_names, show_ledger(ledger, phase2), kind, Some(*c)),
+        (
+            L::Refused { failure_names, .. },
+            _,
+            D::Refused {
+                kind,
+                class: DolosClass::NoRule,
+            },
+            None,
+        ) => refusal_outcome(failure_names, show_ledger(ledger, phase2), kind, None),
         (L::Accepted { .. }, Phase2::Valid, D::Phase2Rejected, None)
         | (L::Accepted { .. }, Phase2::Invalid, D::Accepted, None)
-        | (L::Accepted { .. }, _, D::Refused(_), None)
+        | (L::Accepted { .. }, _, D::Refused { .. }, None)
         | (L::Refused { .. }, _, D::Accepted | D::Phase2Rejected, None) => disagree(),
     }
 }
@@ -194,10 +232,12 @@ pub fn declares(ledger: &LedgerOutcome, dolos: &DolosVerdict) -> Option<Feature>
     }
 }
 
-/// The outcome of a record on the known list, which passes only while the record still fails.
+/// The outcome of a record on the known list, which passes only while the record still fails and keeps an unknown refusal failing.
 pub fn with_known(outcome: Outcome, row: Option<&Row>) -> Outcome {
     match (row, outcome) {
-        (None, outcome) => outcome,
+        (None, outcome) | (Some(_), outcome @ Outcome::Fail(Fail::UnknownRefusal { .. })) => {
+            outcome
+        }
         (Some(&row), Outcome::Fail(fail)) => Outcome::Pass(Pass::Known {
             row,
             shown: fail.to_string(),
@@ -243,11 +283,11 @@ pub fn maker(id: RecordId, dolos: &DolosVerdict, outcome: &Outcome) -> Maker {
     use DolosVerdict as D;
     match (dolos, outcome) {
         (D::Accepted, Outcome::Pass(_) | Outcome::Fail(_) | Outcome::Cascade(_)) => Maker::Taken,
-        (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Pass(_)) => {
+        (D::Phase2Rejected | D::Unsupported(_) | D::Refused { .. }, Outcome::Pass(_)) => {
             Maker::Seeds(SeedingMaker(id))
         }
         (
-            D::Phase2Rejected | D::Unsupported(_) | D::Refused(_),
+            D::Phase2Rejected | D::Unsupported(_) | D::Refused { .. },
             Outcome::Fail(_) | Outcome::Cascade(_),
         ) => Maker::Fails(FailingMaker(id)),
     }
@@ -259,13 +299,13 @@ pub fn with_failing_makers(
     dolos: &DolosVerdict,
     makers: BTreeSet<FailingMaker>,
 ) -> Outcome {
+    use DolosVerdict as D;
     let inputs = match dolos {
-        DolosVerdict::Refused(kind) => {
-            RefusalClass::of_dolos_kind(kind) == Some(RefusalClass::Inputs)
-        }
-        DolosVerdict::Accepted | DolosVerdict::Phase2Rejected | DolosVerdict::Unsupported(_) => {
-            false
-        }
+        D::Refused {
+            class: DolosClass::Rule(RefusalClass::Inputs),
+            ..
+        } => true,
+        D::Refused { .. } | D::Accepted | D::Phase2Rejected | D::Unsupported(_) => false,
     };
     let Some(makers) = NonEmpty::of(makers) else {
         return outcome;
@@ -292,6 +332,7 @@ pub struct ValidationTally {
     pub unsupported_unexpected: Vec<(RecordId, String)>,
     pub stale_manifest: Vec<(RecordId, String)>,
     pub known_stale: Vec<(RecordId, String)>,
+    pub unknown_refusal: Vec<(RecordId, String)>,
 }
 
 impl ValidationTally {
@@ -316,6 +357,7 @@ impl ValidationTally {
                     }
                     Fail::StaleManifest { .. } => self.stale_manifest.push((id, text)),
                     Fail::KnownStale { .. } => self.known_stale.push((id, text)),
+                    Fail::UnknownRefusal { .. } => self.unknown_refusal.push((id, text)),
                 }
             }
             Outcome::Cascade(cascade) => self.cascade.push((id, cascade.to_string())),
@@ -336,6 +378,7 @@ impl ValidationTally {
             unsupported_unexpected,
             stale_manifest,
             known_stale,
+            unknown_refusal,
         } = self;
         let passing = agree
             + unsupported_expected.values().sum::<usize>()
@@ -345,7 +388,8 @@ impl ValidationTally {
             + reason_mismatch.len()
             + unsupported_unexpected.len()
             + stale_manifest.len()
-            + known_stale.len();
+            + known_stale.len()
+            + unknown_refusal.len();
         passing + failing > 0 && failing == 0
     }
 }
@@ -364,12 +408,13 @@ impl fmt::Display for ValidationTally {
             unsupported_unexpected,
             stale_manifest,
             known_stale,
+            unknown_refusal,
         } = self;
         write!(
             f,
             "VALIDATION agree={agree} disagree={} reason_mismatch={} cascade={} \
              unsupported_expected={} unsupported_unexpected={} refuse_unsupported={} \
-             stale_manifest={} dependent={} known={} known_stale={}",
+             stale_manifest={} dependent={} known={} known_stale={} unknown_refusal={}",
             disagree.len(),
             reason_mismatch.len(),
             cascade.len(),
@@ -379,7 +424,8 @@ impl fmt::Display for ValidationTally {
             stale_manifest.len(),
             dependent.len(),
             known.len(),
-            known_stale.len()
+            known_stale.len(),
+            unknown_refusal.len()
         )?;
         let dependent: Vec<String> = dependent
             .iter()
@@ -399,6 +445,7 @@ impl fmt::Display for ValidationTally {
             ("UNSUPPORTED_UNEXPECTED", unsupported_unexpected),
             ("STALE_MANIFEST", stale_manifest),
             ("KNOWN_STALE", known_stale),
+            ("UNKNOWN_REFUSAL", unknown_refusal),
             ("REFUSE_UNSUPPORTED", refuse_unsupported),
         ] {
             for (id, text) in lines {
@@ -448,15 +495,25 @@ mod tests {
         refused_by(&[leaf])
     }
 
+    fn dolos_refused(kind: &str, class: DolosClass) -> DolosVerdict {
+        DolosVerdict::Refused {
+            kind: kind.into(),
+            class,
+        }
+    }
+
     #[test]
     fn a_refusal_in_any_of_the_ledger_classes_agrees() {
         let ledger = refused_by(&["SubMissingTxMetadata", "BadInputsUTxO"]);
-        for kind in ["MetadataHash", "InputNotInUTxO"] {
+        for (kind, class) in [
+            ("MetadataHash", RefusalClass::Metadata),
+            ("InputNotInUTxO", RefusalClass::Inputs),
+        ] {
             assert_eq!(
                 outcome(
                     &ledger,
                     Phase2::Valid,
-                    &DolosVerdict::Refused(kind.into()),
+                    &dolos_refused(kind, DolosClass::Rule(class)),
                     None
                 ),
                 Outcome::Pass(Pass::Agree),
@@ -469,8 +526,15 @@ mod tests {
     fn a_refusal_outside_the_ledger_classes_is_a_reason_mismatch() {
         let ledger = refused_by(&["BadInputsUTxO", "BadInputsUTxO"]);
         let mut tally = ValidationTally::default();
-        for (n, kind) in [(5, "PreservationOfValue"), (6, "DijkstraMissingParameters")] {
-            let dolos = DolosVerdict::Refused(kind.into());
+        for (n, kind, class) in [
+            (
+                5,
+                "PreservationOfValue",
+                DolosClass::Rule(RefusalClass::Value),
+            ),
+            (6, "DijkstraMissingParameters", DolosClass::NoRule),
+        ] {
+            let dolos = dolos_refused(kind, class);
             tally.add(supp(n), outcome(&ledger, Phase2::Valid, &dolos, None));
         }
         assert!(!tally.pass());
@@ -487,6 +551,44 @@ mod tests {
                 "\nREASON_MISMATCH supp#6 ledger=refused[BadInputsUTxO,BadInputsUTxO] \
                  ledger_class=inputs dolos=refused[DijkstraMissingParameters] dolos_class=none"
             ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_of_a_variant_the_table_names_is_never_unknown() {
+        for ledger in [accepted(), refused("BadInputsUTxO")] {
+            for class in [
+                DolosClass::NoRule,
+                DolosClass::Rule(RefusalClass::Value),
+                DolosClass::Rule(RefusalClass::Inputs),
+            ] {
+                let judged = outcome(&ledger, Phase2::Valid, &dolos_refused("Named", class), None);
+                assert!(
+                    !matches!(judged, Outcome::Fail(Fail::UnknownRefusal { .. })),
+                    "{class:?} {judged:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_unknown_refusal_fails_whatever_the_ledger_said_and_on_the_known_list() {
+        let unknown = dolos_refused("FutureVariant", DolosClass::Unknown);
+        let expected = Outcome::Fail(Fail::UnknownRefusal {
+            dolos: "refused[FutureVariant]".into(),
+        });
+        for ledger in [accepted(), refused("BadInputsUTxO")] {
+            let judged = outcome(&ledger, Phase2::Valid, &unknown, None);
+            assert_eq!(judged, expected);
+            assert_eq!(with_known(judged, Some(&Row::V2)), expected);
+        }
+        let mut tally = ValidationTally::default();
+        tally.add(supp(4), expected);
+        assert!(!tally.pass());
+        let text = tally.to_string();
+        assert!(
+            text.contains("\nUNKNOWN_REFUSAL supp#4 dolos=refused[FutureVariant]"),
             "{text}"
         );
     }
@@ -522,7 +624,7 @@ mod tests {
             outcome(
                 &refused("BadInputsUTxO"),
                 Phase2::Valid,
-                &DolosVerdict::Refused("InputNotInUTxO".into()),
+                &input_refusal(),
                 None
             ),
             agree
@@ -544,7 +646,8 @@ mod tests {
             tally.to_string(),
             "VALIDATION agree=0 disagree=1 reason_mismatch=0 cascade=0 unsupported_expected=0 \
              unsupported_unexpected=0 \
-             refuse_unsupported=0 stale_manifest=0 dependent=0 known=0 known_stale=0\n\
+             refuse_unsupported=0 stale_manifest=0 dependent=0 known=0 known_stale=0 \
+             unknown_refusal=0\n\
              DEPENDENT ids=\n\
              DISAGREE supp#5 ledger=refused[BadInputsUTxO] dolos=accepted"
         );
@@ -602,12 +705,7 @@ mod tests {
     #[test]
     fn a_known_record_passes_while_it_fails_and_fails_once_it_agrees() {
         let row = Row::V2;
-        let failing = outcome(
-            &accepted(),
-            Phase2::Valid,
-            &DolosVerdict::Refused("InputNotInUTxO".into()),
-            None,
-        );
+        let failing = outcome(&accepted(), Phase2::Valid, &input_refusal(), None);
         assert_eq!(
             with_known(failing.clone(), None),
             failing,
@@ -653,7 +751,7 @@ mod tests {
     }
 
     fn input_refusal() -> DolosVerdict {
-        DolosVerdict::Refused("InputNotInUTxO".into())
+        dolos_refused("InputNotInUTxO", DolosClass::Rule(RefusalClass::Inputs))
     }
 
     fn failing(ns: &[u32]) -> BTreeSet<FailingMaker> {
@@ -662,7 +760,7 @@ mod tests {
 
     #[test]
     fn a_dependent_refused_for_another_rule_or_with_no_failing_maker_keeps_its_outcome() {
-        let value = DolosVerdict::Refused("PreservationOfValue".into());
+        let value = dolos_refused("PreservationOfValue", DolosClass::Rule(RefusalClass::Value));
         let refused_for_value = outcome(&accepted(), Phase2::Valid, &value, None);
         assert_eq!(
             with_failing_makers(refused_for_value.clone(), &value, failing(&[1])),
@@ -776,8 +874,7 @@ mod tests {
         let unsupported = DolosVerdict::Unsupported("non-vkey witnesses".into());
         assert_eq!(declares(&refused("BadInputsUTxO"), &unsupported), None);
         assert_eq!(declares(&accepted(), &DolosVerdict::Accepted), None);
-        let refused_kind = DolosVerdict::Refused("InputNotInUTxO".into());
-        assert_eq!(declares(&accepted(), &refused_kind), None);
+        assert_eq!(declares(&accepted(), &input_refusal()), None);
         assert_eq!(
             declares(&accepted(), &unsupported),
             Some(feature("non-vkey witnesses"))

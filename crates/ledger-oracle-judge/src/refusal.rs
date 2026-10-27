@@ -104,50 +104,6 @@ impl RefusalClass {
         Some(class)
     }
 
-    /// The class of a node refusal, by its validation error variant name.
-    pub fn of_dolos_kind(kind: &str) -> Option<Self> {
-        use RefusalClass as C;
-        let class = match kind {
-            "InputNotInUTxO"
-            | "ReferenceInputNotInUTxO"
-            | "TxInsEmpty"
-            | "DijkstraInputAlreadySpent" => C::Inputs,
-            "PreservationOfValue"
-            | "NegativeValue"
-            | "MinLovelaceUnreached"
-            | "MaxValSizeExceeded" => C::Value,
-            "FeeBelowMin"
-            | "MaxTxSizeExceeded"
-            | "UnknownTxSize"
-            | "DijkstraReferenceScriptsTooLarge" => C::FeeAndSize,
-            "VKWitnessMissing" | "VKWrongSignature" | "ReqSignerMissing" => C::Witness,
-            "ScriptWitnessMissing"
-            | "NativeScriptDenial"
-            | "ScriptIntegrityHash"
-            | "RedeemerMissing"
-            | "UnneededRedeemer"
-            | "UnneededNativeScript"
-            | "DijkstraMalformedScript" => C::Script,
-            "DatumMissing" | "UnneededDatum" => C::Datum,
-            "MetadataHash" | "DijkstraInvalidMetadata" => C::Metadata,
-            "BlockPrecedesValInt" | "BlockExceedsValInt" => C::Interval,
-            "TxWrongNetworkID" | "OutputWrongNetworkID" => C::Network,
-            "DijkstraInvalidWithdrawal" | "DijkstraCertificateStateUnavailable" => {
-                C::AccountAndWithdrawal
-            }
-            "DijkstraInvalidCertificate" => C::CertificateAndGovernance,
-            "CollateralMissing"
-            | "CollateralNotInUTxO"
-            | "CollateralMinLovelace"
-            | "NonLovelaceCollateral"
-            | "TooManyCollaterals"
-            | "CollateralNotVKeyLocked"
-            | "CollateralAnnotation" => C::Collateral,
-            _ => return None,
-        };
-        Some(class)
-    }
-
     /// The name printed in judgement lines.
     pub fn name(self) -> &'static str {
         match self {
@@ -170,5 +126,24 @@ impl RefusalClass {
 impl fmt::Display for RefusalClass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
+    }
+}
+
+/// The class of a node refusal by its error variant, unknown for a variant the node's error type gained after this table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DolosClass {
+    Rule(RefusalClass),
+    NoRule,
+    Unknown,
+}
+
+impl DolosClass {
+    /// The name printed in judgement lines.
+    pub fn name(self) -> &'static str {
+        match self {
+            DolosClass::Rule(class) => class.name(),
+            DolosClass::NoRule => "none",
+            DolosClass::Unknown => "unknown",
+        }
     }
 }
