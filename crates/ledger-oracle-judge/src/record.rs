@@ -64,6 +64,16 @@ pub struct NonEmpty<T> {
 }
 
 impl<T> NonEmpty<T> {
+    /// The list of the items in order, none when there are none.
+    pub fn of(items: impl IntoIterator<Item = T>) -> Option<Self> {
+        let mut items = items.into_iter();
+        let head = items.next()?;
+        Some(NonEmpty {
+            head,
+            tail: items.collect(),
+        })
+    }
+
     /// The elements in order.
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         std::iter::once(&self.head).chain(&self.tail)
@@ -77,14 +87,8 @@ impl<T> NonEmpty<T> {
 
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for NonEmpty<T> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let mut all = Vec::<T>::deserialize(d)?.into_iter();
-        let head = all
-            .next()
-            .ok_or_else(|| D::Error::invalid_length(0, &"at least one element"))?;
-        Ok(NonEmpty {
-            head,
-            tail: all.collect(),
-        })
+        NonEmpty::of(Vec::<T>::deserialize(d)?)
+            .ok_or_else(|| D::Error::invalid_length(0, &"at least one element"))
     }
 }
 

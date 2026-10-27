@@ -117,11 +117,26 @@ impl fmt::Display for Fail {
     }
 }
 
+/// A record Dolos refused for its inputs that spends outputs failing makers in its group did not leave, made only by `with_failing_makers`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cascade {
+    makers: NonEmpty<FailingMaker>,
+    fail: Fail,
+}
+
+impl fmt::Display for Cascade {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let makers: Vec<String> = self.makers.iter().map(|m| m.0.to_string()).collect();
+        write!(f, "maker={} {}", makers.join(","), self.fail)
+    }
+}
+
 /// The judgement of one record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     Pass(Pass),
     Fail(Fail),
+    Cascade(Cascade),
 }
 
 /// The outcome of one record from both answers and the feature it is declared unsupported for.
@@ -187,11 +202,15 @@ pub fn with_known(outcome: Outcome, row: Option<&Row>) -> Outcome {
             row,
             shown: fail.to_string(),
         }),
+        (Some(&row), Outcome::Cascade(cascade)) => Outcome::Pass(Pass::Known {
+            row,
+            shown: cascade.to_string(),
+        }),
         (Some(&row), Outcome::Pass(_)) => Outcome::Fail(Fail::KnownStale { row }),
     }
 }
 
-/// A record whose outputs are seeded for the records that spend them, made only by `seeds_dependents`.
+/// A record whose outputs are seeded for the records that spend them, made only by `maker`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SeedingMaker(RecordId);
 
@@ -201,19 +220,61 @@ impl Borrow<RecordId> for SeedingMaker {
     }
 }
 
-/// The record as a seeding maker when Dolos did not take it and its outcome passes.
-pub fn seeds_dependents(
-    id: RecordId,
-    dolos: &DolosVerdict,
-    outcome: &Outcome,
-) -> Option<SeedingMaker> {
+/// A record Dolos did not take whose outcome does not pass, made only by `maker`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FailingMaker(RecordId);
+
+impl Borrow<RecordId> for FailingMaker {
+    fn borrow(&self) -> &RecordId {
+        &self.0
+    }
+}
+
+/// What the records that spend a record's outputs in its group are given of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Maker {
+    Taken,
+    Seeds(SeedingMaker),
+    Fails(FailingMaker),
+}
+
+/// The record as a maker, from what Dolos answered and its outcome.
+pub fn maker(id: RecordId, dolos: &DolosVerdict, outcome: &Outcome) -> Maker {
     use DolosVerdict as D;
     match (dolos, outcome) {
-        (D::Accepted, Outcome::Pass(_) | Outcome::Fail(_)) => None,
-        (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Fail(_)) => None,
+        (D::Accepted, Outcome::Pass(_) | Outcome::Fail(_) | Outcome::Cascade(_)) => Maker::Taken,
         (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Pass(_)) => {
-            Some(SeedingMaker(id))
+            Maker::Seeds(SeedingMaker(id))
         }
+        (
+            D::Phase2Rejected | D::Unsupported(_) | D::Refused(_),
+            Outcome::Fail(_) | Outcome::Cascade(_),
+        ) => Maker::Fails(FailingMaker(id)),
+    }
+}
+
+/// The outcome of a record that spends outputs of the failing makers, a cascade of them when it fails and Dolos refused it for its inputs.
+pub fn with_failing_makers(
+    outcome: Outcome,
+    dolos: &DolosVerdict,
+    makers: BTreeSet<FailingMaker>,
+) -> Outcome {
+    let inputs = match dolos {
+        DolosVerdict::Refused(kind) => {
+            RefusalClass::of_dolos_kind(kind) == Some(RefusalClass::Inputs)
+        }
+        DolosVerdict::Accepted | DolosVerdict::Phase2Rejected | DolosVerdict::Unsupported(_) => {
+            false
+        }
+    };
+    let Some(makers) = NonEmpty::of(makers) else {
+        return outcome;
+    };
+    match outcome {
+        Outcome::Fail(fail @ (Fail::Disagree { .. } | Fail::ReasonMismatch { .. })) if inputs => {
+            Outcome::Cascade(Cascade { makers, fail })
+        }
+        Outcome::Fail(_) | Outcome::Pass(_) | Outcome::Cascade(_) => outcome,
     }
 }
 
@@ -227,6 +288,7 @@ pub struct ValidationTally {
     pub known: Vec<(RecordId, Row, String)>,
     pub disagree: Vec<(RecordId, String)>,
     pub reason_mismatch: Vec<(RecordId, String)>,
+    pub cascade: Vec<(RecordId, String)>,
     pub unsupported_unexpected: Vec<(RecordId, String)>,
     pub stale_manifest: Vec<(RecordId, String)>,
     pub known_stale: Vec<(RecordId, String)>,
@@ -256,6 +318,7 @@ impl ValidationTally {
                     Fail::KnownStale { .. } => self.known_stale.push((id, text)),
                 }
             }
+            Outcome::Cascade(cascade) => self.cascade.push((id, cascade.to_string())),
         }
     }
 
@@ -269,6 +332,7 @@ impl ValidationTally {
             known,
             disagree,
             reason_mismatch,
+            cascade: _,
             unsupported_unexpected,
             stale_manifest,
             known_stale,
@@ -296,17 +360,19 @@ impl fmt::Display for ValidationTally {
             known,
             disagree,
             reason_mismatch,
+            cascade,
             unsupported_unexpected,
             stale_manifest,
             known_stale,
         } = self;
         write!(
             f,
-            "VALIDATION agree={agree} disagree={} reason_mismatch={} unsupported_expected={} \
-             unsupported_unexpected={} refuse_unsupported={} stale_manifest={} dependent={} \
-             known={} known_stale={}",
+            "VALIDATION agree={agree} disagree={} reason_mismatch={} cascade={} \
+             unsupported_expected={} unsupported_unexpected={} refuse_unsupported={} \
+             stale_manifest={} dependent={} known={} known_stale={}",
             disagree.len(),
             reason_mismatch.len(),
+            cascade.len(),
             unsupported_expected.values().sum::<usize>(),
             unsupported_unexpected.len(),
             refuse_unsupported.len(),
@@ -329,6 +395,7 @@ impl fmt::Display for ValidationTally {
         for (name, lines) in [
             ("DISAGREE", disagree),
             ("REASON_MISMATCH", reason_mismatch),
+            ("CASCADE", cascade),
             ("UNSUPPORTED_UNEXPECTED", unsupported_unexpected),
             ("STALE_MANIFEST", stale_manifest),
             ("KNOWN_STALE", known_stale),
@@ -475,7 +542,7 @@ mod tests {
         assert!(!tally.pass());
         assert_eq!(
             tally.to_string(),
-            "VALIDATION agree=0 disagree=1 reason_mismatch=0 unsupported_expected=0 \
+            "VALIDATION agree=0 disagree=1 reason_mismatch=0 cascade=0 unsupported_expected=0 \
              unsupported_unexpected=0 \
              refuse_unsupported=0 stale_manifest=0 dependent=0 known=0 known_stale=0\n\
              DEPENDENT ids=\n\
@@ -560,7 +627,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_passing_maker_dolos_did_not_take_seeds_its_dependents() {
+    fn a_maker_dolos_did_not_take_seeds_when_it_passes_and_fails_its_dependents_otherwise() {
         let unsupported = DolosVerdict::Unsupported("certificate kind".into());
         let expected = outcome(
             &accepted(),
@@ -571,13 +638,136 @@ mod tests {
         let unexpected = outcome(&accepted(), Phase2::Valid, &unsupported, None);
         let held = Outcome::Pass(Pass::Agree);
         assert_eq!(
-            seeds_dependents(supp(3), &unsupported, &expected),
-            Some(SeedingMaker(supp(3)))
+            maker(supp(3), &unsupported, &expected),
+            Maker::Seeds(SeedingMaker(supp(3)))
         );
-        assert_eq!(seeds_dependents(supp(3), &unsupported, &unexpected), None);
         assert_eq!(
-            seeds_dependents(supp(3), &DolosVerdict::Accepted, &held),
-            None
+            maker(supp(3), &unsupported, &unexpected),
+            Maker::Fails(FailingMaker(supp(3)))
+        );
+        assert_eq!(maker(supp(3), &DolosVerdict::Accepted, &held), Maker::Taken);
+        assert_eq!(
+            maker(supp(3), &DolosVerdict::Accepted, &unexpected),
+            Maker::Taken
+        );
+    }
+
+    fn input_refusal() -> DolosVerdict {
+        DolosVerdict::Refused("InputNotInUTxO".into())
+    }
+
+    fn failing(ns: &[u32]) -> BTreeSet<FailingMaker> {
+        ns.iter().map(|&n| FailingMaker(supp(n))).collect()
+    }
+
+    #[test]
+    fn a_dependent_refused_for_another_rule_or_with_no_failing_maker_keeps_its_outcome() {
+        let value = DolosVerdict::Refused("PreservationOfValue".into());
+        let refused_for_value = outcome(&accepted(), Phase2::Valid, &value, None);
+        assert_eq!(
+            with_failing_makers(refused_for_value.clone(), &value, failing(&[1])),
+            refused_for_value
+        );
+        let refused_for_inputs = outcome(&accepted(), Phase2::Valid, &input_refusal(), None);
+        assert_eq!(
+            with_failing_makers(refused_for_inputs.clone(), &input_refusal(), failing(&[])),
+            refused_for_inputs
+        );
+        let agree = outcome(
+            &refused("BadInputsUTxO"),
+            Phase2::Valid,
+            &input_refusal(),
+            None,
+        );
+        assert_eq!(
+            with_failing_makers(agree.clone(), &input_refusal(), failing(&[1])),
+            agree
+        );
+        let accepted_by_dolos = outcome(
+            &refused("BadInputsUTxO"),
+            Phase2::Valid,
+            &DolosVerdict::Accepted,
+            None,
+        );
+        assert_eq!(
+            with_failing_makers(
+                accepted_by_dolos.clone(),
+                &DolosVerdict::Accepted,
+                failing(&[1])
+            ),
+            accepted_by_dolos
+        );
+        let stale = Outcome::Fail(Fail::KnownStale { row: Row::V2 });
+        assert_eq!(
+            with_failing_makers(stale.clone(), &input_refusal(), failing(&[1])),
+            stale
+        );
+    }
+
+    #[test]
+    fn a_dependent_refused_for_its_inputs_is_a_cascade_naming_its_failing_makers() {
+        let mut tally = ValidationTally::default();
+        let maker_outcome = outcome(
+            &accepted(),
+            Phase2::Valid,
+            &DolosVerdict::Unsupported("plutus v4".into()),
+            None,
+        );
+        tally.add(supp(1), maker_outcome);
+        let disagree = outcome(&accepted(), Phase2::Valid, &input_refusal(), None);
+        tally.add(
+            supp(2),
+            with_failing_makers(disagree, &input_refusal(), failing(&[1])),
+        );
+        let mismatch = outcome(
+            &refused_by(&["ExtraRedeemers", "CollectErrors"]),
+            Phase2::Valid,
+            &input_refusal(),
+            None,
+        );
+        tally.add(
+            supp(3),
+            with_failing_makers(mismatch, &input_refusal(), failing(&[1, 2])),
+        );
+        assert!(!tally.pass(), "the failing maker still fails the arm");
+        let text = tally.to_string();
+        assert!(
+            text.starts_with("VALIDATION agree=0 disagree=0 reason_mismatch=0 cascade=2 "),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "\nCASCADE supp#2 maker=supp#1 ledger=accepted dolos=refused[InputNotInUTxO]\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "\nCASCADE supp#3 maker=supp#1,supp#2 ledger=refused[ExtraRedeemers,CollectErrors] \
+                 ledger_class=script dolos=refused[InputNotInUTxO] dolos_class=inputs"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("\nUNSUPPORTED_UNEXPECTED supp#1 label=plutus v4"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_cascade_is_a_failing_maker_and_a_known_row_holds_it() {
+        let disagree = outcome(&accepted(), Phase2::Valid, &input_refusal(), None);
+        let cascade = with_failing_makers(disagree, &input_refusal(), failing(&[1]));
+        assert_eq!(
+            maker(supp(2), &input_refusal(), &cascade),
+            Maker::Fails(FailingMaker(supp(2)))
+        );
+        assert_eq!(
+            with_known(cascade, Some(&Row::V2)),
+            Outcome::Pass(Pass::Known {
+                row: Row::V2,
+                shown: "maker=supp#1 ledger=accepted dolos=refused[InputNotInUTxO]".into()
+            })
         );
     }
 

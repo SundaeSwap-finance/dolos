@@ -33,8 +33,8 @@ use ledger_oracle_judge::{
     row::Row,
     run::{origin, InputOrigin, KeptRun},
     verdict::{
-        declares, outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, Pass,
-        SeedingMaker, ValidationTally,
+        declares, maker, outcome, with_failing_makers, with_known, DolosVerdict, Fail,
+        FailingMaker, Maker, Outcome, Pass, ValidationTally,
     },
 };
 use pallas::{
@@ -289,17 +289,27 @@ fn producible(id: RecordId, record: &Record) -> Vec<TxIn> {
     refs.collect()
 }
 
-/// The pre state entries for the inputs of a record that Dolos misses because a maker in its group was not taken.
+/// The inputs of a record that Dolos misses because a maker in its group was not taken, by what that maker gives them.
+struct Missing<'r> {
+    seeded: Vec<&'r UtxoEntry>,
+    seeded_by: BTreeSet<RecordId>,
+    failed_by: BTreeSet<FailingMaker>,
+}
+
+/// The inputs of a record that Dolos misses because a maker in its group was not taken.
 fn missing_from_makers<'r>(
     group: &validate::Group,
     record: &'r Record,
     inputs: &BTreeSet<TxIn>,
     makers: &BTreeMap<TxIn, RecordId>,
     records: &[Record],
-    seeding: &BTreeSet<SeedingMaker>,
-) -> (Vec<&'r UtxoEntry>, BTreeSet<RecordId>) {
-    let mut entries = Vec::new();
-    let mut made_by = BTreeSet::new();
+    given: &BTreeMap<RecordId, Maker>,
+) -> Missing<'r> {
+    let mut missing = Missing {
+        seeded: Vec::new(),
+        seeded_by: BTreeSet::new(),
+        failed_by: BTreeSet::new(),
+    };
     for input in inputs {
         let maker = match origin(input, record, makers, records) {
             InputOrigin::InGroup { made_by } => made_by,
@@ -307,14 +317,24 @@ fn missing_from_makers<'r>(
                 continue
             }
         };
-        if !seeding.contains(&maker) || group.sees(seed::txo_ref(input)) {
+        if group.sees(seed::txo_ref(input)) {
             continue;
         }
-        let entry = record.pre_utxo.iter().find(|e| e.input == *input);
-        entries.push(entry.expect("an in group input is in the pre state"));
-        made_by.insert(maker);
+        match given.get(&maker) {
+            Some(Maker::Seeds(_)) => {
+                let entry = record.pre_utxo.iter().find(|e| e.input == *input);
+                missing
+                    .seeded
+                    .push(entry.expect("an in group input is in the pre state"));
+                missing.seeded_by.insert(maker);
+            }
+            Some(Maker::Fails(failing)) => {
+                missing.failed_by.insert(*failing);
+            }
+            Some(Maker::Taken) | None => {}
+        }
     }
-    (entries, made_by)
+    missing
 }
 
 /// A block a run rolled, with the records it holds and their slot group.
@@ -365,15 +385,14 @@ async fn validate_run<'r>(
     let mut blocks = Vec::new();
     for records in run.groups() {
         let group = validate::group(base, records[0].slot);
-        let mut seeding = BTreeSet::new();
+        let mut given = BTreeMap::new();
         for record in records {
             let id = id_of(record);
             let inputs = named_inputs(id, record);
-            let (entries, made_by) =
-                missing_from_makers(&group, record, &inputs, &makers, records, &seeding);
-            if !entries.is_empty() {
-                group.seed(&entries);
-                tally.dependent.push((id, made_by));
+            let missing = missing_from_makers(&group, record, &inputs, &makers, records, &given);
+            if !missing.seeded.is_empty() {
+                group.seed(&missing.seeded);
+                tally.dependent.push((id, missing.seeded_by));
             }
             let dolos = validate::verdict(&group.receive(&record.tx.0));
             if let Some(feature) = declares(&record.outcome, &dolos) {
@@ -381,15 +400,14 @@ async fn validate_run<'r>(
             }
             let declared = manifests.declared.get(&id);
             let judgement = outcome(&record.outcome, record.phase2_valid, &dolos, declared);
+            let judgement = with_failing_makers(judgement, &dolos, missing.failed_by);
             let known = manifests.known.get(&(Locus::Validation, id));
             let judgement = with_known(judgement, known);
             if let Outcome::Pass(Pass::Known { row, .. }) = &judgement {
                 let entry = (Locus::Validation, id);
                 candidates.known.records.insert(entry, *row);
             }
-            if let Some(maker) = seeds_dependents(id, &dolos, &judgement) {
-                seeding.insert(maker);
-            }
+            given.insert(id, maker(id, &dolos, &judgement));
             tally.add(id, judgement);
             judged.insert(id);
         }
