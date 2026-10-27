@@ -46,6 +46,11 @@ impl KeptRun {
     pub fn records(&self) -> &[Record] {
         &self.records
     }
+
+    /// The records split into maximal sequences that share one slot.
+    pub fn groups(&self) -> impl Iterator<Item = &[Record]> {
+        self.records.chunk_by(|a, b| a.slot == b.slot)
+    }
 }
 
 /// A maximal sequence of records where each starts from the state the previous left.

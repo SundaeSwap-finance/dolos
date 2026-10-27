@@ -2,18 +2,22 @@
 
 mod params;
 mod seed;
+mod validate;
 
 use std::{
     collections::BTreeMap,
+    fmt,
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use dolos_core::SyncExt as _;
+use dolos_core::{SyncExt as _, TxoRef};
 use ledger_oracle_judge::{
     cbor::TxIn,
     compare::{ByteVerdict, StateTallies, Tally},
     corpus::{self, Corpus},
-    record::{CorpusKind, PParams, RecordId, UtxoEntry},
+    record::{CorpusKind, LedgerOutcome, PParams, RecordId, UtxoEntry},
+    run::KeptRun,
+    verdict::{outcome, DolosVerdict, ValidationTally},
 };
 use tonic::Request;
 
@@ -113,14 +117,49 @@ async fn read_params(domain: &DomainAdapter) -> cardano::PParams {
     }
 }
 
-/// The state tallies of seeding every kept run of a corpus and reading its first pre state back.
+/// The validation outcomes and state comparisons of one corpus.
+#[derive(Debug, Default)]
+struct Judged {
+    validation: ValidationTally,
+    state: StateTallies,
+}
+
+impl Judged {
+    fn pass(&self) -> bool {
+        self.validation.pass() && self.state.pass()
+    }
+}
+
+impl fmt::Display for Judged {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}\n{}", self.validation, self.state)
+    }
+}
+
+/// Submits each slot group of a run in order, each to a fresh mempool at the group slot.
+fn validate_run(base: &DomainAdapter, kind: CorpusKind, run: &KeptRun, tally: &mut ValidationTally) {
+    for records in run.groups() {
+        let group = validate::group(base, records[0].slot);
+        for record in records {
+            let id = RecordId {
+                corpus: kind,
+                n: record.n,
+            };
+            let dolos = validate::verdict(&group.receive(&record.tx.0));
+            tally.add(id, outcome(&record.outcome, record.phase2_valid, &dolos));
+        }
+    }
+}
+
+/// Judges every kept run of a corpus, each seeded from its first pre state.
 async fn judge(
     corpus: &Corpus,
     edit_pre: impl Fn(&[UtxoEntry]) -> Vec<UtxoEntry>,
     edit_expected_params: impl Fn(&PParams) -> PParams,
-) -> StateTallies {
+) -> Judged {
     let genesis = seed::genesis(epoch_size(corpus));
-    let mut tallies = StateTallies::default();
+    let mut judged = Judged::default();
+    let tallies = &mut judged.state;
     for run in corpus.kept() {
         let first = &run.records()[0];
         let id = RecordId {
@@ -136,8 +175,9 @@ async fn judge(
         let served = read_params(&seeded.domain).await;
         let expected = edit_expected_params(run.pparams());
         params::compare(id, &expected, &served, &mut tallies.params);
+        validate_run(&seeded.domain, corpus.kind, run, &mut judged.validation);
     }
-    tallies
+    judged
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -161,8 +201,8 @@ async fn ledger_oracle() {
 async fn dropping_one_seed_pair_prints_utxo_disagree() {
     let corpus = load(CorpusKind::Supp);
     let intact = judge(&corpus, <[UtxoEntry]>::to_vec, PParams::clone).await;
-    assert!(intact.utxo.compared > 0);
-    assert!(intact.utxo.disagree.is_empty(), "{intact}");
+    assert!(intact.state.utxo.compared > 0);
+    assert!(intact.state.utxo.disagree.is_empty(), "{intact}");
     let dropped = AtomicBool::new(false);
     let planted = judge(
         &corpus,
@@ -183,8 +223,8 @@ async fn dropping_one_seed_pair_prints_utxo_disagree() {
 async fn one_changed_cost_model_entry_prints_params_disagree() {
     let corpus = load(CorpusKind::Supp);
     let intact = judge(&corpus, <[UtxoEntry]>::to_vec, PParams::clone).await;
-    assert!(intact.params.compared > 0);
-    assert!(intact.params.disagree.is_empty(), "{intact}");
+    assert!(intact.state.params.compared > 0);
+    assert!(intact.state.params.disagree.is_empty(), "{intact}");
     let changed = AtomicBool::new(false);
     let planted = judge(&corpus, <[UtxoEntry]>::to_vec, |pparams| {
         let mut pparams = pparams.clone();
@@ -198,6 +238,73 @@ async fn one_changed_cost_model_entry_prints_params_disagree() {
     let text = planted.to_string();
     assert!(text.contains("STATE params disagree=1\n"), "{text}");
     assert!(text.contains("costModels.PlutusV1[0] ledger="), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn the_v2_record_disagrees_and_its_maker_agrees() {
+    let judged = judge(
+        &load(CorpusKind::Supp),
+        <[UtxoEntry]>::to_vec,
+        PParams::clone,
+    )
+    .await;
+    let text = judged.to_string();
+    assert!(!text.contains(" supp#1 "), "{text}");
+    assert!(
+        text.contains("\nDISAGREE supp#2 ledger=accepted dolos=refused[InputNotInUTxO]"),
+        "{text}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn a_tx_received_in_one_group_is_absent_from_the_next() {
+    let corpus = load(CorpusKind::Supp);
+    let genesis = seed::genesis(epoch_size(&corpus));
+    let mut checked = 0;
+    for run in corpus.kept() {
+        let groups: Vec<_> = run.groups().collect();
+        let [first, second, ..] = groups.as_slice() else {
+            continue;
+        };
+        let pparams = params::seed_values(run.pparams()).unwrap();
+        let seeded = seed::seed(
+            &genesis,
+            run.epoch().unwrap(),
+            &pparams,
+            &run.records()[0].pre_utxo,
+        );
+        let one = validate::group(&seeded.domain, first[0].slot);
+        let Some(hash) = first
+            .iter()
+            .filter(|r| matches!(r.outcome, LedgerOutcome::Accepted { .. }))
+            .find_map(|r| one.receive(&r.tx.0).ok())
+        else {
+            continue;
+        };
+        let made = TxoRef(hash, 0);
+        assert!(one.sees(made.clone()));
+        let two = validate::group(&seeded.domain, second[0].slot);
+        assert!(!two.sees(made));
+        checked += 1;
+    }
+    assert!(checked > 0);
+}
+
+#[test]
+fn a_dolos_refusal_is_named_by_its_kind() {
+    let refused: Result<dolos_core::TxHash, _> = Err(dolos_core::DomainError::ChainError(
+        dolos_core::ChainError::Phase1ValidationRejected(
+            pallas::ledger::validate::utils::ValidationError::PostAlonzo(
+                pallas::ledger::validate::utils::PostAlonzoError::InputNotInUTxO,
+            ),
+        ),
+    ));
+    assert_eq!(
+        validate::verdict(&refused),
+        DolosVerdict::Refused("InputNotInUTxO".to_string())
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
