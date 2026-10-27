@@ -360,7 +360,7 @@ impl<'r> GroupBlock<'r> {
     }
 }
 
-/// Submits each slot group of a run in order to a fresh mempool at the group slot, then rolls the block of its accepted records, compares the outputs and returns what became of each group's block.
+/// Submits each slot group of a run in order to a fresh mempool at the group slot, then rolls the block of its accepted records, compares the outputs and returns what became of each group's block with the account comparisons of each group's last accepted record.
 async fn validate_run<'r>(
     base: &DomainAdapter,
     kind: CorpusKind,
@@ -369,7 +369,7 @@ async fn validate_run<'r>(
     edits: &Edits<'_>,
     judged: &mut BTreeSet<RecordId>,
     tallies: &mut Judged,
-) -> Vec<GroupBlock<'r>> {
+) -> (Vec<GroupBlock<'r>>, BTreeMap<RecordId, Tally>) {
     let Judged {
         validation: tally,
         state,
@@ -383,6 +383,7 @@ async fn validate_run<'r>(
     let by_n: BTreeMap<u32, &Record> = run.records().iter().map(|r| (r.n, r)).collect();
     let mut tip = None;
     let mut blocks = Vec::new();
+    let mut account_checks = BTreeMap::new();
     for records in run.groups() {
         let group = validate::group(base, records[0].slot);
         let mut given = BTreeMap::new();
@@ -461,9 +462,10 @@ async fn validate_run<'r>(
         let made: Vec<(&UtxoEntry, &Record)> = made.collect();
         compare_datums(group.domain(), id_of(last), &made, edits, &mut state.datum).await;
         let served = dolos_accounts(group.domain());
-        accounts::compare(id_of(last), accounts_post, &served, &mut state.accounts);
+        let checks = account_checks.entry(id_of(last)).or_default();
+        accounts::compare(accounts_post, &served, checks);
     }
-    blocks
+    (blocks, account_checks)
 }
 
 /// The datum ReadUtxos serves for an output with a datum hash, by whether the transaction that made the output witnesses that datum.
@@ -1046,9 +1048,7 @@ fn compare_as_output(
         state.seeded_unjudged += served.seeded;
         state.in_run += served.sub_only;
         for (id, tally) in served.records {
-            let merged = checks.entry(id).or_default();
-            merged.compared += tally.compared;
-            merged.disagree.extend(tally.disagree);
+            checks.entry(id).or_default().merge(tally);
         }
     }
 }
@@ -1105,7 +1105,11 @@ async fn sweep(
         }
     }
     compare_utxos(domain, id, [], &first.pre_utxo, tally).await;
-    accounts::compare(id, &first.accounts_pre, &dolos_accounts(domain), tally);
+    let mut restored = Tally::default();
+    accounts::compare(&first.accounts_pre, &dolos_accounts(domain), &mut restored);
+    let lines = restored.disagree.iter().map(|d| format!("{id} {d}"));
+    tally.compared += restored.compared;
+    tally.disagree.extend(lines);
 }
 
 /// The pre state a planted check seeds for a record in place of its own.
@@ -1140,6 +1144,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
     let mut judged = Judged::default();
     let mut judged_ids = BTreeSet::new();
     let mut as_output = BTreeMap::new();
+    let mut account_checks: BTreeMap<RecordId, Tally> = BTreeMap::new();
     for run in corpus.kept() {
         let first = &run.records()[0];
         let id = RecordId {
@@ -1166,11 +1171,12 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
         )
         .await;
         let served = dolos_accounts(&seeded.domain);
-        accounts::compare(id, &first.accounts_pre, &served, &mut judged.state.accounts);
+        let checks = account_checks.entry(id).or_default();
+        accounts::compare(&first.accounts_pre, &served, checks);
         let served = read_params(&seeded.domain).await;
         let expected = (edits.expected_params)(run.pparams());
         params::compare(id, &expected, &served, &mut judged.state.params);
-        let blocks = validate_run(
+        let (blocks, run_accounts) = validate_run(
             &seeded.domain,
             corpus.kind,
             run,
@@ -1180,6 +1186,9 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             &mut judged,
         )
         .await;
+        for (id, tally) in run_accounts {
+            account_checks.entry(id).or_default().merge(tally);
+        }
         let readtx = &mut judged.state.readtx;
         compare_read_tx(&seeded.domain, corpus.kind, &blocks, readtx).await;
         let script = &mut judged.state.script;
@@ -1208,6 +1217,9 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
     judged
         .state
         .settle_as_output(corpus.kind, as_output, &manifests.known);
+    judged
+        .state
+        .settle_accounts(corpus.kind, account_checks, &manifests.known);
     let fired = judged.state.known_fired.clone();
     judged.candidates.known.records.extend(fired);
     judged
@@ -1676,6 +1688,30 @@ async fn the_collateral_return_supp9_spends_is_known_unserved() {
         deleted.contains("\nDIFF as_output supp#9 ledger="),
         "{deleted}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn the_vote_delegation_ic551_keeps_is_known() {
+    let corpus = load(CorpusKind::Ic);
+    let manifests = Manifests::committed();
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    let text = intact.state.to_string();
+    let line = "\nKNOWN row=S18 ids=ic#551 accounts account=";
+    assert!(text.contains(line), "{text}");
+    assert!(intact.state.accounts.disagree.is_empty(), "{text}");
+    assert!(intact.state.known_stale.is_empty(), "{text}");
+    let mut deleted = manifests;
+    let id = RecordId {
+        corpus: CorpusKind::Ic,
+        n: 551,
+    };
+    deleted.known.remove(&(Locus::Accounts, id)).unwrap();
+    let deleted = judge(&corpus, &deleted, &Edits::default()).await;
+    let text = deleted.state.to_string();
+    assert!(!text.contains("\nKNOWN row=S18 "), "{text}");
+    assert!(text.contains("\nSTATE accounts disagree=1\n"), "{text}");
+    assert!(text.contains("\nDIFF accounts ic#551 account="), "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

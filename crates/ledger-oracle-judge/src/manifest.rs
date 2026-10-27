@@ -25,6 +25,7 @@ impl fmt::Display for Feature {
 pub enum Locus {
     Validation,
     AsOutput,
+    Accounts,
 }
 
 impl Locus {
@@ -33,6 +34,7 @@ impl Locus {
         match self {
             Locus::Validation => Check::Validation,
             Locus::AsOutput => Check::AsOutput,
+            Locus::Accounts => Check::Accounts,
         }
     }
 }
@@ -42,6 +44,7 @@ impl fmt::Display for Locus {
         f.write_str(match self {
             Locus::Validation => "validation",
             Locus::AsOutput => "as_output",
+            Locus::Accounts => "accounts",
         })
     }
 }
@@ -53,6 +56,7 @@ impl FromStr for Locus {
         match s {
             "validation" => Ok(Locus::Validation),
             "as_output" => Ok(Locus::AsOutput),
+            "accounts" => Ok(Locus::Accounts),
             other => Err(format!("unknown locus {other}")),
         }
     }
@@ -328,6 +332,22 @@ mod tests {
             reason("S13 validation supp#5"),
             "row S13 is not judged by validation"
         );
+        assert_eq!(
+            reason("S13 accounts ic#551"),
+            "row S13 is not judged by accounts"
+        );
+    }
+
+    #[test]
+    fn an_accounts_row_names_its_record() {
+        let known = parse_known("k", "S18 accounts ic#551").unwrap();
+        assert_eq!(known.records.len(), 1);
+        let ((locus, id), row) = known.records.iter().next().unwrap();
+        assert_eq!(
+            (locus.check(), id.to_string(), *row),
+            (Check::Accounts, "ic#551".to_string(), Row::S18)
+        );
+        assert_eq!(render_known(&known), "S18 accounts ic#551\n");
     }
 
     #[test]

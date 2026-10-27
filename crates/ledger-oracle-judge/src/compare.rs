@@ -76,6 +76,12 @@ impl Tally {
             self.disagree.push(describe());
         }
     }
+
+    /// Counts the items and keeps the disagreements of another tally.
+    pub fn merge(&mut self, other: Tally) {
+        self.compared += other.compared;
+        self.disagree.extend(other.disagree);
+    }
 }
 
 /// A slot group whose block the node did not apply, with why.
@@ -158,31 +164,53 @@ impl StateTallies {
         checks: BTreeMap<RecordId, Tally>,
         known: &KnownList,
     ) {
+        self.settle(Locus::AsOutput, |s| &mut s.as_output, kind, checks, known);
+    }
+
+    /// Adds the account comparisons of each record, passing a known record while it still disagrees.
+    pub fn settle_accounts(
+        &mut self,
+        kind: CorpusKind,
+        checks: BTreeMap<RecordId, Tally>,
+        known: &KnownList,
+    ) {
+        self.settle(Locus::Accounts, |s| &mut s.accounts, kind, checks, known);
+    }
+
+    /// Adds the comparisons of each record to the tally of `locus`, passing a known record while it still disagrees.
+    fn settle(
+        &mut self,
+        locus: Locus,
+        tally_of: fn(&mut StateTallies) -> &mut Tally,
+        kind: CorpusKind,
+        checks: BTreeMap<RecordId, Tally>,
+        known: &KnownList,
+    ) {
         for (id, tally) in &checks {
-            self.as_output.compared += tally.compared;
-            match known.get(&(Locus::AsOutput, *id)) {
+            tally_of(self).compared += tally.compared;
+            match known.get(&(locus, *id)) {
                 None => {
                     let lines = tally.disagree.iter().map(|d| format!("{id} {d}"));
-                    self.as_output.disagree.extend(lines);
+                    tally_of(self).disagree.extend(lines);
                 }
                 Some(row) if tally.disagree.is_empty() => {
                     self.known_stale
-                        .push(format!("{id} row={row} locus=as_output"));
+                        .push(format!("{id} row={row} locus={locus}"));
                 }
                 Some(row) => {
                     let lines = tally
                         .disagree
                         .iter()
-                        .map(|d| format!("row={row} ids={id} as_output {d}"));
+                        .map(|d| format!("row={row} ids={id} {locus} {d}"));
                     self.known.extend(lines);
-                    self.known_fired.insert((Locus::AsOutput, *id), *row);
+                    self.known_fired.insert((locus, *id), *row);
                 }
             }
         }
-        for ((locus, id), row) in known {
-            if *locus == Locus::AsOutput && id.corpus == kind && !checks.contains_key(id) {
+        for ((entry, id), row) in known {
+            if *entry == locus && id.corpus == kind && !checks.contains_key(id) {
                 self.known_stale
-                    .push(format!("{id} row={row} locus=as_output not_compared"));
+                    .push(format!("{id} row={row} locus={locus} not_compared"));
             }
         }
     }
@@ -395,6 +423,30 @@ mod tests {
         );
         assert!(state.known_fired.is_empty());
         assert!(!state.pass());
+    }
+
+    #[test]
+    fn an_account_disagreement_off_the_known_list_fails_and_a_known_one_passes() {
+        let diff = "account=keyHash-00 ledger=balance=0,pool=none,drep=none dolos=balance=0";
+        let mut state = compared();
+        state.as_output.add(true, String::new);
+        let as_output = KnownList::from([((Locus::AsOutput, supp(9)), Row::S3)]);
+        state.settle_accounts(CorpusKind::Supp, checks(&[(9, &[diff])]), &as_output);
+        assert_eq!(state.accounts.disagree, vec![format!("supp#9 {diff}")]);
+        assert!(state.known.is_empty());
+        assert!(!state.pass(), "{state}");
+
+        let mut state = compared();
+        state.as_output.add(true, String::new);
+        let known = KnownList::from([((Locus::Accounts, supp(9)), Row::S18)]);
+        state.settle_accounts(CorpusKind::Supp, checks(&[(9, &[diff])]), &known);
+        assert_eq!(
+            state.known,
+            vec![format!("row=S18 ids=supp#9 accounts {diff}")]
+        );
+        assert_eq!(state.known_fired, known);
+        assert!(state.accounts.disagree.is_empty());
+        assert!(state.pass(), "{state}");
     }
 
     #[test]
