@@ -19,12 +19,19 @@ impl ByteVerdict {
     pub fn of(ledger: Option<&[u8]>, node: Option<&[u8]>) -> Option<Self> {
         match (ledger, node) {
             (None, None) => None,
-            (Some(l), None) => Some(ByteVerdict::LedgerOnly(l.to_vec())),
+            (Some(l), node) => Some(ByteVerdict::against(l, node)),
             (None, Some(n)) => Some(ByteVerdict::NodeOnly(n.to_vec())),
-            (Some(l), Some(n)) => Some(match first_difference(l, n) {
+        }
+    }
+
+    /// Compares the ledger's bytes with the node's, the node's possibly absent.
+    pub fn against(ledger: &[u8], node: Option<&[u8]>) -> Self {
+        match node {
+            None => ByteVerdict::LedgerOnly(ledger.to_vec()),
+            Some(n) => match first_difference(ledger, n) {
                 None => ByteVerdict::Equal,
                 Some(at) => ByteVerdict::Differ { at },
-            }),
+            },
         }
     }
 
@@ -83,12 +90,13 @@ pub struct StateTallies {
     pub params: Tally,
     pub readtx: Tally,
     pub script: Tally,
+    pub datum: Tally,
     pub known: Vec<String>,
     pub known_stale: Vec<String>,
 }
 
 impl StateTallies {
-    fn named(&self) -> [(&'static str, &Tally); 7] {
+    fn named(&self) -> [(&'static str, &Tally); 8] {
         [
             ("utxo", &self.utxo),
             ("as_output", &self.as_output),
@@ -97,6 +105,7 @@ impl StateTallies {
             ("params", &self.params),
             ("readtx", &self.readtx),
             ("script", &self.script),
+            ("datum", &self.datum),
         ]
     }
 
@@ -157,20 +166,23 @@ impl fmt::Display for StateTallies {
             params,
             readtx,
             script,
+            datum,
             known,
             known_stale,
         } = self;
         write!(
             f,
             "STATE compared utxo={} as_output={} of in_run={in_run} \
-             seeded_unjudged={seeded_unjudged} accounts={} undo={} params={} readtx={} script={}",
+             seeded_unjudged={seeded_unjudged} accounts={} undo={} params={} readtx={} script={} \
+             datum={}",
             utxo.compared,
             as_output.compared,
             accounts.compared,
             undo.compared,
             params.compared,
             readtx.compared,
-            script.compared
+            script.compared,
+            datum.compared
         )?;
         for line in known {
             write!(f, "\nKNOWN {line}")?;
@@ -232,6 +244,7 @@ mod tests {
         state.params.add(true, String::new);
         state.readtx.add(true, String::new);
         state.script.add(true, String::new);
+        state.datum.add(true, String::new);
         state
     }
 
@@ -240,7 +253,7 @@ mod tests {
         let mut state = compared();
         state.as_output.add(true, String::new);
         assert!(state.pass(), "{state}");
-        let empties: [fn(&mut StateTallies) -> &mut Tally; 7] = [
+        let empties: [fn(&mut StateTallies) -> &mut Tally; 8] = [
             |s| &mut s.utxo,
             |s| &mut s.as_output,
             |s| &mut s.accounts,
@@ -248,6 +261,7 @@ mod tests {
             |s| &mut s.params,
             |s| &mut s.readtx,
             |s| &mut s.script,
+            |s| &mut s.datum,
         ];
         for empty in empties {
             let mut state = state.clone();
@@ -256,7 +270,7 @@ mod tests {
         }
         assert!(state
             .to_string()
-            .contains(" seeded_unjudged=0 accounts=1 undo=1 params=1 readtx=1 script=1"));
+            .contains(" seeded_unjudged=0 accounts=1 undo=1 params=1 readtx=1 script=1 datum=1"));
     }
 
     #[test]

@@ -39,8 +39,8 @@ use pallas::{
     },
     crypto::hash::Hasher,
     ledger::{
-        primitives::dijkstra,
-        traverse::{ComputeHash as _, Era, MultiEraOutput, MultiEraTx},
+        primitives::{conway::DatumOption, dijkstra},
+        traverse::{ComputeHash as _, Era, MultiEraOutput, MultiEraTx, OriginalHash as _},
     },
 };
 use seed::SeedPoint;
@@ -73,6 +73,35 @@ async fn read_utxos<'a>(
     domain: &DomainAdapter,
     inputs: impl IntoIterator<Item = &'a TxIn>,
 ) -> BTreeMap<TxIn, Vec<u8>> {
+    let items = read_utxo_data(domain, inputs).await.into_iter();
+    items
+        .map(|(input, item)| (input, item.native_bytes.to_vec()))
+        .collect()
+}
+
+/// The datum bytes Dolos serves through ReadUtxos for each input it holds.
+async fn read_datums<'a>(
+    domain: &DomainAdapter,
+    inputs: impl IntoIterator<Item = &'a TxIn>,
+) -> BTreeMap<TxIn, Option<Vec<u8>>> {
+    let items = read_utxo_data(domain, inputs).await.into_iter();
+    items
+        .map(|(input, item)| {
+            let datum = match item.parsed_state {
+                Some(q::any_utxo_data::ParsedState::Cardano(output)) => output.datum,
+                None => None,
+            };
+            let bytes = datum.and_then(|d| d.original_cbor).map(|b| b.to_vec());
+            (input, bytes)
+        })
+        .collect()
+}
+
+/// What Dolos serves through ReadUtxos for each input it holds.
+async fn read_utxo_data<'a>(
+    domain: &DomainAdapter,
+    inputs: impl IntoIterator<Item = &'a TxIn>,
+) -> BTreeMap<TxIn, q::AnyUtxoData> {
     let keys = inputs
         .into_iter()
         .map(|i| q::TxoRef {
@@ -92,7 +121,10 @@ async fn read_utxos<'a>(
     items
         .into_iter()
         .map(|item| {
-            let r = item.txo_ref.expect("ReadUtxos names each output it serves");
+            let r = item
+                .txo_ref
+                .as_ref()
+                .expect("ReadUtxos names each output it serves");
             let input = TxIn {
                 tx: r
                     .hash
@@ -101,7 +133,7 @@ async fn read_utxos<'a>(
                     .expect("a served hash is 32 bytes"),
                 ix: r.index.into(),
             };
-            (input, item.native_bytes.to_vec())
+            (input, item)
         })
         .collect()
 }
@@ -276,6 +308,7 @@ async fn validate_run<'r>(
         n: record.n,
     };
     let makers = run.makers(kind);
+    let by_n: BTreeMap<u32, &Record> = run.records().iter().map(|r| (r.n, r)).collect();
     let mut tip = None;
     let mut rolled = Vec::new();
     for records in run.groups() {
@@ -333,10 +366,85 @@ async fn validate_run<'r>(
         });
         let inputs = records.iter().flat_map(|r| &r.pre_utxo).map(|e| &e.input);
         compare_utxos(group.domain(), id_of(last), inputs, post, &mut state.utxo).await;
+        let made = post
+            .iter()
+            .filter_map(|e| Some((e, by_n[&makers.get(&e.input)?.n])));
+        let made: Vec<(&UtxoEntry, &Record)> = made.collect();
+        compare_datums(group.domain(), id_of(last), &made, edits, &mut state.datum).await;
         let served = dolos_accounts(group.domain());
         accounts::compare(id_of(last), accounts_post, &served, &mut state.accounts);
     }
     rolled
+}
+
+/// The datum ReadUtxos serves for an output with a datum hash, by whether the transaction that made the output witnesses that datum.
+enum ExpectedDatum {
+    Witnessed(Vec<u8>),
+    Unwitnessed,
+}
+
+/// Counts the datum ReadUtxos serves for each ledger output with a datum hash against the datum its making transaction witnesses, or against the hash when it witnesses none.
+async fn compare_datums(
+    domain: &DomainAdapter,
+    id: RecordId,
+    made: &[(&UtxoEntry, &Record)],
+    edits: &Edits<'_>,
+    tally: &mut Tally,
+) {
+    let mut expected = BTreeMap::new();
+    for (entry, maker) in made {
+        let maker_id = RecordId {
+            corpus: id.corpus,
+            n: maker.n,
+        };
+        let output = MultiEraOutput::decode(Era::Dijkstra, &entry.output.0)
+            .unwrap_or_else(|e| panic!("OUTPUT {maker_id} {e}"));
+        let Some(DatumOption::Hash(hash)) = output.datum() else {
+            continue;
+        };
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &maker.tx.0)
+            .unwrap_or_else(|e| panic!("TX {maker_id} {e}"));
+        let subs = tx.sub_transactions();
+        let making = std::iter::once(&tx)
+            .chain(&subs)
+            .find(|t| *t.hash() == entry.input.tx);
+        let datum = making
+            .into_iter()
+            .flat_map(|t| t.plutus_data())
+            .find(|d| d.original_hash() == hash);
+        let ledger = match datum {
+            Some(d) => {
+                ExpectedDatum::Witnessed((edits.expected_datum)(maker_id, d.raw_cbor().to_vec()))
+            }
+            None => ExpectedDatum::Unwitnessed,
+        };
+        expected.insert(entry.input, (maker_id, *hash, ledger));
+    }
+    let served = read_datums(domain, expected.keys()).await;
+    for (input, (maker, hash, ledger)) in &expected {
+        let served = served.get(input).cloned().flatten();
+        let (agrees, dolos) = match ledger {
+            ExpectedDatum::Witnessed(bytes) => {
+                let verdict = ByteVerdict::against(bytes, served.as_deref());
+                (verdict.agrees(), verdict.to_string())
+            }
+            ExpectedDatum::Unwitnessed => match served {
+                None => (true, "unwitnessed dolos=none".to_string()),
+                Some(bytes) => {
+                    let served_hash = *Hasher::<256>::hash(&bytes);
+                    let dolos = format!("unwitnessed dolos_hash={}", hex::encode(served_hash));
+                    (served_hash == *hash, dolos)
+                }
+            },
+        };
+        tally.add(agrees, || {
+            format!(
+                "{id} input={} made_by={maker} datum={} {dolos}",
+                show_input(input),
+                hex::encode(hash)
+            )
+        });
+    }
 }
 
 /// The registered accounts Dolos holds, in the fields the ledger also holds.
@@ -893,6 +1001,7 @@ struct Edits<'a> {
     accounts_pre: Box<dyn Fn(&LedgerAccounts) -> LedgerAccounts + 'a>,
     expected_params: Box<dyn Fn(&PParams) -> PParams + 'a>,
     block_tx: Box<dyn Fn(RecordId, Phase2) -> Option<Phase2> + 'a>,
+    expected_datum: Box<dyn Fn(RecordId, Vec<u8>) -> Vec<u8> + 'a>,
 }
 
 impl Default for Edits<'_> {
@@ -902,6 +1011,7 @@ impl Default for Edits<'_> {
             accounts_pre: Box::new(LedgerAccounts::clone),
             expected_params: Box::new(PParams::clone),
             block_tx: Box::new(|_, phase2| Some(phase2)),
+            expected_datum: Box::new(|_, datum| datum),
         }
     }
 }
@@ -1450,6 +1560,80 @@ async fn a_reference_script_on_a_sub_transaction_output_prints_script_disagree()
     assert_eq!(lines.len(), 1, "{judged}");
     assert!(lines[0].contains(" ledger=Native,output="), "{judged}");
     assert!(lines[0].ends_with(" dolos=none"), "{judged}");
+}
+
+/// The first output of a sub transaction of the record with a datum hash its sub transaction witnesses, and the length of that datum.
+fn sub_witnessed_datum(record: &Record) -> Option<(TxIn, usize)> {
+    let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0).ok()?;
+    for sub in tx.sub_transactions() {
+        for (ix, output) in sub.outputs().iter().enumerate() {
+            let Some(DatumOption::Hash(hash)) = output.datum() else {
+                continue;
+            };
+            let witnessed = sub.plutus_data().iter().find(|d| d.original_hash() == hash);
+            if let Some(datum) = witnessed {
+                let input = TxIn {
+                    tx: *sub.hash(),
+                    ix: ix as u64,
+                };
+                return Some((input, datum.raw_cbor().len()));
+            }
+        }
+    }
+    None
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn a_witnessed_datum_changed_in_its_last_byte_prints_datum_differ() {
+    let corpus = load(CorpusKind::Supp);
+    let manifests = Manifests::committed();
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    assert!(intact.state.datum.compared > 0, "{intact}");
+    let (maker, input, len) = corpus
+        .kept()
+        .flat_map(KeptRun::records)
+        .filter(|r| matches!(r.outcome, LedgerOutcome::Accepted { .. }))
+        .find_map(|r| sub_witnessed_datum(r).map(|(input, len)| (supp(r.n), input, len)))
+        .expect("a sub transaction output holds a datum hash its sub transaction witnesses");
+    let named = format!(" input={} made_by={maker} ", show_input(&input));
+    let text = intact.to_string();
+    assert!(
+        intact
+            .state
+            .datum
+            .disagree
+            .iter()
+            .all(|d| !d.contains(&named)),
+        "{text}"
+    );
+    let edits = Edits {
+        expected_datum: Box::new(|id, mut datum| {
+            if id == maker {
+                if let Some(last) = datum.last_mut() {
+                    *last ^= 1;
+                }
+            }
+            datum
+        }),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
+    let lines: Vec<&String> = planted
+        .state
+        .datum
+        .disagree
+        .iter()
+        .filter(|d| d.contains(&named))
+        .collect();
+    println!(
+        "PLANTED datum disagree={} named={}",
+        planted.state.datum.disagree.len(),
+        lines.len()
+    );
+    assert!(!lines.is_empty(), "{planted}");
+    let differ = format!(" differ at byte {}", len - 1);
+    assert!(lines.iter().all(|d| d.ends_with(&differ)), "{planted}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
