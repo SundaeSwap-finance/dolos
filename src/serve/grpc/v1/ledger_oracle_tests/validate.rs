@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
 use dolos_core::{
-    ChainError, ChainPoint, Domain as _, DomainError, MempoolAwareUtxoStore, StateStore as _,
-    StateWriter as _, SubmitExt as _, TxHash, TxoRef,
+    ChainError, ChainPoint, Domain as _, DomainError, EraCbor, MempoolAwareUtxoStore,
+    StateStore as _, StateWriter as _, SubmitExt as _, TxHash, TxoRef, UtxoSetDelta,
 };
-use ledger_oracle_judge::verdict::DolosVerdict;
+use ledger_oracle_judge::{record::UtxoEntry, verdict::DolosVerdict};
 use pallas::ledger::validate::utils::ValidationError;
 
+use super::seed::{txo_ref, DIJKSTRA};
 use crate::adapters::{DomainAdapter, MempoolBackend};
 
 /// A domain over the seeded stores with a mempool of its own and its cursor at one slot.
@@ -29,6 +32,23 @@ impl Group {
     pub(super) fn receive(&self, tx: &[u8]) -> Result<TxHash, DomainError> {
         let chain = self.domain.read_chain();
         self.domain.receive_tx("ledger-oracle", &chain, tx)
+    }
+
+    /// Writes ledger outputs into the state the group reads.
+    pub(super) fn seed(&self, entries: &[&UtxoEntry]) {
+        let delta = UtxoSetDelta {
+            produced_utxo: entries
+                .iter()
+                .map(|e| {
+                    let output = Arc::new(EraCbor(DIJKSTRA, e.output.0.clone()));
+                    (txo_ref(&e.input), output)
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let writer = self.domain.state().start_writer().unwrap();
+        writer.apply_utxoset(&delta).unwrap();
+        writer.commit().unwrap();
     }
 
     /// Whether the group reads an output at the reference, from the stores or its mempool.

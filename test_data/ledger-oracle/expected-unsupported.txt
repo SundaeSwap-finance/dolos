@@ -4,6 +4,7 @@ ic#68 stateful or scripted subtransaction
 ic#95 stateful or scripted subtransaction
 ic#97 stateful or scripted subtransaction
 ic#100 stateful or scripted subtransaction
+ic#104 pointer address
 ic#105 scripted or stateful batch
 ic#107 account or governance state
 ic#110 stateful or scripted subtransaction
@@ -12,21 +13,28 @@ ic#115 stateful or scripted subtransaction
 ic#118 stateful or scripted subtransaction
 ic#121 stateful or scripted subtransaction
 ic#124 stateful or scripted subtransaction
+ic#126 pointer address
 ic#127 account or governance state
 ic#129 account or governance state
 ic#131 stateful or scripted subtransaction
 ic#134 stateful or scripted subtransaction
+ic#138 pointer address
 ic#139 scripted or stateful batch
 ic#142 stateful or scripted subtransaction
 ic#144 stateful or scripted subtransaction
 ic#147 stateful or scripted subtransaction
+ic#148 pointer address
 ic#149 stateful or scripted subtransaction
 ic#151 account or governance state
+ic#152 pointer address
 ic#156 scripted or stateful batch
 ic#159 stateful or scripted subtransaction
+ic#160 pointer address
 ic#161 stateful or scripted subtransaction
 ic#164 stateful or scripted subtransaction
+ic#168 pointer address
 ic#172 stateful or scripted subtransaction
+ic#173 pointer address
 ic#177 scripted or stateful batch
 ic#179 account or governance state
 ic#182 stateful or scripted subtransaction
@@ -34,8 +42,14 @@ ic#184 stateful or scripted subtransaction
 ic#185 account or governance state
 ic#195 scripted or stateful batch
 ic#197 account or governance state
+ic#198 pointer address
 ic#205 account or governance state
+ic#206 pointer address
+ic#211 pointer address
 ic#214 account or governance state
+ic#215 pointer address
+ic#219 pointer address
+ic#221 pointer address
 ic#229 stateful or scripted subtransaction
 ic#233 stateful or scripted subtransaction
 ic#251 pointer address
@@ -65,21 +79,25 @@ ic#359 account or governance state
 ic#398 account or governance state
 ic#403 account or governance state
 ic#408 account or governance state
+ic#409 certificate kind
 ic#411 account or governance state
 ic#415 account or governance state
 ic#419 account or governance state
 ic#422 certificate kind
+ic#424 certificate kind
 ic#426 account or governance state
 ic#435 certificate kind
 ic#437 account or governance state
 ic#440 certificate kind
 ic#442 account or governance state
 ic#446 certificate kind
+ic#448 certificate kind
 ic#450 account or governance state
 ic#455 stateful or scripted subtransaction
 ic#458 stateful or scripted subtransaction
 ic#473 stateful or scripted subtransaction
 ic#474 certificate kind
+ic#476 certificate kind
 ic#478 account or governance state
 ic#480 stateful or scripted subtransaction
 ic#483 pointer address
@@ -89,11 +107,15 @@ ic#489 stateful or scripted subtransaction
 ic#492 pointer address
 ic#493 stateful or scripted subtransaction
 ic#494 certificate kind
+ic#496 certificate kind
 ic#500 stateful or scripted subtransaction
 ic#501 certificate kind
+ic#503 certificate kind
 ic#508 certificate kind
+ic#510 certificate kind
 ic#513 account or governance state
 ic#514 certificate kind
+ic#516 certificate kind
 ic#518 account or governance state
 ic#521 stateful or scripted subtransaction
 ic#526 stateful or scripted subtransaction
@@ -101,15 +123,18 @@ ic#527 certificate kind
 ic#529 account or governance state
 ic#531 stateful or scripted subtransaction
 ic#533 certificate kind
+ic#535 certificate kind
 ic#537 account or governance state
 ic#539 stateful or scripted subtransaction
 ic#541 account or governance state
 ic#543 stateful or scripted subtransaction
 ic#544 certificate kind
+ic#546 certificate kind
 ic#548 account or governance state
 ic#549 account or governance state
 ic#551 stateful or scripted subtransaction
 ic#552 certificate kind
+ic#554 certificate kind
 ic#556 account or governance state
 ic#559 stateful or scripted subtransaction
 ic#564 scripted or stateful batch
@@ -121,24 +146,53 @@ ic#592 stateful or scripted subtransaction
 ic#595 stateful or scripted subtransaction
 ic#602 stateful or scripted subtransaction
 ic#605 stateful or scripted subtransaction
+ic#607 certificate kind
 ic#610 stateful or scripted subtransaction
 ic#628 stateful or scripted subtransaction
 ic#631 stateful or scripted subtransaction
+ic#635 certificate kind
 ic#722 certificate kind
 ic#724 certificate kind
 ic#733 certificate kind
+ic#734 certificate kind
 ic#736 certificate kind
+ic#737 certificate kind
 ic#753 certificate kind
+ic#754 certificate kind
+ic#755 certificate kind
 ic#761 certificate kind
+ic#763 certificate kind
 ic#765 certificate kind
+ic#767 certificate kind
+ic#769 certificate kind
+ic#770 certificate kind
 ic#771 account or governance state
 ic#780 certificate kind
+ic#781 certificate kind
+ic#783 certificate kind
+ic#785 certificate kind
+ic#786 certificate kind
 ic#787 account or governance state
 ic#790 account or governance state
 ic#791 account or governance state
 ic#792 account or governance state
 ic#793 account or governance state
 ic#825 certificate kind
+ic#827 certificate kind
+ic#829 certificate kind
+ic#830 certificate kind
+ic#831 certificate kind
+ic#833 certificate kind
+ic#835 certificate kind
+ic#836 certificate kind
+ic#837 certificate kind
+ic#839 certificate kind
+ic#841 certificate kind
+ic#842 certificate kind
+ic#843 certificate kind
+ic#845 certificate kind
+ic#847 certificate kind
+ic#848 certificate kind
 ic#851 native script guards
 ic#855 script guards
 ic#869 script guards
@@ -146,17 +200,21 @@ ic#890 stateful or scripted subtransaction
 ic#898 stateful or scripted subtransaction
 ic#900 witness fields
 ic#906 registration with subtransactions
+ic#914 pointer address
 ic#915 registration with subtransactions
 ic#920 registration with subtransactions
 ic#931 registration with subtransactions
 ic#945 registration with subtransactions
 ic#955 registration with subtransactions
 ic#958 stateful or scripted subtransaction
+ic#963 pointer address
 ic#964 scripted or stateful batch
 ic#967 scripted or stateful batch
 ic#969 certificate kind
 ic#973 registration with subtransactions
+ic#975 certificate kind
 ic#982 registration with subtransactions
+ic#984 certificate kind
 ic#988 registration with subtransactions
 ic#993 stateful or scripted subtransaction
 ic#1001 scripted or stateful batch
@@ -165,18 +223,26 @@ ic#1010 registration with subtransactions
 ic#1018 registration with subtransactions
 ic#1023 registration with subtransactions
 ic#1026 certificate kind
+ic#1027 certificate kind
 ic#1030 stateful or scripted subtransaction
 ic#1033 stateful or scripted subtransaction
+ic#1034 pointer address
 ic#1036 registration with subtransactions
+ic#1039 certificate kind
+ic#1040 certificate kind
 ic#1043 stateful or scripted subtransaction
 ic#1045 account or governance state
 ic#1051 registration with subtransactions
+ic#1054 certificate kind
+ic#1055 certificate kind
 ic#1057 account or governance state
 ic#1060 stateful or scripted subtransaction
 ic#1064 registration with subtransactions
 ic#1066 certificate kind
 ic#1068 stateful or scripted subtransaction
+ic#1070 certificate kind
 ic#1075 scripted or stateful batch
+ic#1077 certificate kind
 ic#1079 scripted or stateful batch
 ic#1081 registration with subtransactions
 ic#1088 pointer address
@@ -198,6 +264,7 @@ ic#1133 stateful or scripted subtransaction
 ic#1142 stateful or scripted subtransaction
 ic#1149 stateful or scripted subtransaction
 ic#1159 stateful or scripted subtransaction
+ic#1163 pointer address
 ic#1168 stateful or scripted subtransaction
 ic#1172 stateful or scripted subtransaction
 ic#1176 stateful or scripted subtransaction
@@ -208,6 +275,7 @@ ic#1188 stateful or scripted subtransaction
 ic#1244 bootstrap or reward address
 ic#1255 scripted or stateful batch
 ic#1273 certificate kind
+ic#1275 certificate kind
 ic#1277 account or governance state
 ic#1280 certificate kind
 ic#1282 account or governance state

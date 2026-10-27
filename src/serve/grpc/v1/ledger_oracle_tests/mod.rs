@@ -12,13 +12,15 @@ use std::{
 
 use dolos_core::{SyncExt as _, TxoRef};
 use ledger_oracle_judge::{
-    cbor::TxIn,
+    cbor::{tx_inputs, TxIn},
     compare::{ByteVerdict, StateTallies, Tally},
     corpus::{self, Corpus},
     manifest::{self, Declared, Feature, KnownList, Locus},
-    record::{CorpusKind, LedgerOutcome, PParams, RecordId, UtxoEntry},
-    run::KeptRun,
-    verdict::{outcome, with_known, DolosVerdict, Fail, Outcome, ValidationTally},
+    record::{CorpusKind, LedgerOutcome, PParams, Record, RecordId, UtxoEntry},
+    run::{origin, InputOrigin, KeptRun},
+    verdict::{
+        outcome, seeds_dependents, with_known, DolosVerdict, Fail, Outcome, ValidationTally,
+    },
 };
 use tonic::Request;
 
@@ -169,6 +171,51 @@ impl Manifests {
     }
 }
 
+/// Every input a record names, at the top level and in its sub transactions.
+fn named_inputs(id: RecordId, record: &Record) -> BTreeSet<TxIn> {
+    let inputs = tx_inputs(&record.tx.0).unwrap_or_else(|e| panic!("TX {id} {e}"));
+    let subs = inputs
+        .subs
+        .iter()
+        .flat_map(|s| s.spend.iter().chain(&s.reference));
+    inputs
+        .spend
+        .iter()
+        .chain(&inputs.collateral)
+        .chain(&inputs.reference)
+        .chain(subs)
+        .copied()
+        .collect()
+}
+
+/// The pre state entries for the inputs of a record that Dolos misses because a maker in its group was not taken.
+fn missing_from_makers<'r>(
+    group: &validate::Group,
+    record: &'r Record,
+    inputs: &BTreeSet<TxIn>,
+    makers: &BTreeMap<TxIn, RecordId>,
+    records: &[Record],
+    seeding: &BTreeSet<RecordId>,
+) -> (Vec<&'r UtxoEntry>, BTreeSet<RecordId>) {
+    let mut entries = Vec::new();
+    let mut made_by = BTreeSet::new();
+    for input in inputs {
+        let maker = match origin(input, record, makers, records) {
+            InputOrigin::InGroup { made_by } => made_by,
+            InputOrigin::Seeded | InputOrigin::InRun { .. } | InputOrigin::AbsentFromPre => {
+                continue
+            }
+        };
+        if !seeding.contains(&maker) || group.sees(seed::txo_ref(input)) {
+            continue;
+        }
+        let entry = record.pre_utxo.iter().find(|e| e.input == *input);
+        entries.push(entry.expect("an in group input is in the pre state"));
+        made_by.insert(maker);
+    }
+    (entries, made_by)
+}
+
 /// Submits each slot group of a run in order, each to a fresh mempool at the group slot.
 fn validate_run(
     base: &DomainAdapter,
@@ -178,18 +225,31 @@ fn validate_run(
     judged: &mut BTreeSet<RecordId>,
     tally: &mut ValidationTally,
 ) {
+    let makers = run.makers(kind);
     for records in run.groups() {
         let group = validate::group(base, records[0].slot);
+        let mut seeding = BTreeSet::new();
         for record in records {
             let id = RecordId {
                 corpus: kind,
                 n: record.n,
             };
+            let inputs = named_inputs(id, record);
+            let (entries, made_by) =
+                missing_from_makers(&group, record, &inputs, &makers, records, &seeding);
+            if !entries.is_empty() {
+                group.seed(&entries);
+                tally.dependent.push((id, made_by));
+            }
             let dolos = validate::verdict(&group.receive(&record.tx.0));
             let declared = manifests.declared.get(&id);
             let judgement = outcome(&record.outcome, record.phase2_valid, &dolos, declared);
             let known = manifests.known.get(&(Locus::Validation, id));
-            tally.add(id, with_known(judgement, known));
+            let judgement = with_known(judgement, known);
+            if seeds_dependents(&dolos, &judgement) {
+                seeding.insert(id);
+            }
+            tally.add(id, judgement);
             judged.insert(id);
         }
     }
@@ -387,6 +447,49 @@ async fn a_known_entry_naming_an_agreeing_or_unjudged_record_prints_known_stale(
     .to_string();
     assert!(named.contains("\nKNOWN_STALE supp#0 row=V9"), "{named}");
     assert!(named.contains("\nKNOWN_STALE supp#999 row=V9"), "{named}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn a_maker_that_fails_leaves_its_dependents_disagreeing() {
+    let corpus = load(CorpusKind::Ic);
+    let committed = Manifests::committed();
+    let intact = judge(&corpus, &committed, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    let maker = intact
+        .validation
+        .dependent
+        .iter()
+        .flat_map(|(_, makers)| makers)
+        .find(|m| committed.declared.contains_key(m))
+        .copied()
+        .expect("a declared unsupported maker has a seeded dependent");
+    let dependents: BTreeSet<RecordId> = intact
+        .validation
+        .dependent
+        .iter()
+        .filter(|(_, makers)| makers.contains(&maker))
+        .map(|(id, _)| *id)
+        .collect();
+    let disagrees = |judged: &Judged| -> BTreeSet<RecordId> {
+        let ids = judged.validation.disagree.iter().map(|(id, _)| *id);
+        ids.filter(|id| dependents.contains(id)).collect()
+    };
+    assert!(disagrees(&intact).is_empty(), "{intact}");
+    let mut failing = committed.clone();
+    failing.declared.remove(&maker).unwrap();
+    let patched = judge(&corpus, &failing, <[UtxoEntry]>::to_vec, PParams::clone).await;
+    assert!(
+        patched
+            .validation
+            .dependent
+            .iter()
+            .all(|(_, makers)| !makers.contains(&maker)),
+        "{patched}"
+    );
+    assert!(
+        !disagrees(&patched).is_empty(),
+        "maker={maker} dependents={dependents:?} {patched}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 use crate::{
     manifest::Feature,
@@ -128,9 +131,20 @@ pub fn with_known(outcome: Outcome, row: Option<&String>) -> Outcome {
     }
 }
 
+/// Whether the outputs a record made are seeded for the records that spend them, which holds when Dolos did not take the record and its outcome passes.
+pub fn seeds_dependents(dolos: &DolosVerdict, outcome: &Outcome) -> bool {
+    use DolosVerdict as D;
+    match (dolos, outcome) {
+        (D::Accepted, Outcome::Pass(_) | Outcome::Fail(_)) => false,
+        (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Fail(_)) => false,
+        (D::Phase2Rejected | D::Unsupported(_) | D::Refused(_), Outcome::Pass(_)) => true,
+    }
+}
+
 /// The validation outcomes of one arm, with the records behind each one that is printed.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ValidationTally {
+    pub dependent: Vec<(RecordId, BTreeSet<RecordId>)>,
     pub agree: usize,
     pub unsupported_expected: BTreeMap<String, usize>,
     pub refuse_unsupported: Vec<(RecordId, String)>,
@@ -170,6 +184,7 @@ impl ValidationTally {
     /// Whether the arm judged a record and no outcome fails it.
     pub fn pass(&self) -> bool {
         let ValidationTally {
+            dependent: _,
             agree,
             unsupported_expected,
             refuse_unsupported,
@@ -194,6 +209,7 @@ impl ValidationTally {
 impl fmt::Display for ValidationTally {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ValidationTally {
+            dependent,
             agree,
             unsupported_expected,
             refuse_unsupported,
@@ -206,16 +222,25 @@ impl fmt::Display for ValidationTally {
         write!(
             f,
             "VALIDATION agree={agree} disagree={} unsupported_expected={} \
-             unsupported_unexpected={} refuse_unsupported={} stale_manifest={} known={} \
-             known_stale={}",
+             unsupported_unexpected={} refuse_unsupported={} stale_manifest={} dependent={} \
+             known={} known_stale={}",
             disagree.len(),
             unsupported_expected.values().sum::<usize>(),
             unsupported_unexpected.len(),
             refuse_unsupported.len(),
             stale_manifest.len(),
+            dependent.len(),
             known.len(),
             known_stale.len()
         )?;
+        let dependent: Vec<String> = dependent
+            .iter()
+            .map(|(id, makers)| {
+                let makers: Vec<String> = makers.iter().map(RecordId::to_string).collect();
+                format!("{id}({})", makers.join(","))
+            })
+            .collect();
+        write!(f, "\nDEPENDENT ids={}", dependent.join(","))?;
         for (id, row, shown) in known {
             write!(f, "\nKNOWN row={row} ids={id} {shown}")?;
         }
@@ -314,7 +339,8 @@ mod tests {
         assert_eq!(
             tally.to_string(),
             "VALIDATION agree=0 disagree=1 unsupported_expected=0 unsupported_unexpected=0 \
-             refuse_unsupported=0 stale_manifest=0 known=0 known_stale=0\n\
+             refuse_unsupported=0 stale_manifest=0 dependent=0 known=0 known_stale=0\n\
+             DEPENDENT ids=\n\
              DISAGREE supp#5 ledger=refused[BadInputsUTxO] dolos=accepted"
         );
     }
@@ -393,6 +419,22 @@ mod tests {
             with_known(Outcome::Pass(Pass::Agree), Some(&row)),
             Outcome::Fail(Fail::KnownStale { row })
         );
+    }
+
+    #[test]
+    fn only_a_passing_maker_dolos_did_not_take_seeds_its_dependents() {
+        let unsupported = DolosVerdict::Unsupported("certificate kind".into());
+        let expected = outcome(
+            &accepted(),
+            Phase2::Valid,
+            &unsupported,
+            Some(&feature("certificate kind")),
+        );
+        let unexpected = outcome(&accepted(), Phase2::Valid, &unsupported, None);
+        let held = Outcome::Pass(Pass::Agree);
+        assert!(seeds_dependents(&unsupported, &expected));
+        assert!(!seeds_dependents(&unsupported, &unexpected));
+        assert!(!seeds_dependents(&DolosVerdict::Accepted, &held));
     }
 
     #[test]

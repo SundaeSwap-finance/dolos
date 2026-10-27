@@ -1,4 +1,9 @@
-use crate::record::{PParams, Record};
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::{
+    cbor::TxIn,
+    record::{CorpusKind, LedgerOutcome, PParams, Record, RecordId},
+};
 
 /// Why a run of records is left out of the judgement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +56,53 @@ impl KeptRun {
     pub fn groups(&self) -> impl Iterator<Item = &[Record]> {
         self.records.chunk_by(|a, b| a.slot == b.slot)
     }
+
+    /// The record whose ledger run made each output that a later record of the run can spend.
+    pub fn makers(&self, kind: CorpusKind) -> BTreeMap<TxIn, RecordId> {
+        let mut makers = BTreeMap::new();
+        for record in &self.records {
+            let LedgerOutcome::Accepted { post_utxo, .. } = &record.outcome else {
+                continue;
+            };
+            let pre: BTreeSet<&TxIn> = record.pre_utxo.iter().map(|e| &e.input).collect();
+            let id = RecordId {
+                corpus: kind,
+                n: record.n,
+            };
+            for entry in post_utxo.iter().filter(|e| !pre.contains(&e.input)) {
+                makers.insert(entry.input, id);
+            }
+        }
+        makers
+    }
+}
+
+/// Where an input a record names comes from, as the ledger saw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputOrigin {
+    Seeded,
+    InRun { made_by: RecordId },
+    InGroup { made_by: RecordId },
+    AbsentFromPre,
+}
+
+/// The origin of one input of a record, given the run's makers and the records of its slot group.
+pub fn origin(
+    input: &TxIn,
+    record: &Record,
+    makers: &BTreeMap<TxIn, RecordId>,
+    group: &[Record],
+) -> InputOrigin {
+    if !record.pre_utxo.iter().any(|e| e.input == *input) {
+        return InputOrigin::AbsentFromPre;
+    }
+    match makers.get(input) {
+        None => InputOrigin::Seeded,
+        Some(made_by) if group.iter().any(|r| r.n == made_by.n) => {
+            InputOrigin::InGroup { made_by: *made_by }
+        }
+        Some(made_by) => InputOrigin::InRun { made_by: *made_by },
+    }
 }
 
 /// A maximal sequence of records where each starts from the state the previous left.
@@ -97,4 +149,60 @@ pub fn split(records: Vec<Record>) -> Vec<Run> {
         }
     }
     groups.into_iter().map(classify).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{cbor::tx_inputs, corpus};
+
+    fn supp(n: u32) -> RecordId {
+        RecordId {
+            corpus: CorpusKind::Supp,
+            n,
+        }
+    }
+
+    /// The origin of every spend input of one supplement record.
+    fn spend_origins(n: u32) -> Vec<InputOrigin> {
+        let corpus = corpus::load(CorpusKind::Supp).unwrap();
+        let run = corpus
+            .kept()
+            .find(|r| r.records().iter().any(|x| x.n == n))
+            .unwrap();
+        let makers = run.makers(CorpusKind::Supp);
+        let group = run.groups().find(|g| g.iter().any(|x| x.n == n)).unwrap();
+        let record = group.iter().find(|x| x.n == n).unwrap();
+        let inputs = tx_inputs(&record.tx.0).unwrap();
+        let spend = inputs
+            .spend
+            .iter()
+            .chain(inputs.subs.iter().flat_map(|s| &s.spend));
+        spend.map(|i| origin(i, record, &makers, group)).collect()
+    }
+
+    #[test]
+    fn the_first_record_of_a_run_spends_only_seeded_inputs() {
+        let origins = spend_origins(6);
+        assert!(!origins.is_empty());
+        assert!(
+            origins.iter().all(|o| *o == InputOrigin::Seeded),
+            "{origins:?}"
+        );
+    }
+
+    #[test]
+    fn an_output_made_earlier_in_the_slot_group_is_in_group() {
+        assert!(spend_origins(2).contains(&InputOrigin::InGroup { made_by: supp(1) }));
+    }
+
+    #[test]
+    fn an_output_made_in_an_earlier_slot_group_is_in_run() {
+        assert!(spend_origins(9).contains(&InputOrigin::InRun { made_by: supp(8) }));
+    }
+
+    #[test]
+    fn an_input_the_ledger_did_not_hold_is_absent_from_pre() {
+        assert!(spend_origins(5).contains(&InputOrigin::AbsentFromPre));
+    }
 }
