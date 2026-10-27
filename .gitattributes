@@ -1,0 +1,2 @@
+test_data/ledger-oracle/*.txt text eol=lf
+test_data/ledger-oracle/*.gz binary
