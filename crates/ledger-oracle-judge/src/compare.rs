@@ -78,9 +78,36 @@ impl Tally {
     }
 }
 
+/// A slot group whose block the node did not apply, with why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RollFail {
+    pub first: RecordId,
+    pub last: RecordId,
+    pub records: usize,
+    pub slot: u64,
+    pub cause: String,
+}
+
+impl fmt::Display for RollFail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let RollFail {
+            first,
+            last,
+            records,
+            slot,
+            cause,
+        } = self;
+        write!(
+            f,
+            "group={first}..{last} records={records} slot={slot} {cause}"
+        )
+    }
+}
+
 /// The state comparisons of one arm, one tally each.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct StateTallies {
+    pub roll_fail: Vec<RollFail>,
     pub utxo: Tally,
     pub as_output: Tally,
     pub in_run: usize,
@@ -110,13 +137,18 @@ impl StateTallies {
         ]
     }
 
-    /// Whether every comparison looked at something and agreed on all of it.
+    /// Whether every block rolled and every comparison looked at something and agreed on all of it.
     pub fn pass(&self) -> bool {
         let tallies = self.named();
         let agree = tallies
             .iter()
             .all(|(_, t)| t.compared > 0 && t.disagree.is_empty());
-        agree && self.known_stale.is_empty()
+        agree && self.known_stale.is_empty() && self.roll_fail.is_empty()
+    }
+
+    /// The count of records in slot groups whose block the node did not apply.
+    pub fn rolled_failed(&self) -> usize {
+        self.roll_fail.iter().map(|r| r.records).sum()
     }
 
     /// Adds the served output comparisons of each record, passing a known record while it still disagrees.
@@ -159,6 +191,7 @@ impl StateTallies {
 impl fmt::Display for StateTallies {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let StateTallies {
+            roll_fail,
             utxo,
             as_output,
             in_run,
@@ -177,7 +210,7 @@ impl fmt::Display for StateTallies {
             f,
             "STATE compared utxo={} as_output={} of in_run={in_run} \
              seeded_unjudged={seeded_unjudged} accounts={} undo={} params={} readtx={} script={} \
-             datum={}",
+             datum={} rolled_failed={}",
             utxo.compared,
             as_output.compared,
             accounts.compared,
@@ -185,8 +218,12 @@ impl fmt::Display for StateTallies {
             params.compared,
             readtx.compared,
             script.compared,
-            datum.compared
+            datum.compared,
+            self.rolled_failed()
         )?;
+        for line in roll_fail {
+            write!(f, "\nROLL_FAIL {line}")?;
+        }
         for line in known {
             write!(f, "\nKNOWN {line}")?;
         }
@@ -275,6 +312,31 @@ mod tests {
         assert!(state
             .to_string()
             .contains(" seeded_unjudged=0 accounts=1 undo=1 params=1 readtx=1 script=1 datum=1"));
+    }
+
+    #[test]
+    fn a_group_that_did_not_roll_prints_one_line_and_fails() {
+        let mut state = compared();
+        state.as_output.add(true, String::new);
+        assert!(state.pass(), "{state}");
+        assert!(state.to_string().contains(" datum=1 rolled_failed=0"));
+        assert!(!state.to_string().contains("ROLL_FAIL"));
+        state.roll_fail.push(RollFail {
+            first: supp(3),
+            last: supp(5),
+            records: 3,
+            slot: 40,
+            cause: "panic at=a.rs:1:2 explicit panic".to_string(),
+        });
+        assert!(!state.pass(), "{state}");
+        let text = state.to_string();
+        assert!(text.contains(" datum=1 rolled_failed=3\n"), "{text}");
+        assert!(
+            text.contains(
+                "\nROLL_FAIL group=supp#3..supp#5 records=3 slot=40 panic at=a.rs:1:2 explicit panic"
+            ),
+            "{text}"
+        );
     }
 
     #[test]

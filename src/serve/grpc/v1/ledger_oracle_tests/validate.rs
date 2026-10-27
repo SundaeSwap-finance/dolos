@@ -1,7 +1,8 @@
 use std::{
+    cell::RefCell,
     fmt,
     panic::{self, AssertUnwindSafe},
-    sync::{Arc, PoisonError},
+    sync::{Arc, Once, PoisonError},
 };
 
 use dolos_cardano::CardanoLogic;
@@ -39,16 +40,53 @@ const DIJKSTRA_BLOCK: u16 = 8;
 #[derive(Debug)]
 pub(super) enum RollFailure {
     Error(DomainError),
-    Panic(String),
+    Panic { at: PanicAt, message: String },
 }
 
 impl fmt::Display for RollFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RollFailure::Error(e) => write!(f, "error {e}"),
-            RollFailure::Panic(message) => write!(f, "panic {message}"),
+            RollFailure::Panic { at, message } => write!(f, "panic at={at} {message}"),
         }
     }
+}
+
+/// The source location of a panic, as the panic hook reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PanicAt {
+    Source(String),
+    Unreported,
+}
+
+impl fmt::Display for PanicAt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PanicAt::Source(location) => write!(f, "{location}"),
+            PanicAt::Unreported => write!(f, "unreported"),
+        }
+    }
+}
+
+thread_local! {
+    /// The location of the last panic on this thread.
+    static LAST_PANIC: RefCell<PanicAt> = const { RefCell::new(PanicAt::Unreported) };
+}
+
+/// Installs, once, a panic hook that records each panic's location for its thread and then runs the hook it replaces.
+fn record_panic_locations() {
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            let at = match info.location() {
+                Some(l) => PanicAt::Source(format!("{}:{}:{}", l.file(), l.line(), l.column())),
+                None => PanicAt::Unreported,
+            };
+            LAST_PANIC.with(|last| *last.borrow_mut() = at);
+            previous(info);
+        }));
+    });
 }
 
 /// The header hash and block number of the last block a run applied.
@@ -170,11 +208,14 @@ impl Group {
 
     /// Applies one block through the live sync path, reopening the chain logic from the state after a panic.
     pub(super) fn roll(&self, block: RawBlock) -> Result<BlockSlot, RollFailure> {
+        record_panic_locations();
+        LAST_PANIC.with(|last| *last.borrow_mut() = PanicAt::Unreported);
         let rolled = panic::catch_unwind(AssertUnwindSafe(|| self.domain.roll_forward(block)));
         let payload = match rolled {
             Ok(result) => return result.map_err(RollFailure::Error),
             Err(payload) => payload,
         };
+        let at = LAST_PANIC.with(|last| last.replace(PanicAt::Unreported));
         let logic = CardanoLogic::initialize::<DomainAdapter>(
             Default::default(),
             &self.domain.state,
@@ -194,7 +235,7 @@ impl Group {
                 .map_or("non text payload", |m| m)
                 .to_string(),
         };
-        Err(RollFailure::Panic(message))
+        Err(RollFailure::Panic { at, message })
     }
 
     /// The domain the group submits to and rolls blocks into.

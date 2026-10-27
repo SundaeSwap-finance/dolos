@@ -18,13 +18,14 @@ use dolos_cardano::{
     FixedNamespace as _,
 };
 use dolos_core::{
-    AsyncQueryFacade, BlockHash, ChainPoint, Domain as _, StateStore as _, SyncExt as _, TxoRef,
+    AsyncQueryFacade, BlockHash, ChainPoint, Domain as _, RawBlock, StateStore as _, SyncExt as _,
+    TxoRef,
 };
 use itertools::Itertools as _;
 use ledger_oracle_judge::{
     accounts::{self, Account, Credential, LedgerAccounts},
     cbor::{tx_inputs, TxIn},
-    compare::{ByteVerdict, StateTallies, Tally},
+    compare::{ByteVerdict, RollFail, StateTallies, Tally},
     corpus::{self, Corpus},
     manifest::{self, Candidates, Declared, Feature, KnownList, Locus},
     record::{CorpusKind, LedgerOutcome, PParams, Phase2, Record, RecordId, UtxoEntry},
@@ -293,7 +294,23 @@ struct Rolled<'r> {
     records: Vec<&'r Record>,
 }
 
-/// Submits each slot group of a run in order to a fresh mempool at the group slot, then rolls the block of its accepted records, compares the outputs and returns the blocks it rolled.
+/// What became of the block of one slot group, unmade when the group holds no accepted record.
+enum GroupBlock<'r> {
+    Unmade(&'r [Record]),
+    Rolled(Rolled<'r>),
+    Failed,
+}
+
+impl<'r> GroupBlock<'r> {
+    fn rolled(&self) -> Option<&Rolled<'r>> {
+        match self {
+            GroupBlock::Rolled(rolled) => Some(rolled),
+            GroupBlock::Unmade(_) | GroupBlock::Failed => None,
+        }
+    }
+}
+
+/// Submits each slot group of a run in order to a fresh mempool at the group slot, then rolls the block of its accepted records, compares the outputs and returns what became of each group's block.
 async fn validate_run<'r>(
     base: &DomainAdapter,
     kind: CorpusKind,
@@ -302,7 +319,7 @@ async fn validate_run<'r>(
     edits: &Edits<'_>,
     judged: &mut BTreeSet<RecordId>,
     tallies: &mut Judged,
-) -> Vec<Rolled<'r>> {
+) -> Vec<GroupBlock<'r>> {
     let Judged {
         validation: tally,
         state,
@@ -315,7 +332,7 @@ async fn validate_run<'r>(
     let makers = run.makers(kind);
     let by_n: BTreeMap<u32, &Record> = run.records().iter().map(|r| (r.n, r)).collect();
     let mut tip = None;
-    let mut rolled = Vec::new();
+    let mut blocks = Vec::new();
     for records in run.groups() {
         let group = validate::group(base, records[0].slot);
         let mut seeding = BTreeSet::new();
@@ -354,6 +371,7 @@ async fn validate_run<'r>(
             LedgerOutcome::Refused { .. } => None,
         });
         let Some((last, post, accounts_post)) = accepted.clone().next_back() else {
+            blocks.push(GroupBlock::Unmade(records));
             continue;
         };
         let included: Vec<(&Record, Phase2)> = accepted
@@ -364,18 +382,24 @@ async fn validate_run<'r>(
             .map(|(r, phase2)| (r.tx.0.as_slice(), *phase2))
             .collect();
         let (next, block) = validate::block(last.slot, tip, &txs);
-        if let Err(e) = group.roll(block) {
-            let id = id_of(last);
-            state.utxo.add(false, || format!("{id} roll_forward {e}"));
+        if let Err(e) = group.roll((edits.rolled_block)(id_of(last), block)) {
+            state.roll_fail.push(RollFail {
+                first: id_of(&records[0]),
+                last: id_of(&records[records.len() - 1]),
+                records: records.len(),
+                slot: last.slot,
+                cause: e.to_string(),
+            });
+            blocks.push(GroupBlock::Failed);
             // A failed block leaves the tip where it was, so the next block names that parent.
             continue;
         }
         tip = Some(next);
-        rolled.push(Rolled {
+        blocks.push(GroupBlock::Rolled(Rolled {
             point: ChainPoint::Specific(last.slot, next.hash()),
             group: records,
             records: included.into_iter().map(|(r, _)| r).collect(),
-        });
+        }));
         let inputs = records.iter().flat_map(|r| &r.pre_utxo).map(|e| &e.input);
         compare_utxos(group.domain(), id_of(last), inputs, post, &mut state.utxo).await;
         let made = post
@@ -386,7 +410,7 @@ async fn validate_run<'r>(
         let served = dolos_accounts(group.domain());
         accounts::compare(id_of(last), accounts_post, &served, &mut state.accounts);
     }
-    rolled
+    blocks
 }
 
 /// The datum ReadUtxos serves for an output with a datum hash, by whether the transaction that made the output witnesses that datum.
@@ -620,23 +644,21 @@ impl fmt::Display for TxName {
     }
 }
 
-/// Counts each transaction hash of a run against what ReadTx serves for it, the block and transaction of the accepted record that names it or nothing when only refused records do.
+/// Counts each transaction hash of the groups whose block rolled or was never made against what ReadTx serves for it, the block and transaction of the accepted record that names it or nothing when only refused records do.
 async fn compare_read_tx(
     domain: &DomainAdapter,
     kind: CorpusKind,
-    run: &KeptRun,
-    rolled: &[Rolled<'_>],
+    blocks: &[GroupBlock<'_>],
     tally: &mut Tally,
 ) {
-    let blocks: BTreeMap<u64, [u8; 32]> = rolled
-        .iter()
-        .filter_map(|r| match &r.point {
-            ChainPoint::Specific(slot, hash) => Some((*slot, **hash)),
-            _ => None,
-        })
-        .collect();
     let mut expected: BTreeMap<TxName, (RecordId, Option<ExpectedTx>)> = BTreeMap::new();
-    for record in run.records() {
+    let groups = blocks.iter().filter_map(|block| match block {
+        GroupBlock::Unmade(records) => Some((*records, None)),
+        GroupBlock::Rolled(rolled) => Some((rolled.group, rolled.point.hash().map(|h| *h))),
+        GroupBlock::Failed => None,
+    });
+    let records = groups.flat_map(|(records, block)| records.iter().map(move |r| (r, block)));
+    for (record, block) in records {
         let id = RecordId {
             corpus: kind,
             n: record.n,
@@ -652,7 +674,7 @@ async fn compare_read_tx(
         let ledger = match &record.outcome {
             LedgerOutcome::Accepted { .. } => Some(ExpectedTx {
                 slot: record.slot,
-                block: blocks.get(&record.slot).copied(),
+                block,
                 tx: &record.tx.0,
                 phase2: record.phase2_valid,
             }),
@@ -743,15 +765,20 @@ fn output_script(output: &MultiEraOutput<'_>) -> Option<([u8; 28], ScriptLanguag
 /// The language and place of a script an accepted record carries, none for a script the ledger does not hold.
 type LedgerScript = Option<(ScriptLanguage, ScriptAt)>;
 
-/// Counts each script hash of a run against what the script lookup serves for it, the language from the witnesses or produced outputs of an accepted record, or nothing otherwise.
+/// Counts each script hash of the groups whose block rolled or was never made against what the script lookup serves for it, the language from the witnesses or produced outputs of an accepted record, or nothing otherwise.
 async fn compare_scripts(
     domain: &DomainAdapter,
     kind: CorpusKind,
-    run: &KeptRun,
+    blocks: &[GroupBlock<'_>],
     tally: &mut Tally,
 ) {
     let mut expected: BTreeMap<[u8; 28], (RecordId, LedgerScript)> = BTreeMap::new();
-    for record in run.records() {
+    let groups = blocks.iter().filter_map(|block| match block {
+        GroupBlock::Unmade(records) => Some(*records),
+        GroupBlock::Rolled(rolled) => Some(rolled.group),
+        GroupBlock::Failed => None,
+    });
+    for record in groups.flatten() {
         let id = RecordId {
             corpus: kind,
             n: record.n,
@@ -825,7 +852,7 @@ async fn compare_scripts(
 async fn serve_rolled(
     domain: &DomainAdapter,
     seed: &SeedPoint,
-    rolled: &[Rolled<'_>],
+    rolled: &[&Rolled<'_>],
 ) -> [(Service, Served); 3] {
     let hashes: Vec<BlockHash> = rolled
         .iter()
@@ -936,7 +963,7 @@ fn compare_served(
 fn compare_as_output(
     kind: CorpusKind,
     run: &KeptRun,
-    rolled: &[Rolled<'_>],
+    rolled: &[&Rolled<'_>],
     services: &[(Service, Served)],
     state: &mut StateTallies,
     checks: &mut BTreeMap<RecordId, Tally>,
@@ -960,7 +987,7 @@ async fn sweep(
     seed: &SeedPoint,
     kind: CorpusKind,
     run: &KeptRun,
-    rolled: &[Rolled<'_>],
+    rolled: &[&Rolled<'_>],
     tally: &mut Tally,
 ) {
     let makers = run.makers(kind);
@@ -1018,6 +1045,7 @@ struct Edits<'a> {
     accounts_pre: Box<dyn Fn(&LedgerAccounts) -> LedgerAccounts + 'a>,
     expected_params: Box<dyn Fn(&PParams) -> PParams + 'a>,
     block_tx: Box<dyn Fn(RecordId, Phase2) -> Option<Phase2> + 'a>,
+    rolled_block: Box<dyn Fn(RecordId, RawBlock) -> RawBlock + 'a>,
     expected_datum: Box<dyn Fn(RecordId, Vec<u8>) -> Vec<u8> + 'a>,
 }
 
@@ -1028,6 +1056,7 @@ impl Default for Edits<'_> {
             accounts_pre: Box::new(LedgerAccounts::clone),
             expected_params: Box::new(PParams::clone),
             block_tx: Box::new(|_, phase2| Some(phase2)),
+            rolled_block: Box::new(|_, block| block),
             expected_datum: Box::new(|_, datum| datum),
         }
     }
@@ -1069,7 +1098,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
         let served = read_params(&seeded.domain).await;
         let expected = (edits.expected_params)(run.pparams());
         params::compare(id, &expected, &served, &mut judged.state.params);
-        let rolled = validate_run(
+        let blocks = validate_run(
             &seeded.domain,
             corpus.kind,
             run,
@@ -1079,15 +1108,11 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             &mut judged,
         )
         .await;
-        compare_read_tx(
-            &seeded.domain,
-            corpus.kind,
-            run,
-            &rolled,
-            &mut judged.state.readtx,
-        )
-        .await;
-        compare_scripts(&seeded.domain, corpus.kind, run, &mut judged.state.script).await;
+        let readtx = &mut judged.state.readtx;
+        compare_read_tx(&seeded.domain, corpus.kind, &blocks, readtx).await;
+        let script = &mut judged.state.script;
+        compare_scripts(&seeded.domain, corpus.kind, &blocks, script).await;
+        let rolled: Vec<&Rolled> = blocks.iter().filter_map(GroupBlock::rolled).collect();
         let services = serve_rolled(&seeded.domain, &seeded.seed, &rolled).await;
         compare_as_output(
             corpus.kind,
@@ -1399,6 +1424,59 @@ async fn leaving_an_accepted_tx_out_of_its_block_prints_utxo_disagree() {
     let planted = judge(&corpus, &manifests, &edits).await;
     assert!(missing(&planted) > 0, "{left_out} {planted}");
     assert!(planted.to_string().contains("\nSTATE utxo disagree="));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "judges Dolos against the committed ledger corpora, run in release"]
+async fn a_block_that_does_not_roll_prints_one_roll_fail_and_no_state_line_for_its_group() {
+    let corpus = load(CorpusKind::Supp);
+    let manifests = Manifests::committed();
+    let intact = judge(&corpus, &manifests, &Edits::default()).await;
+    let text = intact.to_string();
+    assert!(intact.state.roll_fail.is_empty(), "{text}");
+    assert!(text.contains(" rolled_failed=0\n"), "{text}");
+    let group: Vec<RecordId> = corpus
+        .kept()
+        .flat_map(|run| run.groups())
+        .find(|g| {
+            g.iter()
+                .any(|r| matches!(r.outcome, LedgerOutcome::Accepted { .. }))
+        })
+        .expect("a group holds an accepted record")
+        .iter()
+        .map(|r| supp(r.n))
+        .collect();
+    let edits = Edits {
+        rolled_block: Box::new(|id, block| match group.contains(&id) {
+            true => std::sync::Arc::new(vec![0x80]),
+            false => block,
+        }),
+        ..Edits::default()
+    };
+    let planted = judge(&corpus, &manifests, &edits).await;
+    let text = planted.to_string();
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("ROLL_FAIL "))
+        .collect();
+    let first = group[0];
+    let last = group[group.len() - 1];
+    let head = format!("ROLL_FAIL group={first}..{last} records={} ", group.len());
+    assert_eq!(lines.len(), 1, "{text}");
+    assert!(lines[0].starts_with(&head), "{text}");
+    assert!(
+        text.contains(&format!(" rolled_failed={}\n", group.len())),
+        "{text}"
+    );
+    assert!(!planted.pass());
+    let state = &planted.state;
+    let loci = [&state.utxo, &state.readtx, &state.script];
+    let named = loci
+        .iter()
+        .flat_map(|t| &t.disagree)
+        .filter(|d| group.iter().any(|id| d.starts_with(&format!("{id} "))))
+        .join("\n");
+    assert!(named.is_empty(), "{named}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
