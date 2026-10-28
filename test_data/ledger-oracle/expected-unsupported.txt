@@ -289,3 +289,4 @@ supp#8 V3 builtin outside audited protocol-12 subset
 supp#14 stateful or scripted subtransaction
 supp#20 overlapping spending and reference inputs
 supp#22 account or governance state
+supp#26 V3 builtin outside audited protocol-12 subset

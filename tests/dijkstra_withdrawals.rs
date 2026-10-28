@@ -360,11 +360,19 @@ fn pending_and_inflight_withdrawals_reserve_only_available_rewards() {
         if stage >= 2 {
             domain.mempool().mark_acknowledged(&[hash]).unwrap();
         }
-        assert_rejected(&domain, &txs[2], "DijkstraWithdrawalConflict");
+        assert_rejected(
+            &domain,
+            &txs[2],
+            "amount does not match available account balance",
+        );
         domain
             .receive_tx("remaining", &domain.read_chain(), &txs[1])
             .unwrap();
-        assert_rejected(&domain, &txs[3], "DijkstraWithdrawalConflict");
+        assert_rejected(
+            &domain,
+            &txs[3],
+            "amount does not match available account balance",
+        );
         assert_eq!(get_account(&domain, &credential), before);
     }
 }
@@ -407,7 +415,11 @@ fn confirmation_rollback_and_drop_update_withdrawal_reservations() {
         domain.mempool().check_status(&hash).stage,
         MempoolTxStage::Pending
     );
-    assert_rejected(&domain, &txs[2], "DijkstraWithdrawalConflict");
+    assert_rejected(
+        &domain,
+        &txs[2],
+        "amount does not match available account balance",
+    );
     domain.mempool().mark_inflight(&[hash]).unwrap();
     domain
         .mempool()
@@ -493,7 +505,7 @@ fn simultaneous_submissions_cannot_overdraw_one_account() {
     assert_eq!(results.iter().filter(|x| x.is_ok()).count(), 1);
     let error = results.into_iter().find_map(Result::err).unwrap();
     assert!(
-        format!("{error:?}").contains("DijkstraWithdrawalConflict"),
+        format!("{error:?}").contains("amount does not match available account balance"),
         "{error:?}"
     );
     assert_eq!(domain.mempool().peek_pending().len(), 1);
