@@ -1,7 +1,7 @@
+use crate::serve::ChainReads;
 use futures_core::Stream;
 use futures_util::StreamExt;
 use pallas::interop::utxorpc::v1::{self as interop, spec as u5c};
-use pallas::interop::utxorpc::LedgerContext;
 use pallas::{
     interop::utxorpc::v1::spec::watch::any_chain_tx_pattern::Chain,
     ledger::{addresses::Address, traverse::MultiEraBlock},
@@ -366,7 +366,7 @@ fn apply_predicate(predicate: &u5c::watch::TxPredicate, tx: &u5c::cardano::Tx) -
     tx_matches && !not_clause && and_clause && or_clause
 }
 
-fn block_to_txs<C: LedgerContext>(
+fn block_to_txs<C: ChainReads>(
     block: &RawBlock,
     context: &C,
     request: &u5c::watch::WatchTxRequest,
@@ -396,18 +396,16 @@ fn block_to_txs<C: LedgerContext>(
         .collect()
 }
 
-fn raw_to_blockref<C: LedgerContext>(context: &C, raw: &[u8]) -> Option<u5c::watch::BlockRef> {
-    let block = interop::Mapper::new(context.clone()).map_block_cbor(raw);
-    let header = block.header?;
-
-    Some(u5c::watch::BlockRef {
-        slot: header.slot,
-        hash: header.hash,
-        height: header.height,
-    })
+fn raw_to_blockref(raw: &[u8]) -> u5c::watch::BlockRef {
+    let block = MultiEraBlock::decode(raw).unwrap();
+    u5c::watch::BlockRef {
+        slot: block.slot(),
+        hash: block.hash().to_vec().into(),
+        height: block.number(),
+    }
 }
 
-fn roll_to_watch_response<C: LedgerContext>(
+fn roll_to_watch_response<C: ChainReads>(
     context: &C,
     log: &TipEvent,
     request: &u5c::watch::WatchTxRequest,
@@ -416,14 +414,11 @@ fn roll_to_watch_response<C: LedgerContext>(
         TipEvent::Apply(_, block) => {
             let txs = block_to_txs(block, context, request);
             if txs.is_empty() {
-                let block_ref = raw_to_blockref(context, block);
-                if let Some(r) = block_ref {
-                    vec![u5c::watch::WatchTxResponse {
-                        action: Some(u5c::watch::watch_tx_response::Action::Idle(r)),
-                    }]
-                } else {
-                    vec![]
-                }
+                vec![u5c::watch::WatchTxResponse {
+                    action: Some(u5c::watch::watch_tx_response::Action::Idle(
+                        raw_to_blockref(block),
+                    )),
+                }]
             } else {
                 txs.into_iter()
                     .map(u5c::watch::watch_tx_response::Action::Apply)
@@ -445,7 +440,7 @@ fn roll_to_watch_response<C: LedgerContext>(
 
 pub struct WatchServiceImpl<D, C>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
     C: CancelToken,
 {
     domain: D,
@@ -454,7 +449,7 @@ where
 
 impl<D, C> WatchServiceImpl<D, C>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
     C: CancelToken,
 {
     pub fn new(domain: D, cancel: C) -> Self {
@@ -465,7 +460,7 @@ where
 #[async_trait::async_trait]
 impl<D, C> u5c::watch::watch_service_server::WatchService for WatchServiceImpl<D, C>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
     C: CancelToken,
 {
     type WatchTxStream = Pin<

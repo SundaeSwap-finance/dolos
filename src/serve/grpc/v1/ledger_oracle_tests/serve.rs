@@ -7,8 +7,10 @@ use tokio_util::sync::CancellationToken;
 use tonic::Request;
 
 use super::super::{
+    query::QueryServiceImpl,
     spec::{
         cardano,
+        query::{self as q, query_service_server::QueryService as _},
         sync::{self as s, sync_service_server::SyncService as _},
         watch::{self as w, watch_service_server::WatchService as _},
     },
@@ -26,6 +28,7 @@ pub(super) enum Service {
     FetchBlock,
     FollowTip,
     WatchTx,
+    ReadTx,
 }
 
 impl fmt::Display for Service {
@@ -34,6 +37,7 @@ impl fmt::Display for Service {
             Service::FetchBlock => "FetchBlock",
             Service::FollowTip => "FollowTip",
             Service::WatchTx => "WatchTx",
+            Service::ReadTx => "ReadTx",
         };
         f.write_str(name)
     }
@@ -112,6 +116,26 @@ pub(super) async fn fetch_block(domain: &DomainAdapter, blocks: &[BlockHash]) ->
             &mut served,
             &block.expect("FetchBlock serves a block it holds"),
         );
+    }
+    served
+}
+
+/// The inputs ReadTx serves for each transaction hash it finds.
+pub(super) async fn read_tx(domain: &DomainAdapter, txs: &[[u8; 32]]) -> Served {
+    let service = QueryServiceImpl::new(domain.clone());
+    let mut served = Served::new();
+    for hash in txs {
+        let request = q::ReadTxRequest {
+            hash: hash.to_vec().into(),
+            ..Default::default()
+        };
+        let Ok(response) = service.read_tx(Request::new(request)).await else {
+            continue;
+        };
+        let tx = response.into_inner().tx.and_then(|tx| tx.chain);
+        if let Some(q::any_chain_tx::Chain::Cardano(tx)) = tx {
+            add_tx(&mut served, &tx);
+        }
     }
     served
 }

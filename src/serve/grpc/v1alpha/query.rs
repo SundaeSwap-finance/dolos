@@ -9,8 +9,10 @@ use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 
 use crate::prelude::*;
+use crate::serve::grpc::block_context::{BlockContext, NoInputs};
 use crate::serve::grpc::block_refs::BlockRefData;
 use crate::serve::grpc::masking::apply_mask;
+use crate::serve::ChainReads;
 use dolos_cardano::indexes::AsyncCardanoQueryExt;
 
 fn to_chain_point(data: &BlockRefData) -> u5c::query::ChainPoint {
@@ -22,7 +24,7 @@ fn to_chain_point(data: &BlockRefData) -> u5c::query::ChainPoint {
     }
 }
 
-pub fn point_to_u5c<T: LedgerContext>(_ledger: &T, point: &ChainPoint) -> u5c::query::ChainPoint {
+pub fn point_to_u5c<T: ChainReads>(_ledger: &T, point: &ChainPoint) -> u5c::query::ChainPoint {
     u5c::query::ChainPoint {
         slot: point.slot(),
         hash: point.hash().map(|h| h.to_vec()).unwrap_or_default().into(),
@@ -32,18 +34,18 @@ pub fn point_to_u5c<T: LedgerContext>(_ledger: &T, point: &ChainPoint) -> u5c::q
 
 pub struct QueryServiceImpl<D>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
 {
     domain: D,
-    mapper: interop::Mapper<D>,
+    mapper: interop::Mapper<NoInputs>,
 }
 
 impl<D> QueryServiceImpl<D>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
 {
     pub fn new(domain: D) -> Self {
-        let mapper = interop::Mapper::new(domain.clone());
+        let mapper = interop::Mapper::new(NoInputs);
 
         Self { domain, mapper }
     }
@@ -785,10 +787,10 @@ fn map_era_summary(
     }
 }
 
-async fn into_u5c_utxo<S: Domain + LedgerContext>(
+async fn into_u5c_utxo<S: Domain>(
     txo: &TxoRef,
     body: &EraCbor,
-    mapper: &interop::Mapper<S>,
+    mapper: &interop::Mapper<NoInputs>,
     domain: &S,
     block_ref: Option<u5c::query::ChainPoint>,
 ) -> Result<u5c::query::AnyUtxoData, Box<dyn std::error::Error>> {
@@ -856,7 +858,7 @@ async fn into_u5c_utxo<S: Domain + LedgerContext>(
 #[async_trait::async_trait]
 impl<D> u5c::query::query_service_server::QueryService for QueryServiceImpl<D>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
 {
     async fn read_params(
         &self,
@@ -1045,12 +1047,13 @@ where
                     height: block.header().number(),
                     timestamp: self
                         .domain
-                        .get_slot_timestamp(block.slot())
+                        .slot_timestamp(block.slot())
                         .map(|s| s * 1000)
                         .unwrap_or(0),
                 }),
                 chain: Some(u5c::query::any_chain_tx::Chain::Cardano(
-                    self.mapper.map_tx(&tx),
+                    interop::Mapper::new(BlockContext::for_tx(self.domain.clone(), &block, &tx))
+                        .map_tx(&tx),
                 )),
             }),
             ledger_tip: cursor,

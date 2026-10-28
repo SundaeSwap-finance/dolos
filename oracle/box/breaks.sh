@@ -26,8 +26,7 @@ pallas_source() {
 }
 
 plant_rodrigo() {
-  git -C "$ROOT/$SCRATCH" diff 5192df05^ 5192df05 -- src/serve/grpc/block_context.rs |
-    git -C "$ROOT/$SCRATCH" apply -R
+  git -C "$ROOT/$SCRATCH" apply "$HERE/plants/rodrigo.diff"
 }
 
 plant_colret() {

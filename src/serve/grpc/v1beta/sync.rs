@@ -1,9 +1,9 @@
+use crate::serve::ChainReads;
 use futures_core::Stream;
 use futures_util::StreamExt;
 use itertools::Itertools;
 use pallas::interop::utxorpc::v1beta::spec::sync::BlockRef;
 use pallas::interop::utxorpc::v1beta::{spec as u5c, Mapper};
-use pallas::interop::utxorpc::LedgerContext;
 use std::pin::Pin;
 use tonic::{Request, Response, Status};
 
@@ -21,7 +21,7 @@ fn u5c_to_chain_point(block_ref: u5c::sync::BlockRef) -> Result<ChainPoint, Stat
     ))
 }
 
-fn raw_to_anychain<C: LedgerContext>(
+fn raw_to_anychain<C: ChainReads>(
     context: &C,
     body: &BlockBody,
     mask: BlockMask,
@@ -43,7 +43,7 @@ fn raw_to_anychain<C: LedgerContext>(
     }
 }
 
-fn raw_to_blockref<C: LedgerContext>(context: &C, body: &BlockBody) -> Option<u5c::sync::BlockRef> {
+fn raw_to_blockref<C: ChainReads>(context: &C, body: &BlockBody) -> Option<u5c::sync::BlockRef> {
     // A tip reference needs no transaction mapping or input resolution.
     let block = MultiEraBlock::decode(body).unwrap();
     Some(u5c::sync::BlockRef {
@@ -51,7 +51,7 @@ fn raw_to_blockref<C: LedgerContext>(context: &C, body: &BlockBody) -> Option<u5
         hash: block.hash().to_vec().into(),
         height: block.number(),
         timestamp: context
-            .get_slot_timestamp(block.slot())
+            .slot_timestamp(block.slot())
             .map(|s| s * 1000)
             .unwrap_or(0),
     })
@@ -66,7 +66,7 @@ fn point_to_blockref(point: &ChainPoint, timestamp: u64) -> u5c::sync::BlockRef 
     }
 }
 
-fn tip_event_to_response<C: LedgerContext>(
+fn tip_event_to_response<C: ChainReads>(
     context: &C,
     event: &TipEvent,
     mask: BlockMask,
@@ -98,7 +98,7 @@ fn tip_event_to_response<C: LedgerContext>(
 
 pub struct SyncServiceImpl<D, C>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
     C: CancelToken,
 {
     domain: D,
@@ -107,7 +107,7 @@ where
 
 impl<D, C> SyncServiceImpl<D, C>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
     C: CancelToken,
 {
     pub fn new(domain: D, cancel: C) -> Self {
@@ -118,7 +118,7 @@ where
 #[async_trait::async_trait]
 impl<D, C> u5c::sync::sync_service_server::SyncService for SyncServiceImpl<D, C>
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
     C: CancelToken,
 {
     type FollowTipStream =
@@ -313,7 +313,7 @@ where
 
         let timestamp = self
             .domain
-            .get_slot_timestamp(point.slot())
+            .slot_timestamp(point.slot())
             .map(|s| s * 1000)
             .unwrap_or(0);
         let response = u5c::sync::ReadTipResponse {
@@ -328,6 +328,7 @@ where
 mod tests {
     use dolos_testing::toy_domain::ToyDomain;
     use pallas::interop::utxorpc::v1beta::spec::sync::sync_service_server::SyncService as _;
+    use pallas::interop::utxorpc::LedgerContext;
 
     use super::*;
 

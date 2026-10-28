@@ -30,7 +30,7 @@ fn request(bytes: &[u8]) -> Request<EvalTxRequest> {
     })
 }
 
-async fn evaluate<D: Domain + LedgerContext>(domain: &D, bytes: &[u8]) -> u5c::cardano::TxEval {
+async fn evaluate<D: Domain>(domain: &D, bytes: &[u8]) -> u5c::cardano::TxEval {
     let response = SubmitServiceImpl::new(domain.clone())
         .eval_tx(request(bytes))
         .await
@@ -366,18 +366,6 @@ impl Domain for RpcDomain {
     }
     fn notify_tip(&self, tip: TipEvent) {
         self.inner.notify_tip(tip);
-    }
-}
-
-impl LedgerContext for RpcDomain {
-    fn get_utxos(
-        &self,
-        refs: &[pallas::interop::utxorpc::TxoRef],
-    ) -> Option<pallas::interop::utxorpc::UtxoMap> {
-        LedgerContext::get_utxos(&self.inner, refs)
-    }
-    fn get_slot_timestamp(&self, slot: u64) -> Option<u64> {
-        self.inner.get_slot_timestamp(slot)
     }
 }
 

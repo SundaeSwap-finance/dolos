@@ -903,12 +903,12 @@ async fn compare_scripts(
     }
 }
 
-/// The output bytes each service serves for the blocks a run rolled, streamed from the seed point.
+/// The output bytes each service serves for the inputs of the blocks a run rolled.
 async fn serve_rolled(
     domain: &DomainAdapter,
     seed: &SeedPoint,
     rolled: &[&Rolled<'_>],
-) -> [(Service, Served); 3] {
+) -> [(Service, Served); 4] {
     let hashes: Vec<BlockHash> = rolled
         .iter()
         .map(|r| r.point.hash().expect("a rolled block has a hash"))
@@ -917,7 +917,22 @@ async fn serve_rolled(
     let streams = serve::Streams::open(domain, seed.point()).await;
     let [follow, watch] = streams.read(Event::Apply, hashes.len(), txs).await;
     let fetch = serve::fetch_block(domain, &hashes).await;
-    [(Service::FetchBlock, fetch), follow, watch]
+    let tx_hashes: Vec<[u8; 32]> = rolled
+        .iter()
+        .flat_map(|r| &r.records)
+        .map(|record| {
+            let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
+                .unwrap_or_else(|e| panic!("TX n={} {e}", record.n));
+            *tx.hash()
+        })
+        .collect();
+    let read = serve::read_tx(domain, &tx_hashes).await;
+    [
+        (Service::FetchBlock, fetch),
+        follow,
+        watch,
+        (Service::ReadTx, read),
+    ]
 }
 
 /// The verdict on one served output against the ledger's output bytes, none when its bytes and parsed fields agree.

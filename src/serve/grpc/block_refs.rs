@@ -38,7 +38,7 @@ pub async fn fetch_block_refs<D>(
     txo_refs: impl IntoIterator<Item = &TxoRef>,
 ) -> Result<HashMap<TxHash, BlockRefData>, Status>
 where
-    D: Domain + pallas::interop::utxorpc::LedgerContext,
+    D: Domain,
 {
     let unique_hashes: Vec<TxHash> = txo_refs
         .into_iter()

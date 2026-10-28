@@ -1,10 +1,10 @@
 use dolos_core::config::GrpcConfig;
-use pallas::interop::utxorpc::LedgerContext;
 use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 
 use crate::prelude::*;
+use crate::serve::ChainReads;
 
 mod block_context;
 pub(crate) mod block_refs;
@@ -59,7 +59,7 @@ pub struct Driver;
 
 impl<D, C> dolos_core::Driver<D, C> for Driver
 where
-    D: Domain + LedgerContext,
+    D: Domain + ChainReads,
     C: CancelToken,
 {
     type Config = GrpcConfig;

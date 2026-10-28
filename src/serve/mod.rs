@@ -6,6 +6,9 @@ use tracing::info;
 use crate::adapters::DomainAdapter;
 use crate::prelude::*;
 
+mod chain_reads;
+pub use chain_reads::ChainReads;
+
 #[cfg(feature = "grpc")]
 pub mod grpc;
 

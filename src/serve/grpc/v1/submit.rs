@@ -6,7 +6,6 @@ use pallas::crypto::hash::Hash;
 use pallas::interop::utxorpc::v1::spec as u5c;
 use pallas::interop::utxorpc::v1::spec::cardano::ExUnits;
 use pallas::interop::utxorpc::v1::spec::submit::{WaitForTxResponse, *};
-use pallas::interop::utxorpc::LedgerContext;
 use std::collections::HashSet;
 use std::pin::Pin;
 use tonic::{Request, Response, Status};
@@ -16,14 +15,14 @@ use crate::prelude::*;
 
 pub struct SubmitServiceImpl<D>
 where
-    D: Domain + LedgerContext,
+    D: Domain,
 {
     domain: D,
 }
 
 impl<D> SubmitServiceImpl<D>
 where
-    D: Domain + LedgerContext,
+    D: Domain,
 {
     pub fn new(domain: D) -> Self {
         Self { domain }
@@ -133,7 +132,7 @@ fn tx_eval_to_u5c(
 #[async_trait::async_trait]
 impl<D> submit_service_server::SubmitService for SubmitServiceImpl<D>
 where
-    D: Domain + LedgerContext,
+    D: Domain,
 {
     type WaitForTxStream =
         Pin<Box<dyn Stream<Item = Result<WaitForTxResponse, tonic::Status>> + Send + 'static>>;

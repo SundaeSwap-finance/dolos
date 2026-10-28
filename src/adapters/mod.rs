@@ -137,8 +137,8 @@ impl Domain for DomainAdapter {
     }
 }
 
-impl pallas::interop::utxorpc::LedgerContext for DomainAdapter {
-    fn get_utxos(
+impl crate::serve::ChainReads for DomainAdapter {
+    fn utxos(
         &self,
         refs: &[pallas::interop::utxorpc::TxoRef],
     ) -> Option<pallas::interop::utxorpc::UtxoMap> {
@@ -163,7 +163,7 @@ impl pallas::interop::utxorpc::LedgerContext for DomainAdapter {
         Some(result)
     }
 
-    fn get_slot_timestamp(&self, slot: u64) -> Option<u64> {
+    fn slot_timestamp(&self, slot: u64) -> Option<u64> {
         let time = dolos_cardano::eras::load_era_summary::<Self>(self.state())
             .ok()?
             .slot_time(slot);

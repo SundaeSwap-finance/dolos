@@ -1,13 +1,28 @@
-//! Resolved inputs shared by all transaction mappings in one block response.
+//! Resolved inputs for the transaction mappings of one block response.
 //! The map is discarded after the response; no state survives a rollback.
 use pallas::{
     interop::utxorpc::{LedgerContext, TxoRef, UtxoMap},
-    ledger::traverse::MultiEraBlock,
+    ledger::traverse::{MultiEraBlock, MultiEraTx},
 };
 use std::{collections::HashSet, sync::Arc};
 
+use crate::serve::ChainReads;
+
+/// A ledger context that holds no outputs, for mapping values that name no inputs.
+#[derive(Clone, Default)]
+pub(super) struct NoInputs;
+
+impl LedgerContext for NoInputs {
+    fn get_utxos(&self, _: &[TxoRef]) -> Option<UtxoMap> {
+        None
+    }
+    fn get_slot_timestamp(&self, _: u64) -> Option<u64> {
+        None
+    }
+}
+
 #[derive(Clone)]
-pub(super) struct BlockContext<C: LedgerContext> {
+pub(super) struct BlockContext<C: ChainReads> {
     inner: C,
     resolved: Option<Arc<UtxoMap>>,
     made: Arc<UtxoMap>,
@@ -27,34 +42,45 @@ fn made_outputs(block: &MultiEraBlock<'_>) -> UtxoMap {
         .collect()
 }
 
-impl<C: LedgerContext> BlockContext<C> {
+/// The inputs, collateral inputs and reference inputs a transaction names.
+fn named_inputs(tx: &MultiEraTx<'_>) -> Vec<TxoRef> {
+    tx.inputs()
+        .into_iter()
+        .chain(tx.collateral())
+        .chain(tx.reference_inputs())
+        .map(|i| (*i.hash(), i.index() as u32))
+        .collect()
+}
+
+impl<C: ChainReads> BlockContext<C> {
     pub(super) fn new(inner: C, block: &MultiEraBlock<'_>) -> Self {
+        Self::resolving(inner, block, &block.txs())
+    }
+
+    /// A context for mapping one transaction of a block, resolving only the inputs that transaction names.
+    pub(super) fn for_tx(inner: C, block: &MultiEraBlock<'_>, tx: &MultiEraTx<'_>) -> Self {
+        Self::resolving(inner, block, std::slice::from_ref(tx))
+    }
+
+    fn resolving(inner: C, block: &MultiEraBlock<'_>, txs: &[MultiEraTx<'_>]) -> Self {
         let start = std::time::Instant::now();
-        let refs: HashSet<TxoRef> = block
-            .txs()
+        let refs: HashSet<TxoRef> = txs
             .iter()
             .flat_map(|tx| {
                 // The v1 mapper resolves every child separately. Its inputs
                 // need not also occur in the parent's reference inputs.
-                std::iter::once(tx)
-                    .chain(tx.sub_transactions().iter())
-                    .flat_map(|member| {
-                        member
-                            .inputs()
-                            .into_iter()
-                            .chain(member.collateral())
-                            .chain(member.reference_inputs())
-                            .map(|i| (*i.hash(), i.index() as u32))
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>()
+                let mut refs = named_inputs(tx);
+                for sub in tx.sub_transactions() {
+                    refs.extend(named_inputs(&sub));
+                }
+                refs
             })
             .collect();
         let refs: Vec<_> = refs.into_iter().collect();
         let resolved = if refs.is_empty() {
             Some(UtxoMap::new())
         } else {
-            inner.get_utxos(&refs)
+            inner.utxos(&refs)
         };
         tracing::trace!(slot = block.slot(), input_count = refs.len(),
             resolved_count = resolved.as_ref().map(|x| x.len()),
@@ -67,7 +93,7 @@ impl<C: LedgerContext> BlockContext<C> {
     }
 }
 
-impl<C: LedgerContext> LedgerContext for BlockContext<C> {
+impl<C: ChainReads> LedgerContext for BlockContext<C> {
     fn get_utxos(&self, refs: &[TxoRef]) -> Option<UtxoMap> {
         // An output the block makes is served from the block, so applying and
         // undoing the block serve the same output.
@@ -81,13 +107,13 @@ impl<C: LedgerContext> LedgerContext for BlockContext<C> {
                 .filter_map(|r| resolved.get(r).map(|v| (*r, v.clone())))
                 .collect(),
             // Preserve the old per-transaction behavior if the bulk read failed.
-            None => self.inner.get_utxos(&outside)?,
+            None => self.inner.utxos(&outside)?,
         };
         found.extend(made.iter().map(|r| (*r, self.made[r].clone())));
         Some(found)
     }
     fn get_slot_timestamp(&self, slot: u64) -> Option<u64> {
-        self.inner.get_slot_timestamp(slot)
+        self.inner.slot_timestamp(slot)
     }
 }
 

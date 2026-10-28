@@ -1,0 +1,17 @@
+diff --git a/src/serve/grpc/block_context.rs b/src/serve/grpc/block_context.rs
+index 87249add..5d7add64 100644
+--- a/src/serve/grpc/block_context.rs
++++ b/src/serve/grpc/block_context.rs
+@@ -68,11 +68,3 @@ impl<C: ChainReads> BlockContext<C> {
+             .iter()
+-            .flat_map(|tx| {
+-                // The v1 mapper resolves every child separately. Its inputs
+-                // need not also occur in the parent's reference inputs.
+-                let mut refs = named_inputs(tx);
+-                for sub in tx.sub_transactions() {
+-                    refs.extend(named_inputs(&sub));
+-                }
+-                refs
+-            })
++            .flat_map(named_inputs)
+             .collect();
