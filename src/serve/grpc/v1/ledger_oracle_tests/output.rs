@@ -9,7 +9,33 @@ use pallas::{
     },
 };
 
+use std::fmt;
+
 use super::super::spec::cardano;
+
+/// A part of a served output compared against the ledger's output bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OutputField {
+    Address,
+    Coin,
+    Assets,
+    Datum,
+    Script,
+    ParsedState,
+}
+
+impl fmt::Display for OutputField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            OutputField::Address => "address",
+            OutputField::Coin => "coin",
+            OutputField::Assets => "assets",
+            OutputField::Datum => "datum",
+            OutputField::Script => "script",
+            OutputField::ParsedState => "parsed_state",
+        })
+    }
+}
 
 /// An integer as CBOR states it, its sign and the big endian magnitude, without leading zeros, of the value when nonnegative or of minus one minus the value when negative.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -318,11 +344,11 @@ impl LedgerOutput {
     }
 }
 
-/// The names of the fields of a served output that state other values than the ledger's output bytes hold.
+/// The fields of a served output that state other values than the ledger's output bytes hold.
 pub(super) fn differing(
     ledger: &[u8],
     served: &cardano::TxOutput,
-) -> Result<Vec<&'static str>, minicbor::decode::Error> {
+) -> Result<Vec<OutputField>, minicbor::decode::Error> {
     let ledger = LedgerOutput::decode(ledger)?;
     let coin = served.coin.as_ref().and_then(Integer::served);
     let assets = served.assets.iter().flat_map(|policy| {
@@ -342,11 +368,14 @@ pub(super) fn differing(
         (None, Some(_)) | (Some(_), None) => false,
     };
     let fields = [
-        ("address", served.address == ledger.address),
-        ("coin", coin == Some(ledger.coin)),
-        ("assets", assets == Some(ledger.assets)),
-        ("datum", ledger.datum.agrees(served.datum.as_ref())),
-        ("script", script),
+        (OutputField::Address, served.address == ledger.address),
+        (OutputField::Coin, coin == Some(ledger.coin)),
+        (OutputField::Assets, assets == Some(ledger.assets)),
+        (
+            OutputField::Datum,
+            ledger.datum.agrees(served.datum.as_ref()),
+        ),
+        (OutputField::Script, script),
     ];
     let differing = fields.into_iter().filter(|(_, same)| !same);
     Ok(differing.map(|(name, _)| name).collect())
@@ -488,26 +517,27 @@ mod tests {
             assert!(differing.is_empty(), "{} {differing:?}", hex::encode(bytes));
         }
         type Change = fn(&mut cardano::TxOutput);
-        let changes: [(&[u8], &str, Change); 11] = [
-            (&first, "address", |o| o.address = vec![0x61; 29].into()),
-            (&first, "coin", |o| o.coin = None),
-            (&first, "coin", |o| o.coin = bigint(1)),
-            (&first, "assets", |o| o.assets.clear()),
-            (&first, "assets", |o| {
+        use OutputField as F;
+        let changes: [(&[u8], OutputField, Change); 11] = [
+            (&first, F::Address, |o| o.address = vec![0x61; 29].into()),
+            (&first, F::Coin, |o| o.coin = None),
+            (&first, F::Coin, |o| o.coin = bigint(1)),
+            (&first, F::Assets, |o| o.assets.clear()),
+            (&first, F::Assets, |o| {
                 o.assets[0].assets[0].quantity = bigint(987_654_321_987)
             }),
-            (&first, "datum", |o| {
+            (&first, F::Datum, |o| {
                 o.datum.as_mut().unwrap().payload = None
             }),
-            (&first, "datum", |o| o.datum = None),
-            (&first, "script", |o| o.script = None),
-            (&second, "datum", |o| {
+            (&first, F::Datum, |o| o.datum = None),
+            (&first, F::Script, |o| o.script = None),
+            (&second, F::Datum, |o| {
                 o.datum.as_mut().unwrap().hash = vec![0; 32].into()
             }),
-            (&second, "datum", |o| {
+            (&second, F::Datum, |o| {
                 o.datum.as_mut().unwrap().original_cbor = Some(vec![0x05].into())
             }),
-            (&second, "script", |o| o.script = None),
+            (&second, F::Script, |o| o.script = None),
         ];
         for (bytes, field, change) in changes {
             let mut served = mapped(bytes);

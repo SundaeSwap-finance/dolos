@@ -37,6 +37,7 @@ use ledger_oracle_judge::{
         FailingMaker, Maker, Outcome, Pass, ValidationTally,
     },
 };
+use output::OutputField;
 use pallas::{
     codec::{
         minicbor,
@@ -49,9 +50,9 @@ use pallas::{
     },
 };
 use seed::SeedPoint;
-use validate::Relay;
 use serve::{Event, Served, Service};
 use tonic::{Request, Status};
+use validate::Relay;
 
 use super::{
     query::QueryServiceImpl,
@@ -133,17 +134,17 @@ async fn read_utxo_data<'a>(
         .collect()
 }
 
-/// The names of the fields of a served output that state other values than the ledger's output bytes, only `parsed_state` when Dolos serves no parsed output.
+/// The fields of a served output that state other values than the ledger's output bytes, only `ParsedState` when Dolos serves no parsed output.
 fn parsed_differing(
     id: RecordId,
     ledger: &[u8],
     parsed: Option<&cardano::TxOutput>,
-) -> Vec<&'static str> {
+) -> Vec<OutputField> {
     match parsed {
         Some(parsed) => {
             output::differing(ledger, parsed).unwrap_or_else(|e| panic!("OUTPUT {id} {e}"))
         }
-        None => vec!["parsed_state"],
+        None => vec![OutputField::ParsedState],
     }
 }
 
@@ -181,7 +182,10 @@ async fn compare_utxos<'a>(
             let shown = show_input(input);
             match fields.is_empty() {
                 true => format!("{id} input={shown} {verdict}"),
-                false => format!("{id} input={shown} {verdict} fields={}", fields.join(",")),
+                false => format!(
+                    "{id} input={shown} {verdict} fields={}",
+                    fields.iter().join(",")
+                ),
             }
         });
     }
@@ -664,19 +668,39 @@ impl TxParts {
         })
     }
 
-    /// The names of the parts that differ between two transactions.
-    fn differing(&self, other: &TxParts) -> Vec<&'static str> {
+    /// The parts that differ between two transactions.
+    fn differing(&self, other: &TxParts) -> Vec<TxPart> {
         let parts = [
-            ("body", self.body == other.body),
-            ("witness", self.witness == other.witness),
-            ("auxiliary", self.auxiliary == other.auxiliary),
-            ("success", self.success == other.success),
+            (TxPart::Body, self.body == other.body),
+            (TxPart::Witness, self.witness == other.witness),
+            (TxPart::Auxiliary, self.auxiliary == other.auxiliary),
+            (TxPart::Success, self.success == other.success),
         ];
         parts
             .into_iter()
             .filter(|(_, same)| !same)
             .map(|(name, _)| name)
             .collect()
+    }
+}
+
+/// A part of a transaction compared between the ledger's records and what ReadTx serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TxPart {
+    Body,
+    Witness,
+    Auxiliary,
+    Success,
+}
+
+impl fmt::Display for TxPart {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            TxPart::Body => "body",
+            TxPart::Witness => "witness",
+            TxPart::Auxiliary => "auxiliary",
+            TxPart::Success => "success",
+        })
     }
 }
 
@@ -768,7 +792,7 @@ async fn compare_read_tx(
                 let ledger =
                     TxParts::ledger(e.tx, e.phase2).unwrap_or_else(|err| panic!("TX {id} {err}"));
                 let differing = match TxParts::block(&served.bytes) {
-                    Ok(parts) => ledger.differing(&parts).join(","),
+                    Ok(parts) => ledger.differing(&parts).iter().join(","),
                     Err(err) => format!("undecoded {err}"),
                 };
                 let block = served.block;
@@ -957,7 +981,7 @@ fn served_verdict(
     match (verdict.agrees(), fields.is_empty()) {
         (true, true) => None,
         (_, true) => Some(verdict.to_string()),
-        (_, false) => Some(format!("{verdict} fields={}", fields.join(","))),
+        (_, false) => Some(format!("{verdict} fields={}", fields.iter().join(","))),
     }
 }
 
