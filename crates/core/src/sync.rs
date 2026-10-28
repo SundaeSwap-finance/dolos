@@ -14,7 +14,8 @@ use tracing::{debug, info, instrument, warn};
 
 use crate::{
     ArchiveStore as _, ArchiveWriter as _, BlockSlot, ChainLogic, ChainPoint, Domain, DomainError,
-    EntityMap, MempoolStore, RawBlock, StateStore, StateWriter as _, TipEvent, WalStore, WorkUnit,
+    EntityMap, MempoolStore, RawBlock, StateStore, StateWriter as _, SubmitExt as _, TipEvent,
+    WalStore, WorkUnit,
 };
 
 const MEMPOOL_FINALIZE_THRESHOLD: u32 = 6;
@@ -71,6 +72,8 @@ impl<D: Domain> SyncExt for D {
 
         drain_pending_work::<D>(&mut *chain, self)?;
 
+        revalidate_mempool(self, &chain);
+
         Ok(last)
     }
 
@@ -100,6 +103,7 @@ impl<D: Domain> SyncExt for D {
         }
 
         drain_pending_work::<D>(&mut *chain, self)?;
+        revalidate_mempool(self, &chain);
         Ok(last)
     }
 
@@ -189,7 +193,16 @@ impl<D: Domain> SyncExt for D {
 
         self.wal().truncate_front(to)?;
 
+        revalidate_mempool(self, &self.read_chain());
+
         Ok(())
+    }
+}
+
+/// Drops the pending transactions the ledger refuses once the state has moved.
+fn revalidate_mempool<D: Domain>(domain: &D, chain: &D::Chain) {
+    if let Err(e) = domain.revalidate_pending(chain) {
+        warn!(?e, "mempool revalidation failed");
     }
 }
 

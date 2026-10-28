@@ -61,6 +61,10 @@ impl MempoolStore for MockMempoolStore {
         Ok(())
     }
 
+    fn drop_pending(&self, _hashes: &[TxHash]) -> Result<(), MempoolError> {
+        Ok(())
+    }
+
     fn check_status(&self, _hash: &TxHash) -> TxStatus {
         TxStatus {
             stage: MempoolTxStage::Unknown,

@@ -292,6 +292,37 @@ impl MempoolStore for EphemeralMempool {
         Ok(())
     }
 
+    fn drop_pending(&self, hashes: &[TxHash]) -> Result<(), MempoolError> {
+        let hash_set: HashSet<_> = hashes.iter().collect();
+        let mut state = self.state.write().unwrap();
+
+        let mut dropped = Vec::new();
+        state.pending.retain(|tx| {
+            if hash_set.contains(&tx.hash) {
+                dropped.push(tx.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        for mut tx in dropped {
+            tx.stage = MempoolTxStage::Dropped;
+            state.finalized_log.push_back(tx.clone());
+            debug!(tx.hash = %tx.hash, "pending tx dropped");
+            self.notify(tx);
+        }
+
+        if state.finalized_log.len() > MAX_FINALIZED_LOG {
+            let excess = state.finalized_log.len() - MAX_FINALIZED_LOG;
+            state.finalized_log.drain(..excess);
+        }
+
+        self.log_state(&state);
+
+        Ok(())
+    }
+
     fn check_status(&self, tx_hash: &TxHash) -> TxStatus {
         let state = self.state.read().unwrap();
 

@@ -228,6 +228,9 @@ pub trait MempoolStore: Clone + Send + Sync + 'static {
     /// confirmation count, and the chain point where it was first confirmed.
     fn check_status(&self, tx_hash: &TxHash) -> TxStatus;
 
+    /// Moves matching pending transactions to the finalized log as `Dropped`, ignoring hashes not pending.
+    fn drop_pending(&self, hashes: &[TxHash]) -> Result<(), MempoolError>;
+
     /// Paginate through finalized transactions.
     ///
     /// `cursor` is a sequence number assigned at finalization time. Returns a
@@ -285,16 +288,38 @@ impl<M: MempoolStore> Stream for UpdateFilter<M> {
 pub struct MempoolAwareUtxoStore<'a, D: Domain> {
     inner: &'a D::State,
     mempool: &'a D::Mempool,
+    pending: Pending,
 }
 
-fn scan_mempool_utxos<D: Domain, F>(predicate: F, mempool: &D::Mempool) -> HashSet<TxoRef>
+/// The pending transactions a mempool aware view counts.
+enum Pending {
+    /// The pending queue of the mempool, read at each use.
+    Queue,
+    /// The given transactions, in place of the pending queue.
+    Only(Vec<MempoolTx>),
+}
+
+impl<D: Domain> MempoolAwareUtxoStore<'_, D> {
+    /// The pending transactions this view counts.
+    pub fn pending(&self) -> Vec<MempoolTx> {
+        match &self.pending {
+            Pending::Queue => self.mempool.peek_pending(),
+            Pending::Only(txs) => txs.clone(),
+        }
+    }
+
+    fn unconfirmed(&self) -> Vec<MempoolTx> {
+        let mut all_txs = self.pending();
+        all_txs.extend(self.mempool.peek_inflight());
+        all_txs
+    }
+}
+
+fn scan_mempool_utxos<F>(predicate: F, all_txs: Vec<MempoolTx>) -> HashSet<TxoRef>
 where
     F: Fn(&MultiEraOutput<'_>) -> bool,
 {
     let mut refs = HashSet::new();
-
-    let mut all_txs = mempool.peek_pending();
-    all_txs.extend(mempool.peek_inflight());
 
     for mtx in all_txs {
         let era_cbor = &mtx.payload;
@@ -316,11 +341,8 @@ where
     refs
 }
 
-fn exclude_inflight_stxis<D: Domain>(refs: &mut HashSet<TxoRef>, mempool: &D::Mempool) {
+fn exclude_inflight_stxis(refs: &mut HashSet<TxoRef>, all_txs: Vec<MempoolTx>) {
     debug!("excluding inflight stxis");
-
-    let mut all_txs = mempool.peek_pending();
-    all_txs.extend(mempool.peek_inflight());
 
     for mtx in all_txs {
         let era_cbor = &mtx.payload;
@@ -340,11 +362,8 @@ fn exclude_inflight_stxis<D: Domain>(refs: &mut HashSet<TxoRef>, mempool: &D::Me
     }
 }
 
-fn select_mempool_utxos<D: Domain>(refs: &mut HashSet<TxoRef>, mempool: &D::Mempool) -> UtxoMap {
+fn select_mempool_utxos(refs: &mut HashSet<TxoRef>, all_txs: Vec<MempoolTx>) -> UtxoMap {
     let mut map = HashMap::new();
-
-    let mut all_txs = mempool.peek_pending();
-    all_txs.extend(mempool.peek_inflight());
 
     for mtx in all_txs {
         let era_cbor = &mtx.payload;
@@ -372,7 +391,24 @@ fn select_mempool_utxos<D: Domain>(refs: &mut HashSet<TxoRef>, mempool: &D::Memp
 
 impl<'a, D: Domain> MempoolAwareUtxoStore<'a, D> {
     pub fn new(inner: &'a D::State, mempool: &'a D::Mempool) -> Self {
-        Self { inner, mempool }
+        Self {
+            inner,
+            mempool,
+            pending: Pending::Queue,
+        }
+    }
+
+    /// A view that counts `pending` in place of the mempool's pending queue.
+    pub fn with_pending(
+        inner: &'a D::State,
+        mempool: &'a D::Mempool,
+        pending: Vec<MempoolTx>,
+    ) -> Self {
+        Self {
+            inner,
+            mempool,
+            pending: Pending::Only(pending),
+        }
     }
 
     pub fn state(&self) -> &D::State {
@@ -397,21 +433,21 @@ impl<'a, D: Domain> MempoolAwareUtxoStore<'a, D> {
     where
         F: Fn(&MultiEraOutput<'_>) -> bool,
     {
-        let from_mempool = scan_mempool_utxos::<D, _>(predicate, self.mempool);
+        let from_mempool = scan_mempool_utxos(predicate, self.unconfirmed());
 
         let mut utxos = self.inner.utxos_by_tag(dimension, key)?;
 
         utxos.extend(from_mempool);
 
-        exclude_inflight_stxis::<D>(&mut utxos, self.mempool);
+        exclude_inflight_stxis(&mut utxos, self.unconfirmed());
 
         Ok(utxos)
     }
 
     pub fn get_utxos(&self, mut refs: HashSet<TxoRef>) -> Result<UtxoMap, StateError> {
-        exclude_inflight_stxis::<D>(&mut refs, self.mempool);
+        exclude_inflight_stxis(&mut refs, self.unconfirmed());
 
-        let from_mempool = select_mempool_utxos::<D>(&mut refs, self.mempool);
+        let from_mempool = select_mempool_utxos(&mut refs, self.unconfirmed());
 
         let mut utxos = self.inner.get_utxos(Vec::from_iter(refs))?;
 
@@ -487,6 +523,10 @@ mod tests {
             _finalize_threshold: u32,
             _drop_threshold: u32,
         ) -> Result<(), MempoolError> {
+            Ok(())
+        }
+
+        fn drop_pending(&self, _hashes: &[TxHash]) -> Result<(), MempoolError> {
             Ok(())
         }
 

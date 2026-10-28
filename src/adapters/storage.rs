@@ -1409,6 +1409,13 @@ impl MempoolStore for MempoolBackend {
         }
     }
 
+    fn drop_pending(&self, hashes: &[TxHash]) -> Result<(), MempoolError> {
+        match self {
+            Self::Ephemeral(s) => s.drop_pending(hashes),
+            Self::Redb(s) => s.drop_pending(hashes),
+        }
+    }
+
     fn dump_finalized(&self, cursor: u64, limit: usize) -> dolos_core::MempoolPage {
         match self {
             Self::Ephemeral(s) => s.dump_finalized(cursor, limit),

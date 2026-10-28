@@ -597,7 +597,7 @@ fn synced_balance(
 
 /// The mempool transactions the synced state does not reflect yet, inflight before pending, each once.
 fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx> {
-    let pending = utxos.mempool().peek_pending();
+    let pending = utxos.pending();
     let inflight = utxos.mempool().peek_inflight();
     // Relay can move a transaction between these two reads. Count it once.
     let mut seen = std::collections::HashSet::new();

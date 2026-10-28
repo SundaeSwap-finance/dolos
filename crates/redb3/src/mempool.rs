@@ -943,6 +943,26 @@ impl MempoolStore for RedbMempool {
         Ok(())
     }
 
+    fn drop_pending(&self, hashes: &[TxHash]) -> Result<(), MempoolError> {
+        let hash_set: HashSet<TxHash> = hashes.iter().copied().collect();
+
+        self.with_write_tx(|wx| {
+            let drained = PendingTable::drain_by_hashes(wx, &hash_set)?;
+            let mut events = Vec::new();
+            for (hash, payload) in drained {
+                let record = InflightRecord::new(payload);
+                let mut tx = record.to_mempool_tx(hash);
+                FinalizedTable::append(wx, record.into_dropped_entry(hash))?;
+                tx.stage = MempoolTxStage::Dropped;
+                debug!(tx.hash = %tx.hash, "pending tx dropped");
+                events.push(tx);
+            }
+            Ok(events)
+        })?;
+
+        Ok(())
+    }
+
     fn check_status(&self, tx_hash: &TxHash) -> TxStatus {
         let rx = match self.db.begin_read() {
             Ok(rx) => rx,

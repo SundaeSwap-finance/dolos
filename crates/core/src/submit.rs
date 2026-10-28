@@ -88,6 +88,43 @@ pub trait SubmitExt: Domain {
 
         Ok(hash)
     }
+
+    /// Validates each pending transaction again, in arrival order, and drops those the ledger now refuses.
+    fn revalidate_pending(&self, chain: &Self::Chain) -> Result<Vec<TxHash>, DomainError> {
+        if !self.mempool().has_pending() {
+            return Ok(vec![]);
+        }
+
+        let _guard = match SUBMIT_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        let tip = self.state().read_cursor()?;
+        let genesis = self.genesis();
+        let mut kept = Vec::new();
+        let mut refused = Vec::new();
+
+        // Each transaction is judged after the pending transactions kept before it.
+        for tx in self.mempool().peek_pending() {
+            let utxos = MempoolAwareUtxoStore::<'_, Self>::with_pending(
+                self.state(),
+                self.mempool(),
+                kept.clone(),
+            );
+            match chain.validate_tx(&tx.payload.1, &utxos, tip.clone(), &genesis) {
+                Ok(_) => kept.push(tx),
+                Err(error) => {
+                    debug!(tx.hash = %tx.hash, %error, "pending tx refused on revalidation");
+                    refused.push(tx.hash);
+                }
+            }
+        }
+
+        self.mempool().drop_pending(&refused)?;
+
+        Ok(refused)
+    }
 }
 
 impl<D: Domain> SubmitExt for D {}

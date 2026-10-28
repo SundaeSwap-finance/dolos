@@ -88,6 +88,10 @@ impl MempoolStore for Mempool {
         Ok(())
     }
 
+    fn drop_pending(&self, _hashes: &[TxHash]) -> Result<(), MempoolError> {
+        Ok(())
+    }
+
     fn check_status(&self, _tx_hash: &TxHash) -> TxStatus {
         TxStatus {
             stage: MempoolTxStage::Unknown,

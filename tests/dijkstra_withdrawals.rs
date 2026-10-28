@@ -433,6 +433,105 @@ fn confirmation_rollback_and_drop_update_withdrawal_reservations() {
     domain.validate_tx(&domain.read_chain(), &txs[2]).unwrap();
 }
 
+// Unregisters the synthetic credential and returns a transaction that registers it.
+fn registration(domain: &WithdrawalDomain, txs: &[Vec<u8>], credential: &n::StakeCredential) -> Vec<u8> {
+    let key = minicbor::to_vec(credential).unwrap().into();
+    let w = domain.state().start_writer().unwrap();
+    w.delete_entity(AccountState::NS, &key).unwrap();
+    w.commit().unwrap();
+    let deposit = dolos_cardano::load_effective_pparams::<WithdrawalDomain>(domain.state())
+        .unwrap()
+        .key_deposit()
+        .unwrap();
+    let template = MultiEraTx::decode_for_era(Era::Dijkstra, &txs[0]).unwrap();
+    let mut tx = template.as_dijkstra().unwrap().clone();
+    let n::TransactionOutput::PostAlonzo(output) = &tx.transaction_body.outputs[0] else {
+        unreachable!()
+    };
+    let address = output.address.clone();
+    let output = |coin| {
+        n::TransactionOutput::PostAlonzo(
+            n::PostAlonzoTransactionOutput {
+                address: address.clone(),
+                value: n::Value::Coin(coin),
+                datum_option: None,
+                script_ref: None,
+            }
+            .into(),
+        )
+    };
+    let input = n::TransactionInput {
+        transaction_id: [120; 32].into(),
+        index: 0,
+    };
+    let mut delta = UtxoSetDelta::default();
+    delta.produced_utxo.insert(
+        TxoRef(input.transaction_id, 0),
+        Arc::new(EraCbor(8, minicbor::to_vec(output(20_000_000)).unwrap())),
+    );
+    let w = domain.state().start_writer().unwrap();
+    w.apply_utxoset(&delta).unwrap();
+    w.commit().unwrap();
+    tx.transaction_body.outputs =
+        MaybeIndefArray::Def(vec![output(20_000_000 - 1_000_000 - deposit)]);
+    tx.transaction_body.inputs = n::Set::from(vec![input]);
+    tx.transaction_body.withdrawals = None;
+    tx.transaction_body.fee = 1_000_000;
+    tx.transaction_body.certificates =
+        n::NonEmptySet::from_vec(vec![n::Certificate::Reg(credential.clone(), deposit)]);
+    let key = SecretKey::from([73; 32]);
+    let hash = Hasher::<256>::hash(&minicbor::to_vec(&tx.transaction_body).unwrap());
+    tx.transaction_witness_set.vkeywitness = n::NonEmptySet::from_vec(vec![n::VKeyWitness {
+        vkey: key.public_key().as_ref().to_vec().into(),
+        signature: key.sign(hash).as_ref().to_vec().into(),
+    }]);
+    minicbor::to_vec(tx.to_mempool_transaction()).unwrap()
+}
+
+#[test]
+fn revalidation_keeps_pending_transactions_the_ledger_still_accepts() {
+    let (domain, txs, credential) = synthetic(&[0], 0);
+    let register = registration(&domain, &txs, &credential);
+    assert_rejected(&domain, &txs[0], "unregistered account");
+    let a = domain
+        .receive_tx("register", &domain.read_chain(), &register)
+        .unwrap();
+    let t = domain
+        .receive_tx("withdraw", &domain.read_chain(), &txs[0])
+        .unwrap();
+    assert_eq!(domain.revalidate_pending(&domain.read_chain()).unwrap(), Vec::<TxHash>::new());
+    let pending: Vec<_> = domain.mempool().peek_pending().iter().map(|x| x.hash).collect();
+    assert_eq!(pending, vec![a, t]);
+    domain.mempool().mark_inflight(&[a]).unwrap();
+    assert_eq!(domain.revalidate_pending(&domain.read_chain()).unwrap(), Vec::<TxHash>::new());
+    assert_eq!(domain.mempool().check_status(&t).stage, MempoolTxStage::Pending);
+}
+
+#[test]
+fn a_pending_withdrawal_is_dropped_once_its_registration_is_dropped() {
+    let (domain, txs, credential) = synthetic(&[0], 0);
+    let register = registration(&domain, &txs, &credential);
+    let a = domain
+        .receive_tx("register", &domain.read_chain(), &register)
+        .unwrap();
+    domain.mempool().mark_inflight(&[a]).unwrap();
+    let t = domain
+        .receive_tx("withdraw", &domain.read_chain(), &txs[0])
+        .unwrap();
+    domain
+        .mempool()
+        .confirm(&ChainPoint::Slot(1400011), &[], &[], 10, 1)
+        .unwrap();
+    assert_eq!(domain.revalidate_pending(&domain.read_chain()).unwrap(), vec![t]);
+    assert!(domain.mempool().peek_pending().is_empty());
+    let finalized = domain.mempool().dump_finalized(0, 10);
+    let stages: Vec<_> = finalized.items.iter().map(|x| (x.hash, x.stage.clone())).collect();
+    assert_eq!(
+        stages,
+        vec![(a, MempoolTxStage::Dropped), (t, MempoolTxStage::Dropped)]
+    );
+}
+
 #[test]
 fn absent_deregistered_and_unreadable_accounts_do_not_become_zero_balances() {
     let (domain, txs, credential) = synthetic(&[0], 0);
