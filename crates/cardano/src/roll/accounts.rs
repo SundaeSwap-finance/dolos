@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     pallas_extras, roll::BlockVisitor, ControlledAmountDec, ControlledAmountInc, DirectDeposit,
-    EnqueueMir, PParamsSet, StakeDelegation, StakeDeregistration, StakeRegistration,
+    EnqueueMir, EraProtocol, PParamsSet, StakeDelegation, StakeDeregistration, StakeRegistration,
     VoteDelegation, WithdrawalInc,
 };
 
@@ -42,6 +42,7 @@ pub struct AccountVisitor {
     /// Pre-Alonzo (< 5): MIRs overwrite previous values.
     /// Alonzo+ (>= 5): MIRs accumulate.
     protocol_version: Option<u16>,
+    era: Option<EraProtocol>,
 }
 
 impl BlockVisitor for AccountVisitor {
@@ -53,11 +54,12 @@ impl BlockVisitor for AccountVisitor {
         pparams: &PParamsSet,
         epoch: Epoch,
         _: u64,
-        _: u16,
+        protocol: u16,
     ) -> Result<(), ChainError> {
         self.deposit = pparams.ensure_key_deposit().ok();
         self.epoch = Some(epoch);
         self.protocol_version = pparams.protocol_major();
+        self.era = Some(EraProtocol::from(protocol));
         Ok(())
     }
 
@@ -70,8 +72,9 @@ impl BlockVisitor for AccountVisitor {
         resolved: &MultiEraOutput,
     ) -> Result<(), ChainError> {
         let address = resolved.address().unwrap();
+        let era = self.era.expect("value set in root");
 
-        let Some((cred, is_pointer)) = pallas_extras::address_as_stake_cred(&address) else {
+        let Some((cred, is_pointer)) = pallas_extras::address_as_stake_cred(&address, era) else {
             return Ok(());
         };
 
@@ -94,8 +97,9 @@ impl BlockVisitor for AccountVisitor {
     ) -> Result<(), ChainError> {
         let address = output.address().expect("valid address");
         let epoch = self.epoch.expect("value set in root");
+        let era = self.era.expect("value set in root");
 
-        let Some((cred, is_pointer)) = pallas_extras::address_as_stake_cred(&address) else {
+        let Some((cred, is_pointer)) = pallas_extras::address_as_stake_cred(&address, era) else {
             return Ok(());
         };
 
@@ -184,8 +188,9 @@ impl BlockVisitor for AccountVisitor {
         amount: u64,
     ) -> Result<(), ChainError> {
         let address = Address::from_bytes(account)?;
+        let era = self.era.expect("value set in root");
 
-        let Some((cred, _)) = pallas_extras::address_as_stake_cred(&address) else {
+        let Some((cred, _)) = pallas_extras::address_as_stake_cred(&address, era) else {
             return Ok(());
         };
 
@@ -203,8 +208,9 @@ impl BlockVisitor for AccountVisitor {
         amount: u64,
     ) -> Result<(), ChainError> {
         let address = Address::from_bytes(account)?;
+        let era = self.era.expect("value set in root");
 
-        let Some((cred, _)) = pallas_extras::address_as_stake_cred(&address) else {
+        let Some((cred, _)) = pallas_extras::address_as_stake_cred(&address, era) else {
             return Ok(());
         };
 

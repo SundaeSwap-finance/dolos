@@ -4,8 +4,8 @@ use pallas::ledger::addresses::{Address, Network, StakeAddress, StakePayload};
 use pallas::ledger::primitives::StakeCredential;
 
 use crate::{
-    pallas_extras, AccountState, DRepDelegation, EpochValue, PoolDelegation, PoolHash, PoolParams,
-    PoolSnapshot, PoolState, Stake,
+    pallas_extras, AccountState, DRepDelegation, EpochValue, EraProtocol, PoolDelegation, PoolHash,
+    PoolParams, PoolSnapshot, PoolState, Stake,
 };
 
 use pallas::crypto::hash::Hash;
@@ -74,7 +74,7 @@ fn parse_pool(dto: &ConfigPool) -> PoolState {
     }
 }
 
-fn find_initial_utxo_sum(credential: &StakeCredential, genesis: &Genesis) -> u64 {
+fn find_initial_utxo_sum(credential: &StakeCredential, genesis: &Genesis, era: EraProtocol) -> u64 {
     let Some(initial_funds) = &genesis.shelley.initial_funds else {
         return 0;
     };
@@ -82,7 +82,7 @@ fn find_initial_utxo_sum(credential: &StakeCredential, genesis: &Genesis) -> u64
     for (address, amount) in initial_funds {
         let address: Address = address.parse().unwrap();
 
-        if let Some((candidate, _)) = pallas_extras::address_as_stake_cred(&address) {
+        if let Some((candidate, _)) = pallas_extras::address_as_stake_cred(&address, era) {
             if credential == &candidate {
                 return *amount;
             }
@@ -92,7 +92,12 @@ fn find_initial_utxo_sum(credential: &StakeCredential, genesis: &Genesis) -> u64
     0
 }
 
-fn parse_delegation(account: &str, pool: &str, genesis: &Genesis) -> AccountState {
+fn parse_delegation(
+    account: &str,
+    pool: &str,
+    genesis: &Genesis,
+    era: EraProtocol,
+) -> AccountState {
     let keyhash: Hash<28> = account.parse().unwrap();
     let credential = StakeCredential::AddrKeyhash(keyhash);
 
@@ -102,7 +107,7 @@ fn parse_delegation(account: &str, pool: &str, genesis: &Genesis) -> AccountStat
         rewards_sum: 0,
         withdrawals_sum: 0,
         utxo_sum_at_pointer_addresses: 0,
-        utxo_sum: find_initial_utxo_sum(&credential, genesis),
+        utxo_sum: find_initial_utxo_sum(&credential, genesis, era),
     };
 
     AccountState {
@@ -118,7 +123,11 @@ fn parse_delegation(account: &str, pool: &str, genesis: &Genesis) -> AccountStat
     }
 }
 
-pub fn bootstrap<D: Domain>(state: &D::State, genesis: &Genesis) -> Result<(), ChainError> {
+pub fn bootstrap<D: Domain>(
+    state: &D::State,
+    genesis: &Genesis,
+    era: EraProtocol,
+) -> Result<(), ChainError> {
     let writer = state.start_writer()?;
 
     let Some(staking) = &genesis.shelley.staking else {
@@ -139,7 +148,7 @@ pub fn bootstrap<D: Domain>(state: &D::State, genesis: &Genesis) -> Result<(), C
     };
 
     for (account, pool) in delegations {
-        let state = parse_delegation(account, pool, genesis);
+        let state = parse_delegation(account, pool, genesis, era);
         let key = minicbor::to_vec(&state.credential).unwrap();
         let key = EntityKey::from(key);
         writer.write_entity_typed(&key, &state)?;

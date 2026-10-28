@@ -11,6 +11,10 @@ impl EraProtocol {
     pub fn is_shelley_or_later(&self) -> bool {
         self.0 >= 2
     }
+
+    pub fn counts_pointer_stake(&self) -> bool {
+        self.0 < 9
+    }
 }
 
 impl std::fmt::Display for EraProtocol {

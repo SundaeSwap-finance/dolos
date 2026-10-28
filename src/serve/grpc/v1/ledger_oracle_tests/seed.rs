@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use dolos_cardano::{
-    model::{AccountState, DRepDelegation, EpochState, EpochValue, PParamValue, PoolDelegation},
+    model::{
+        AccountState, DRepDelegation, EpochState, EpochValue, EraProtocol, PParamValue,
+        PoolDelegation,
+    },
     pallas_extras, CardanoDelta, ControlledAmountInc, FixedNamespace as _, SingletonEntity as _,
 };
 use dolos_core::{
@@ -18,7 +21,6 @@ use ledger_oracle_judge::{
 use pallas::{
     codec::minicbor,
     ledger::{
-        addresses::{Address, ShelleyDelegationPart},
         primitives::{conway, StakeCredential},
         traverse::{Era, MultiEraOutput},
     },
@@ -31,6 +33,9 @@ use crate::adapters::{
 /// The era tag Dolos stores a Dijkstra output under.
 pub(super) const DIJKSTRA: u16 = 8;
 
+/// The protocol version of the corpus chain.
+const PROTOCOL: u16 = 12;
+
 /// The devnet genesis with the corpus epoch length and protocol version 12.
 pub(super) fn genesis(epoch_size: u64) -> Arc<Genesis> {
     let mut genesis = dolos_cardano::include::devnet::load()
@@ -41,7 +46,7 @@ pub(super) fn genesis(epoch_size: u64) -> Arc<Genesis> {
         .expect("the devnet Dijkstra genesis loads");
     genesis.shelley.epoch_length =
         Some(u32::try_from(epoch_size).expect("the corpus epoch size fits a genesis epoch length"));
-    genesis.force_protocol = Some(12);
+    genesis.force_protocol = Some(PROTOCOL.into());
     Arc::new(genesis)
 }
 
@@ -51,19 +56,15 @@ pub(super) fn txo_ref(input: &TxIn) -> TxoRef {
     TxoRef(input.tx.into(), index)
 }
 
-/// The account deltas Dolos makes when a block produces the outputs, leaving out outputs at pointer addresses.
+/// The account deltas Dolos makes when a block produces the outputs.
 fn controlled_amounts(pre: &[UtxoEntry], epoch: u64) -> Vec<CardanoDelta> {
     pre.iter()
         .filter_map(|e| {
             let output = MultiEraOutput::decode(Era::Dijkstra, &e.output.0)
                 .expect("a seeded output decodes");
             let address = output.address().expect("a seeded output has an address");
-            if let Address::Shelley(shelley) = &address {
-                if let ShelleyDelegationPart::Pointer(_) = shelley.delegation() {
-                    return None;
-                }
-            }
-            let (cred, is_pointer) = pallas_extras::address_as_stake_cred(&address)?;
+            let era = EraProtocol::from(PROTOCOL);
+            let (cred, is_pointer) = pallas_extras::address_as_stake_cred(&address, era)?;
             let amount = output.value().coin();
             Some(ControlledAmountInc::new(cred, is_pointer, amount, epoch).into())
         })

@@ -49,9 +49,10 @@ impl Stake {
     }
 
     pub fn total_for_era(&self, era: EraProtocol) -> u64 {
-        match era {
-            x if x < 9 => self.total_pre_conway(),
-            _ => self.total(),
+        if era.counts_pointer_stake() {
+            self.total_pre_conway()
+        } else {
+            self.total()
         }
     }
 

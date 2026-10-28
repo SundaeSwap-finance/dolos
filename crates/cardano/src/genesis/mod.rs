@@ -5,8 +5,8 @@ use dolos_core::{
 
 use crate::{
     gov_from_conway_genesis, indexes::utxo_index_delta_from_utxo_delta, pots::Pots,
-    utils::nonce_stability_window, EndStats, EpochState, EpochValue, EraBoundary, EraSummary,
-    GovState, Lovelace, Nonces, PParamsSet, RollingStats, SingletonEntity as _,
+    utils::nonce_stability_window, EndStats, EpochState, EpochValue, EraBoundary, EraProtocol,
+    EraSummary, GovState, Lovelace, Nonces, PParamsSet, RollingStats, SingletonEntity as _,
 };
 
 mod staking;
@@ -179,7 +179,8 @@ pub fn execute<D: Domain>(
 
     bootstrap_utxos::<D>(state, genesis, config)?;
 
-    staking::bootstrap::<D>(state, genesis)?;
+    let era = EraProtocol::from(epoch.pparams.unwrap_live().protocol_major_or_default());
+    staking::bootstrap::<D>(state, genesis, era)?;
 
     // Mark genesis state as applied by setting the cursor to Origin. This
     // lets crash recovery distinguish "genesis done, no blocks yet" (cursor

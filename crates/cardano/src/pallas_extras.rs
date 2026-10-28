@@ -16,6 +16,7 @@ use pallas::ledger::traverse::{MultiEraCert, MultiEraCertKind, MultiEraScriptRef
 use serde::{Deserialize, Serialize};
 
 use crate::eras::ChainSummary;
+use crate::model::EraProtocol;
 use crate::{hacks, Lovelace};
 
 /// What a pool registration wrote in the BLS key slot the Dijkstra era adds.
@@ -247,11 +248,14 @@ pub fn stake_address_to_cred(address: &StakeAddress) -> StakeCredential {
 
 pub fn shelley_address_to_stake_cred(
     address: &ShelleyAddress,
+    era: EraProtocol,
 ) -> Option<(StakeCredential, IsPointer)> {
     match address.delegation() {
         ShelleyDelegationPart::Key(x) => Some((StakeCredential::AddrKeyhash(*x), false)),
         ShelleyDelegationPart::Script(x) => Some((StakeCredential::ScriptHash(*x), false)),
-        ShelleyDelegationPart::Pointer(x) => hacks::pointers::pointer_to_cred(x).map(|x| (x, true)),
+        ShelleyDelegationPart::Pointer(x) => {
+            hacks::pointers::pointer_to_cred(x, era).map(|x| (x, true))
+        }
         ShelleyDelegationPart::Null => None,
     }
 }
@@ -272,9 +276,12 @@ pub fn shelley_address_to_stake_address(address: &ShelleyAddress) -> Option<Stak
 
 pub type IsPointer = bool;
 
-pub fn address_as_stake_cred(address: &Address) -> Option<(StakeCredential, IsPointer)> {
+pub fn address_as_stake_cred(
+    address: &Address,
+    era: EraProtocol,
+) -> Option<(StakeCredential, IsPointer)> {
     match &address {
-        Address::Shelley(x) => shelley_address_to_stake_cred(x),
+        Address::Shelley(x) => shelley_address_to_stake_cred(x, era),
         Address::Stake(x) => Some((stake_address_to_cred(x), false)),
         _ => None,
     }
@@ -502,10 +509,13 @@ pub fn stake_cred_to_drep(cred: &StakeCredential) -> DRep {
 }
 
 pub fn parse_reward_account(reward_account: &[u8]) -> Option<StakeCredential> {
-    let pool_address = Address::from_bytes(reward_account).ok()?;
-    let (cred, _) = address_as_stake_cred(&pool_address)?;
+    let address = match Address::from_bytes(reward_account).ok()? {
+        Address::Stake(x) => x,
+        Address::Shelley(x) => shelley_address_to_stake_address(&x)?,
+        _ => return None,
+    };
 
-    Some(cred)
+    Some(stake_address_to_cred(&address))
 }
 
 pub fn keyhash_to_stake_cred(keyhash: Hash<28>) -> StakeCredential {

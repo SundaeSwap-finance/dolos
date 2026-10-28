@@ -8,7 +8,7 @@ use dolos_core::{
 use crate::{tx_sequence_to_hash, utxo_with_value};
 
 use bech32::{FromBase32, ToBase32, Variant};
-use dolos_cardano::model::{AccountEpochLog, FixedNamespace as _};
+use dolos_cardano::model::{AccountEpochLog, EraProtocol, FixedNamespace as _};
 use dolos_cardano::rupd::credential_to_key;
 use pallas::codec::utils::{CborWrap, Int, Nullable};
 use pallas::codec::{minicbor, utils::KeepRaw};
@@ -33,6 +33,11 @@ use pallas::{
         traverse::ComputeHash,
     },
 };
+
+/// The protocol version of the Conway blocks this module builds.
+fn conway() -> EraProtocol {
+    EraProtocol::from(9)
+}
 
 #[derive(Clone, Debug)]
 pub struct SyntheticBlockConfig {
@@ -273,7 +278,7 @@ pub fn build_synthetic_blocks(
 
     let stake_cred = Address::from_bech32(&cfg.address)
         .ok()
-        .and_then(|addr| dolos_cardano::pallas_extras::address_as_stake_cred(&addr))
+        .and_then(|addr| dolos_cardano::pallas_extras::address_as_stake_cred(&addr, conway()))
         .map(|(cred, _)| cred)
         .unwrap_or_else(|| StakeCredential::AddrKeyhash(AddrKeyhash::from([0u8; 28])));
 
@@ -581,7 +586,7 @@ pub fn seed_reward_logs<D: Domain>(
     epochs: &[u64],
 ) -> Result<(), ChainError> {
     let address = Address::from_bech32(stake_address)?;
-    let (stake_cred, _) = dolos_cardano::pallas_extras::address_as_stake_cred(&address)
+    let (stake_cred, _) = dolos_cardano::pallas_extras::address_as_stake_cred(&address, conway())
         .ok_or(ChainError::InvalidPoolParams)?;
     let entity_key = credential_to_key(&stake_cred);
     let pool_keyhash =
@@ -621,7 +626,7 @@ pub fn seed_account_stake_logs<D: Domain>(
     epochs: &[u64],
 ) -> Result<(), ChainError> {
     let address = Address::from_bech32(stake_address)?;
-    let (stake_cred, _) = dolos_cardano::pallas_extras::address_as_stake_cred(&address)
+    let (stake_cred, _) = dolos_cardano::pallas_extras::address_as_stake_cred(&address, conway())
         .ok_or(ChainError::InvalidPoolParams)?;
     let pool_keyhash =
         pool_keyhash_from_bech32(pool_id).map_err(|_| ChainError::InvalidPoolParams)?;

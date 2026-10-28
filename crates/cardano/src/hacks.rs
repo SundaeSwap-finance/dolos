@@ -2,7 +2,9 @@ pub mod pointers {
     use pallas::ledger::{addresses::Pointer, primitives::StakeCredential};
     use tracing::warn;
 
-    pub fn pointer_to_cred(pointer: &Pointer) -> Option<StakeCredential> {
+    use crate::model::EraProtocol;
+
+    pub fn pointer_to_cred(pointer: &Pointer, era: EraProtocol) -> Option<StakeCredential> {
         match (pointer.slot(), pointer.tx_idx(), pointer.cert_idx()) {
             // preview
             (2940289, 1, 0) => Some(StakeCredential::AddrKeyhash(
@@ -77,10 +79,39 @@ pub mod pointers {
                     .unwrap(),
             )),
 
+            _ if !era.counts_pointer_stake() => None,
+
             (slot, tx_idx, cert_idx) => {
                 warn!(slot, tx_idx, cert_idx, "missing pointer mapping");
                 panic!()
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_mapped_pointer_resolves_to_its_credential_at_protocol_12() {
+            let pointer = Pointer::new(4495800, 11, 0);
+            let expected = "bc1597ad71c55d2d009a9274b3831ded155118dd769f5376decc1369";
+            assert_eq!(
+                pointer_to_cred(&pointer, EraProtocol::from(12)),
+                Some(StakeCredential::AddrKeyhash(expected.parse().unwrap()))
+            );
+        }
+
+        #[test]
+        #[should_panic(expected = "explicit panic")]
+        fn an_unmapped_pointer_before_protocol_9_panics() {
+            pointer_to_cred(&Pointer::new(5179681, 0, 0), EraProtocol::from(8));
+        }
+
+        #[test]
+        fn an_unmapped_pointer_from_protocol_9_resolves_to_no_credential() {
+            let pointer = Pointer::new(5179681, 0, 0);
+            assert_eq!(pointer_to_cred(&pointer, EraProtocol::from(12)), None);
         }
     }
 }
