@@ -194,7 +194,11 @@ ic#843 certificate kind
 ic#845 certificate kind
 ic#847 certificate kind
 ic#848 certificate kind
+ic#886 new script language (requires V3)
+ic#889 pointer address
 ic#890 stateful or scripted subtransaction
+ic#894 new script language (requires V3)
+ic#896 new script language (requires V3)
 ic#898 stateful or scripted subtransaction
 ic#900 witness fields
 ic#906 registration with subtransactions
