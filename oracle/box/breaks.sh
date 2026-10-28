@@ -53,6 +53,8 @@ plant_rob() {
   done
   git -C "$ROOT/$PALLAS" checkout -q --detach "$ROB_BASE"
   git -C "$ROOT/$PALLAS" revert -m 1 --no-commit f3419a3a
+  # Adds the phase 2 unsupported type that ChainError holds, with every message unchanged.
+  git -C "$ROOT/$PALLAS" apply "$HERE/plants/rob-surface.diff"
   sed -E -i 's#^(pallas[a-z-]*) = \{ git = "https://github.com/[^/]+/pallas", rev = "[0-9a-f]+"#\1 = { path = "/w/'"$PALLAS"'/\1"#' \
     "$ROOT/$SCRATCH/Cargo.toml"
 }

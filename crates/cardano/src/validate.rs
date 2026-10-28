@@ -171,8 +171,8 @@ fn evaluate_decoded<D: Domain>(
 /// The chain error for a phase two evaluation pallas could not complete.
 fn evaluation_error(error: pallas_validate::phase2::error::Error) -> ChainError {
     match error {
-        pallas_validate::phase2::error::Error::DijkstraUnsupported(label) => {
-            ChainError::Phase2EvaluationUnsupported(label)
+        pallas_validate::phase2::error::Error::DijkstraUnsupported(unsupported) => {
+            ChainError::Phase2EvaluationUnsupported(unsupported)
         }
         error => ChainError::Phase2EvaluationError(error.to_string()),
     }
@@ -1158,7 +1158,7 @@ mod parameter_tests {
 #[cfg(test)]
 mod evaluation_tests {
     use super::*;
-    use pallas_validate::phase2::error::Error;
+    use pallas_validate::phase2::error::{Error, Unsupported};
 
     #[test]
     fn an_evaluation_error_keeps_its_message() {
@@ -1171,11 +1171,16 @@ mod evaluation_tests {
 
     #[test]
     fn an_unsupported_evaluation_keeps_its_label() {
-        let label = "V3 builtin outside audited protocol-12 subset";
-        let error = evaluation_error(Error::DijkstraUnsupported(label));
+        let unsupported = Unsupported("V3 builtin outside audited protocol-12 subset");
+        let error = evaluation_error(Error::DijkstraUnsupported(unsupported));
         assert!(
-            matches!(&error, ChainError::Phase2EvaluationUnsupported(x) if *x == label),
+            matches!(&error, ChainError::Phase2EvaluationUnsupported(x) if *x == unsupported),
             "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "couldn't evaluate phase-2 script: unsupported native Dijkstra evaluation: \
+             V3 builtin outside audited protocol-12 subset"
         );
     }
 }
