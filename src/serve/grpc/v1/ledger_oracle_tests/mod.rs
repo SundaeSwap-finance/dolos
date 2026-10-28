@@ -1680,28 +1680,20 @@ async fn a_tx_received_in_one_group_is_absent_from_the_next() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
-async fn the_collateral_return_supp9_spends_is_known_unserved() {
-    let line = "\nKNOWN row=S3 ids=supp#9 as_output ledger=";
+async fn the_collateral_return_supp9_spends_is_served() {
     let intact = judge_supp(|_| ()).await;
     let text = intact.to_string();
-    assert!(text.contains(line), "{text}");
-    let known = text.lines().find(|l| l.starts_with(&line[1..])).unwrap();
-    assert!(known.contains(" dolos=none input="), "{known}");
-    for service in ["FetchBlock", "FollowTip", "WatchTx"] {
-        assert!(known.contains(service), "{known}");
-    }
+    assert!(!text.contains("\nKNOWN row=S3 "), "{text}");
+    assert!(!text.contains("\nDIFF as_output supp#9 "), "{text}");
     assert!(intact.state.as_output.disagree.is_empty(), "{text}");
-    assert!(intact.state.as_output.compared > 0, "{text}");
-    let deleted = judge_supp(|m| {
-        m.known.remove(&(Locus::AsOutput, supp(9))).unwrap();
+    let listed = judge_supp(|m| {
+        m.known.insert((Locus::AsOutput, supp(9)), Row::S3);
     })
     .await
     .to_string();
-    assert!(!deleted.contains("\nKNOWN row=S3 "), "{deleted}");
-    assert!(deleted.contains("\nSTATE as_output disagree="), "{deleted}");
     assert!(
-        deleted.contains("\nDIFF as_output supp#9 ledger="),
-        "{deleted}"
+        listed.contains("\nKNOWN_STALE supp#9 row=S3 locus=as_output"),
+        "{listed}"
     );
 }
 

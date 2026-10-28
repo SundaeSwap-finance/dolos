@@ -203,9 +203,9 @@ fn resolve_archive_inputs<A: dolos_core::ArchiveStore>(
             let Some(refs) = wanted.remove(&tx.hash()) else {
                 continue;
             };
-            let outputs = tx.outputs();
+            let outputs: HashMap<usize, _> = tx.produces().into_iter().collect();
             for r in refs {
-                if let Some(output) = outputs.get(r.1 as usize) {
+                if let Some(output) = outputs.get(&(r.1 as usize)) {
                     result.insert(r, (block.era(), output.encode()));
                 }
             }
@@ -254,9 +254,8 @@ mod input_resolution_tests {
         writer.commit().unwrap();
         txs.iter()
             .flat_map(|(_, tx)| {
-                tx.outputs()
-                    .iter()
-                    .enumerate()
+                tx.produces()
+                    .into_iter()
                     .map(|(i, o)| ((tx.hash(), i as u32), (block.era(), o.encode())))
                     .collect::<Vec<_>>()
             })
