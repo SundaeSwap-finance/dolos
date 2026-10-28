@@ -13,15 +13,14 @@ pub(super) struct BlockContext<C: LedgerContext> {
     made: Arc<UtxoMap>,
 }
 
-/// The outputs of every transaction of the block, sub transactions included.
+/// The outputs each transaction of the block produces, sub transactions included.
 fn made_outputs(block: &MultiEraBlock<'_>) -> UtxoMap {
     dolos_core::applied_txs(block)
         .into_iter()
         .flat_map(|(_, tx)| {
             let hash = tx.hash();
-            tx.outputs()
-                .iter()
-                .enumerate()
+            tx.produces()
+                .into_iter()
                 .map(|(i, o)| ((hash, i as u32), (block.era(), o.encode())))
                 .collect::<Vec<_>>()
         })

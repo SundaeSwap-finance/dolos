@@ -10,19 +10,25 @@
 -- | Writes the supplement corpus, scenarios whose shapes the Imp spec corpus lacks.
 module Main (main) where
 
-import Cardano.Ledger.Address (Withdrawals (..))
-import Cardano.Ledger.Alonzo.TxWits (TxDats (..))
-import Cardano.Ledger.BaseTypes (StrictMaybe (..), natVersion)
+import Cardano.Ledger.Address (Addr (..), Withdrawals (..))
+import Cardano.Ledger.Alonzo.Scripts (AsIx (..), PlutusBinary (..), mkBinaryPlutusScript, pattern SpendingPurpose)
+import Cardano.Ledger.Alonzo.TxWits (Redeemers (..), TxDats (..))
+import Cardano.Ledger.BaseTypes (Network (..), StrictMaybe (..), natVersion)
 import Cardano.Ledger.Coin (Coin (..))
-import Cardano.Ledger.Credential (Credential (..))
+import Cardano.Ledger.Credential (Credential (..), StakeReference (..))
 import Cardano.Ledger.Dijkstra.Core
 import Cardano.Ledger.Mary.Value (AssetName, MaryValue (..), PolicyID (..), multiAssetFromList)
 import Cardano.Ledger.Plutus.Data (Data (..), Datum (..), hashData)
+import Cardano.Ledger.Plutus.ExUnits (ExUnits (..))
+import Cardano.Ledger.Plutus.Language (Language (..))
 import Cardano.Ledger.Shelley.Scripts (pattern RequireSignature)
 import Cardano.Ledger.Tools (setMinCoinTxOut)
 import Cardano.Ledger.TxIn (mkTxInPartial)
 import Cardano.Ledger.Val (inject)
 import Control.Monad (void)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Base16 as B16
+import Data.ByteString.Short (toShort)
 import Data.Maybe (listToMaybe)
 import qualified Data.OMap.Strict as OMap
 import Dump (E, dumpTo)
@@ -108,6 +114,36 @@ supplement = describe "SUPPLEMENT" $ do
   it "a registration, then a withdrawal from that account in one slot" $ do
     account <- registerStakeCredential . KeyHashObj =<< freshKeyHash
     submitTx_ (mkBasicTx (mkBasicTxBody & withdrawalsTxBodyL .~ Withdrawals [(account, Coin 0)]) :: Tx TopTx E)
+  -- (program 1.1.0 (lam ctx (force [[[(force (builtin ifThenElse)) [[(builtin equalsInteger) [[(builtin indexByteString) (con bytestring #0a0b)] (con integer 1)]] (con integer 11)]] (delay (con unit ()))] (delay (error))])))
+  it "a V3 script calls indexByteString" $
+    spendWithV3 "581a01010025333573466e1ccdc72441020a0b004800920161498581"
+  -- (program 1.1.0 (lam ctx (force [[[(force (builtin ifThenElse)) [[(builtin equalsByteString) [[[(builtin sliceByteString) (con integer 1)] (con integer 2)] (con bytestring #0a0b0c0d)]] (con bytestring #0b0c)]] (delay (con unit ()))] (delay (error))])))
+  it "a V3 script calls sliceByteString" $
+    spendWithV3 "582201010025333573466e3cccdc62400490022441040a0b0c0d004881020b0c00149859"
+  it "the collateral return of a phase two invalid tx is spent in the same slot" $ do
+    addr <- freshKeyAddrNoPtr_
+    coll <- sendCoinTo addr (Coin 10_000_000)
+    tx <- switchTxToPhase2InvalidLegacyMode (mkBasicTx mkBasicTxBody :: Tx TopTx E)
+    let tx' = tx & bodyTxL . collateralInputsTxBodyL .~ [coll] & bodyTxL . collateralReturnTxBodyL .~ SJust (mkBasicTxOut addr (inject (Coin 5_000_000)))
+    fixed <- submitPhase2Invalid tx'
+    let n = length (fixed ^. bodyTxL . outputsTxBodyL)
+        crIn = mkTxInPartial (txIdTx fixed) (fromIntegral n)
+    submitTx_ (mkBasicTx (mkBasicTxBody & inputsTxBodyL .~ [crIn]) :: Tx TopTx E)
+
+-- | Locks coin at a V3 script given as its CBOR hex, then spends it with that script and no datum.
+spendWithV3 :: ByteString -> ImpTestM E ()
+spendWithV3 hex = do
+  plutus :: PlutusScript E <- expectJust $ mkBinaryPlutusScript PlutusV3 . PlutusBinary . toShort =<< either (const Nothing) Just (B16.decode hex)
+  let script = fromPlutusScript plutus
+      hash = hashScript script
+  locked <- sendCoinTo (Addr Testnet (ScriptHashObj hash) StakeRefNull) (Coin 5_000_000)
+  collateral <- makeCollateralInput
+  let tx :: Tx TopTx E
+      tx =
+        mkBasicTx (mkBasicTxBody & inputsTxBodyL .~ [locked] & collateralInputsTxBodyL .~ [collateral] & feeTxBodyL .~ Coin 400_000)
+          & witsTxL . scriptTxWitsL .~ [(hash, script)]
+          & witsTxL . rdmrsTxWitsL .~ Redeemers [(SpendingPurpose (AsIx 0), (Data (PV1.I 0), ExUnits 1_000_000 1_000_000_000))]
+  submitTx_ tx
 
 main :: IO ()
 main =
