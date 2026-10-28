@@ -125,7 +125,7 @@ mod made_in_block_tests {
     use pallas::interop::utxorpc::v1;
     use pallas::ledger::primitives::dijkstra::{self, TransactionInput};
 
-    /// A ledger context that knows exactly the outputs it holds.
+    /// A ledger context that resolves only the outputs it holds.
     #[derive(Clone)]
     struct Known(Arc<UtxoMap>);
 

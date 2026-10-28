@@ -595,7 +595,7 @@ fn synced_balance(
     Ok(balance)
 }
 
-/// The mempool transactions the synced state does not reflect yet, inflight before pending, each once.
+/// The mempool transactions, inflight before pending, each once.
 fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx> {
     let pending = utxos.pending();
     let inflight = utxos.mempool().peek_inflight();
