@@ -33,7 +33,7 @@ use ledger_oracle_judge::{
     row::Row,
     run::{origin, InputOrigin, KeptRun},
     verdict::{
-        declares, maker, outcome, with_failing_makers, with_known, DolosVerdict, Fail,
+        declares, maker, one_answer, outcome, with_failing_makers, with_known, DolosVerdict, Fail,
         FailingMaker, Maker, Outcome, Pass, ValidationTally,
     },
 };
@@ -49,6 +49,7 @@ use pallas::{
     },
 };
 use seed::SeedPoint;
+use validate::Relay;
 use serve::{Event, Served, Service};
 use tonic::{Request, Status};
 
@@ -360,7 +361,7 @@ impl<'r> GroupBlock<'r> {
     }
 }
 
-/// Submits each slot group of a run in order to a fresh mempool at the group slot, then rolls the block of its accepted records, compares the outputs and returns what became of each group's block with the account comparisons of each group's last accepted record.
+/// Submits each slot group of a run in order to a fresh mempool at the group slot, once holding accepted records pending and once marking them inflight, then rolls the block of its accepted records, compares the outputs and returns what became of each group's block with the account comparisons of each group's last accepted record.
 async fn validate_run<'r>(
     base: &DomainAdapter,
     kind: CorpusKind,
@@ -385,7 +386,8 @@ async fn validate_run<'r>(
     let mut blocks = Vec::new();
     let mut account_checks = BTreeMap::new();
     for records in run.groups() {
-        let group = validate::group(base, records[0].slot);
+        let group = validate::group(base, records[0].slot, Relay::Held);
+        let relayed = validate::group(base, records[0].slot, Relay::Inflight);
         let mut given = BTreeMap::new();
         for record in records {
             let id = id_of(record);
@@ -396,11 +398,15 @@ async fn validate_run<'r>(
                 tally.dependent.push((id, missing.seeded_by));
             }
             let dolos = validate::verdict(&group.receive(&record.tx.0));
+            let inflight = validate::verdict(&relayed.receive(&record.tx.0));
             if let Some(feature) = declares(&record.outcome, &dolos) {
                 candidates.declared.insert(id, feature);
             }
             let declared = manifests.declared.get(&id);
-            let judgement = outcome(&record.outcome, record.phase2_valid, &dolos, declared);
+            let judgement = match one_answer(&dolos, &inflight) {
+                Ok(dolos) => outcome(&record.outcome, record.phase2_valid, dolos, declared),
+                Err(fail) => Outcome::Fail(fail),
+            };
             let judgement = with_failing_makers(judgement, &dolos, missing.failed_by);
             let known = manifests.known.get(&(Locus::Validation, id));
             let judgement = with_known(judgement, known);
@@ -1661,7 +1667,7 @@ async fn a_tx_received_in_one_group_is_absent_from_the_next() {
             &run.records()[0].pre_utxo,
             &run.records()[0].accounts_pre,
         );
-        let one = validate::group(&seeded.domain, first[0].slot);
+        let one = validate::group(&seeded.domain, first[0].slot, Relay::Held);
         let Some(hash) = first
             .iter()
             .filter(|r| matches!(r.outcome, LedgerOutcome::Accepted { .. }))
@@ -1671,7 +1677,7 @@ async fn a_tx_received_in_one_group_is_absent_from_the_next() {
         };
         let made = TxoRef(hash, 0);
         assert!(one.sees(made.clone()));
-        let two = validate::group(&seeded.domain, second[0].slot);
+        let two = validate::group(&seeded.domain, second[0].slot, Relay::Held);
         assert!(!two.sees(made));
         checked += 1;
     }

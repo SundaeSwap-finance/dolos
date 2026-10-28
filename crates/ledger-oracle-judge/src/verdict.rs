@@ -103,6 +103,25 @@ pub enum Fail {
     UnknownRefusal {
         dolos: String,
     },
+    RelayDependent {
+        held: String,
+        inflight: String,
+    },
+}
+
+/// The one answer Dolos gave for a record submitted with the earlier records pending and again with them inflight.
+pub fn one_answer<'v>(
+    held: &'v DolosVerdict,
+    inflight: &'v DolosVerdict,
+) -> Result<&'v DolosVerdict, Fail> {
+    if held == inflight {
+        Ok(held)
+    } else {
+        Err(Fail::RelayDependent {
+            held: held.to_string(),
+            inflight: inflight.to_string(),
+        })
+    }
 }
 
 impl fmt::Display for Fail {
@@ -125,6 +144,9 @@ impl fmt::Display for Fail {
             }
             Fail::KnownStale { row } => write!(f, "row={row}"),
             Fail::UnknownRefusal { dolos } => write!(f, "dolos={dolos}"),
+            Fail::RelayDependent { held, inflight } => {
+                write!(f, "held={held} inflight={inflight}")
+            }
         }
     }
 }
@@ -350,7 +372,9 @@ impl ValidationTally {
             Outcome::Fail(fail) => {
                 let text = fail.to_string();
                 match fail {
-                    Fail::Disagree { .. } => self.disagree.push((id, text)),
+                    Fail::Disagree { .. } | Fail::RelayDependent { .. } => {
+                        self.disagree.push((id, text))
+                    }
                     Fail::ReasonMismatch { .. } => self.reason_mismatch.push((id, text)),
                     Fail::UnsupportedUnexpected { .. } => {
                         self.unsupported_unexpected.push((id, text))
@@ -500,6 +524,27 @@ mod tests {
             kind: kind.into(),
             class,
         }
+    }
+
+    #[test]
+    fn the_same_answer_in_both_relay_states_is_that_answer() {
+        let refused = dolos_refused("InputNotInUTxO", DolosClass::Rule(RefusalClass::Inputs));
+        for verdict in [DolosVerdict::Accepted, refused] {
+            assert_eq!(one_answer(&verdict, &verdict.clone()), Ok(&verdict));
+        }
+    }
+
+    #[test]
+    fn different_answers_in_the_two_relay_states_disagree() {
+        let refused = dolos_refused("WithdrawalNotRegistered", DolosClass::NoRule);
+        let fail = one_answer(&DolosVerdict::Accepted, &refused).unwrap_err();
+        let mut tally = ValidationTally::default();
+        tally.add(supp(3), Outcome::Fail(fail));
+        assert!(!tally.pass());
+        assert_eq!(
+            tally.to_string().lines().last(),
+            Some("DISAGREE supp#3 held=accepted inflight=refused[WithdrawalNotRegistered]")
+        );
     }
 
     #[test]

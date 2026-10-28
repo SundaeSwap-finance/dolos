@@ -8,8 +8,8 @@ use std::{
 use dolos_cardano::CardanoLogic;
 use dolos_core::{
     BlockHash, BlockSlot, ChainError, ChainLogic as _, ChainPoint, Domain as _, DomainError,
-    EraCbor, MempoolAwareUtxoStore, RawBlock, StateStore as _, StateWriter as _, SubmitExt as _,
-    SyncExt as _, TxHash, TxoRef, UtxoSetDelta,
+    EraCbor, MempoolAwareUtxoStore, MempoolStore as _, RawBlock, StateStore as _, StateWriter as _,
+    SubmitExt as _, SyncExt as _, TxHash, TxoRef, UtxoSetDelta,
 };
 use ledger_oracle_judge::{
     record::{Phase2, UtxoEntry},
@@ -162,13 +162,23 @@ pub(super) fn block(slot: u64, tip: Option<Tip>, txs: &[(&[u8], Phase2)]) -> (Ti
     (Tip { hash, number }, Arc::new(raw))
 }
 
+/// The mempool state a group puts each transaction it accepts in.
+#[derive(Clone, Copy)]
+pub(super) enum Relay {
+    /// Accepted transactions stay pending.
+    Held,
+    /// Accepted transactions are marked inflight at once.
+    Inflight,
+}
+
 /// A domain over the seeded stores with a mempool of its own and its cursor at one slot.
 pub(super) struct Group {
     domain: DomainAdapter,
+    relay: Relay,
 }
 
 /// The group for the records at one slot, whose mempool starts empty and whose cursor keeps the hash of the last applied block.
-pub(super) fn group(base: &DomainAdapter, slot: u64) -> Group {
+pub(super) fn group(base: &DomainAdapter, slot: u64, relay: Relay) -> Group {
     let hash = base
         .state()
         .read_cursor()
@@ -180,14 +190,19 @@ pub(super) fn group(base: &DomainAdapter, slot: u64) -> Group {
     writer.commit().unwrap();
     let mut domain = base.clone();
     domain.mempool = MempoolBackend::Ephemeral(Default::default());
-    Group { domain }
+    Group { domain, relay }
 }
 
 impl Group {
-    /// Submits one transaction to the group mempool.
+    /// Submits one transaction to the group mempool and leaves it in the group's relay state.
     pub(super) fn receive(&self, tx: &[u8]) -> Result<TxHash, DomainError> {
         let chain = self.domain.read_chain();
-        self.domain.receive_tx("ledger-oracle", &chain, tx)
+        let hash = self.domain.receive_tx("ledger-oracle", &chain, tx)?;
+        match self.relay {
+            Relay::Held => {}
+            Relay::Inflight => self.domain.mempool().mark_inflight(&[hash])?,
+        }
+        Ok(hash)
     }
 
     /// Writes ledger outputs into the state the group reads.
