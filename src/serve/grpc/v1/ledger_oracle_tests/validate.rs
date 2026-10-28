@@ -276,6 +276,9 @@ pub(super) fn verdict(result: &Result<TxHash, DomainError>) -> DolosVerdict {
         ChainError::Phase1ValidationRejected(v) => validation_verdict(v),
         ChainError::Phase2ValidationRejected(_) => DolosVerdict::Phase2Rejected,
         ChainError::Phase2EvaluationError(_) => refused("Phase2EvaluationError"),
+        ChainError::Phase2EvaluationUnsupported(label) => {
+            DolosVerdict::Unsupported(label.to_string())
+        }
         ChainError::DijkstraWithdrawalConflict { .. } => refused("DijkstraWithdrawalConflict"),
         ChainError::CantReceiveBlock(_) => refused("CantReceiveBlock"),
         ChainError::BrokenInvariant(_) => refused("BrokenInvariant"),
@@ -392,5 +395,34 @@ fn validation_verdict(v: &ValidationError) -> DolosVerdict {
             kind: variant_name(format!("{other:?}")),
             class: validation_class(other),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refusal(e: ChainError) -> Result<TxHash, DomainError> {
+        Err(e.into())
+    }
+
+    #[test]
+    fn a_phase_two_evaluation_error_is_a_refusal() {
+        let error = ChainError::Phase2EvaluationError("can't eval without redeemers".into());
+        let expected = DolosVerdict::Refused {
+            kind: "Phase2EvaluationError".to_string(),
+            class: DolosClass::NoRule,
+        };
+        assert_eq!(verdict(&refusal(error)), expected);
+    }
+
+    #[test]
+    fn an_unsupported_phase_two_evaluation_is_unsupported_with_its_label() {
+        let label = "V3 builtin outside audited protocol-12 subset";
+        let error = ChainError::Phase2EvaluationUnsupported(label);
+        assert_eq!(
+            verdict(&refusal(error)),
+            DolosVerdict::Unsupported(label.to_string())
+        );
     }
 }

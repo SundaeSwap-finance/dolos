@@ -166,9 +166,19 @@ fn evaluate_decoded<D: Domain>(
     } else {
         pallas_validate::phase2::evaluate_tx(tx, pparams, &utxos, &slot_config)
     }
-    .map_err(|e| ChainError::Phase2EvaluationError(e.to_string()))?;
+    .map_err(evaluation_error)?;
 
     Ok(report)
+}
+
+/// The chain error for a phase two evaluation pallas could not complete.
+fn evaluation_error(error: pallas_validate::phase2::error::Error) -> ChainError {
+    match error {
+        pallas_validate::phase2::error::Error::DijkstraUnsupported(label) => {
+            ChainError::Phase2EvaluationUnsupported(label)
+        }
+        error => ChainError::Phase2EvaluationError(error.to_string()),
+    }
 }
 
 /// Whether phase two has anything to run: a redeemer at the top level or in a
@@ -1028,5 +1038,30 @@ mod parameter_tests {
             refused,
             ChainError::InvalidConfig(x) if x == "leios committee size exceeds u16"
         ));
+    }
+}
+
+#[cfg(test)]
+mod evaluation_tests {
+    use super::*;
+    use pallas_validate::phase2::error::Error;
+
+    #[test]
+    fn an_evaluation_error_keeps_its_message() {
+        let error = evaluation_error(Error::NoRedeemers);
+        assert!(
+            matches!(&error, ChainError::Phase2EvaluationError(x) if x == "can't eval without redeemers"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_unsupported_evaluation_keeps_its_label() {
+        let label = "V3 builtin outside audited protocol-12 subset";
+        let error = evaluation_error(Error::DijkstraUnsupported(label));
+        assert!(
+            matches!(&error, ChainError::Phase2EvaluationUnsupported(x) if *x == label),
+            "{error:?}"
+        );
     }
 }

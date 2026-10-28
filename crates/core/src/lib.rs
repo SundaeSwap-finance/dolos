@@ -577,6 +577,9 @@ pub enum ChainError {
     #[error("couldn't evaluate phase-2 script: {0}")]
     Phase2EvaluationError(String),
 
+    #[error("couldn't evaluate phase-2 script: unsupported native Dijkstra evaluation: {0}")]
+    Phase2EvaluationUnsupported(&'static str),
+
     #[error("phase-2 script rejected the transaction")]
     Phase2ValidationRejected(Phase2Log),
 
