@@ -116,7 +116,7 @@ pub struct StateTallies {
     pub roll_fail: Vec<RollFail>,
     pub utxo: Tally,
     pub as_output: Tally,
-    pub in_run: usize,
+    pub sub_only: usize,
     pub seeded_unjudged: usize,
     pub accounts: Tally,
     pub undo: Tally,
@@ -225,7 +225,7 @@ impl fmt::Display for StateTallies {
             roll_fail,
             utxo,
             as_output,
-            in_run,
+            sub_only,
             seeded_unjudged,
             accounts,
             undo,
@@ -241,7 +241,7 @@ impl fmt::Display for StateTallies {
         } = self;
         write!(
             f,
-            "STATE compared utxo={} as_output={} of in_run={in_run} \
+            "STATE compared utxo={} as_output={} of sub_only={sub_only} \
              seeded_unjudged={seeded_unjudged} accounts={} undo={} revalidate={} \
              of dependents={dependents} params={} readtx={} script={} datum={} rolled_failed={}",
             utxo.compared,
@@ -269,7 +269,7 @@ impl fmt::Display for StateTallies {
             if !t.disagree.is_empty() {
                 write!(f, "\nSTATE {name} disagree={}", t.disagree.len())?;
                 if name == "as_output" {
-                    write!(f, " of in_run={in_run}")?;
+                    write!(f, " of sub_only={sub_only}")?;
                 }
                 for d in t.disagree.iter().take(20) {
                     write!(f, "\nDIFF {name} {d}")?;
@@ -486,7 +486,7 @@ mod tests {
         assert!(!state.pass());
         assert!(state
             .to_string()
-            .contains("\nSTATE as_output disagree=1 of in_run=0\n"));
+            .contains("\nSTATE as_output disagree=1 of sub_only=0\n"));
     }
 
     #[test]

@@ -142,7 +142,6 @@ async fn read_utxo_data<'a>(
         .collect()
 }
 
-/// The fields of a served output that state other values than the ledger's output bytes, only `ParsedState` when Dolos serves no parsed output.
 fn parsed_differing(
     id: RecordId,
     ledger: &[u8],
@@ -1275,7 +1274,7 @@ fn compare_as_output(
     for block in rolled {
         let served = compare_served(kind, &makers, block, services);
         state.seeded_unjudged += served.seeded;
-        state.in_run += served.sub_only;
+        state.sub_only += served.sub_only;
         for (id, tally) in served.records {
             checks.entry(id).or_default().merge(tally);
         }
