@@ -147,7 +147,7 @@ pub fn estimate_tx_calls<D: Domain>(
     estimate_decoded::<D>(&tx, utxos, &pparams)
 }
 
-/// The minimum fee the ledger charges a transaction under the active parameters, none outside Dijkstra.
+/// The minimum fee `dijkstra_min_fee` computes for a transaction under the active parameters, none outside Dijkstra.
 pub fn min_fee<D: Domain>(
     cbor: &[u8],
     utxos: &MempoolAwareUtxoStore<D>,

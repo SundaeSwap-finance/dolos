@@ -61,7 +61,7 @@ pub fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
     }
 }
 
-/// The count of items one comparison looked at and the ones that disagreed.
+/// The number of items one comparison checked and a description of each that disagreed.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Tally {
     pub compared: usize,
@@ -145,7 +145,7 @@ impl StateTallies {
         ]
     }
 
-    /// Whether every block rolled, every named comparison looked at something, and every comparison agreed on all it looked at.
+    /// Whether every block rolled forward, every named tally compared at least one item, no tally holds a disagreement, and no known entry is stale.
     pub fn pass(&self) -> bool {
         let tallies = self.named();
         let agree = tallies
