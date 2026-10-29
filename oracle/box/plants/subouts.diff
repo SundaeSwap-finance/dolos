@@ -1,0 +1,8 @@
+diff --git a/src/serve/grpc/block_context.rs b/src/serve/grpc/block_context.rs
+--- a/src/serve/grpc/block_context.rs
++++ b/src/serve/grpc/block_context.rs
+@@ -33,3 +33,4 @@ fn made_outputs(block: &MultiEraBlock<'_>) -> UtxoMap {
+     dolos_core::applied_txs(block)
+         .into_iter()
++        .filter(|(_, tx)| tx.as_dijkstra_sub().is_none())
+         .flat_map(|(_, tx)| {

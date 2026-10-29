@@ -1,11 +1,11 @@
 #!/bin/sh
 # Judges the oracle branch head and each named arm, one oracle run each.
-# Usage: [REV=ref] [ARMS="head colret coin inflight rodrigo-reverted rob-reverted cost revalidate"] breaks.sh
+# Usage: [REV=ref] [ARMS="head colret coin inflight rodrigo-reverted rob-reverted cost revalidate subouts"] breaks.sh
 # The branch is read from the bare repository $ROOT/dolos.git.
 set -eu
 ROOT=${ROOT:-/opt/build/ledger-oracle-1027}
 REV=${REV:-feat/ledger-oracle}
-ARMS=${ARMS:-head colret coin inflight rodrigo-reverted rob-reverted cost revalidate}
+ARMS=${ARMS:-head colret coin inflight rodrigo-reverted rob-reverted cost revalidate subouts}
 MIN_FREE_G=${MIN_FREE_G:-6}
 HERE=$(cd "$(dirname "$0")" && pwd)
 IMAGE="$HERE/in-image.sh"
@@ -50,6 +50,10 @@ plant_revalidate() {
   git -C "$ROOT/$SCRATCH" apply "$HERE/plants/revalidate.diff"
 }
 
+plant_subouts() {
+  git -C "$ROOT/$SCRATCH" apply "$HERE/plants/subouts.diff"
+}
+
 # Checks pallas out at a commit into the scratch pallas tree and points the scratch tree's pallas crates at it.
 pallas_tree() {
   rm -rf "${ROOT:?}/$PALLAS"
@@ -88,6 +92,7 @@ caught() {
     rob-reverted) pattern='^(UNSUPPORTED_UNEXPECTED|DISAGREE|REASON_MISMATCH|STALE_MANIFEST) ic#(851|861|1215|1233) ' ;;
     cost) pattern='^DIFF units supp#[0-9]+ purpose=[0-9]+#[0-9]+ ledger=\(ran ' ;;
     revalidate) pattern='^DIFF revalidate [a-z]+#[0-9]+ kept_after_rollback_to=' ;;
+    subouts) pattern='^DIFF (undo|as_output) [a-z]+#[0-9]+ ' ;;
   esac
   if [ ! -f "$OUT/head.log" ]; then
     echo "ARM $arm NO_HEAD_LOG"
@@ -112,6 +117,7 @@ for arm in $ARMS; do
     coin) plant_coin ;;
     inflight) plant_inflight ;;
     revalidate) plant_revalidate ;;
+    subouts) plant_subouts ;;
     rodrigo-reverted) plant_rodrigo ;;
     rob-reverted) plant_rob ; locked= ;;
     cost) plant_cost ; locked= ;;
