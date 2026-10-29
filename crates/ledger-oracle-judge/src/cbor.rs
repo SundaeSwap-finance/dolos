@@ -9,6 +9,19 @@ pub struct TxIn {
     pub ix: u64,
 }
 
+/// A redeemer's purpose, its tag and its index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Purpose {
+    pub tag: u64,
+    pub index: u64,
+}
+
+impl std::fmt::Display for Purpose {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}#{}", self.tag, self.index)
+    }
+}
+
 /// A CBOR item that is not the shape a reader asked for.
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("cbor at byte {at}: {what}")]
@@ -191,6 +204,16 @@ impl<'b> Reader<'b> {
         })
     }
 
+    fn purpose(&mut self) -> Result<Purpose> {
+        if self.array()? != Len::Def(2) {
+            return self.fail("expected a two element purpose");
+        }
+        Ok(Purpose {
+            tag: self.uint()?,
+            index: self.uint()?,
+        })
+    }
+
     fn txins(&mut self) -> Result<Vec<TxIn>> {
         let len = self.array()?;
         let mut out = Vec::new();
@@ -202,6 +225,11 @@ impl<'b> Reader<'b> {
 /// Decodes one output reference from its CBOR bytes.
 pub fn txin(raw: &[u8]) -> Result<TxIn> {
     Reader::new(raw).txin()
+}
+
+/// Decodes one redeemer purpose from its CBOR bytes.
+pub fn purpose(raw: &[u8]) -> Result<Purpose> {
+    Reader::new(raw).purpose()
 }
 
 /// The inputs one sub transaction body names.

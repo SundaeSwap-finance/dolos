@@ -19,17 +19,21 @@ use dolos_cardano::{
     FixedNamespace as _,
 };
 use dolos_core::{
-    AsyncQueryFacade, BlockHash, ChainPoint, Domain as _, RawBlock, StateStore as _, SyncExt as _,
-    TxoRef,
+    AsyncQueryFacade, BlockHash, ChainError, ChainPoint, Domain as _, RawBlock, StateStore as _,
+    SyncExt as _, TxoRef,
 };
 use itertools::Itertools as _;
 use ledger_oracle_judge::{
     accounts::{self, Account, Credential, LedgerAccounts},
-    cbor::{tx_inputs, TxIn},
+    cbor::{tx_inputs, Purpose, TxIn},
     compare::{ByteVerdict, RollFail, StateTallies, Tally},
     corpus::{self, Corpus},
+    cost::{self, CostSkip, CostTallies, NodeCosts},
     manifest::{self, Candidates, Declared, Feature, KnownList, Locus},
-    record::{CorpusKind, LedgerOutcome, PParams, Phase2, Record, RecordId, UtxoEntry},
+    record::{
+        CorpusKind, Evaluation, LedgerOutcome, LedgerRedeemer, PParams, Phase2, Record, RecordId,
+        Units, UtxoEntry,
+    },
     row::Row,
     run::{origin, InputOrigin, KeptRun},
     verdict::{
@@ -45,8 +49,12 @@ use pallas::{
     },
     crypto::hash::Hasher,
     ledger::{
-        primitives::{conway::DatumOption, dijkstra},
+        primitives::{
+            conway::{DatumOption, RedeemerTag},
+            dijkstra,
+        },
         traverse::{ComputeHash as _, Era, MultiEraOutput, MultiEraTx, OriginalHash as _},
+        validate::phase2::{tx::TxEvalResult, Builtin},
     },
 };
 use seed::SeedPoint;
@@ -210,11 +218,12 @@ async fn read_params(domain: &DomainAdapter) -> cardano::PParams {
     }
 }
 
-/// The validation outcomes, state comparisons and manifest candidates of one corpus.
+/// The validation outcomes, state comparisons, cost comparisons and manifest candidates of one corpus.
 #[derive(Debug, Default)]
 struct Judged {
     validation: ValidationTally,
     state: StateTallies,
+    cost: CostTallies,
     candidates: Candidates,
 }
 
@@ -226,8 +235,71 @@ impl Judged {
 
 impl fmt::Display for Judged {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}\n{}", self.validation, self.state)
+        write!(f, "{}\n{}\n{}", self.validation, self.state, self.cost)
     }
+}
+
+/// The redeemer tag number the ledger writes in a purpose.
+fn tag_number(tag: &RedeemerTag) -> u64 {
+    match tag {
+        RedeemerTag::Spend => 0,
+        RedeemerTag::Mint => 1,
+        RedeemerTag::Cert => 2,
+        RedeemerTag::Reward => 3,
+        RedeemerTag::Vote => 4,
+        RedeemerTag::Propose => 5,
+    }
+}
+
+/// The evaluations Dolos estimates for one transaction, each in the ledger's terms.
+fn node_costs(estimate: Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError>) -> NodeCosts {
+    let results = match estimate {
+        Ok(results) => results,
+        Err(e) => return NodeCosts::Unevaluated(e.to_string()),
+    };
+    let evaluated = results.into_iter().map(|(r, _)| LedgerRedeemer {
+        purpose: Purpose {
+            tag: tag_number(&r.tag),
+            index: r.index.into(),
+        },
+        evaluation: match r.success {
+            true => Evaluation::Ran(Units {
+                mem: r.units.mem,
+                steps: r.units.steps,
+            }),
+            false => Evaluation::Failed(r.failure_message.unwrap_or_default()),
+        },
+    });
+    NodeCosts::Evaluated(evaluated.collect())
+}
+
+/// Counts the redeemer evaluations and the minimum fee Dolos computes for one record against the ledger's.
+fn compare_cost(
+    group: &validate::Group,
+    id: RecordId,
+    record: &Record,
+    declared: Option<&Feature>,
+    cost: &mut CostTallies,
+) {
+    let skip = match (&record.outcome, declared) {
+        (LedgerOutcome::Refused { .. }, _) => Some(CostSkip::Refused),
+        (LedgerOutcome::Accepted { .. }, Some(_)) => Some(CostSkip::Declared),
+        (LedgerOutcome::Accepted { .. }, None) => None,
+    };
+    if let Some(why) = skip {
+        cost.skip(why);
+        return;
+    }
+    if !record.ex_units.is_empty() {
+        let node = node_costs(group.estimate(&record.tx.0));
+        cost.add_units(id, &cost::pair(&record.ex_units, &node));
+    }
+    let fee = match group.min_fee(&record.tx.0) {
+        Ok(Some(fee)) => Ok(fee),
+        Ok(None) => Err("outside Dijkstra".to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    cost.add_fee(id, record.min_fee, fee);
 }
 
 /// The declared support and the known list a judgement reads.
@@ -378,6 +450,7 @@ async fn validate_run<'r>(
     let Judged {
         validation: tally,
         state,
+        cost,
         candidates,
     } = tallies;
     let id_of = |record: &Record| RecordId {
@@ -401,6 +474,7 @@ async fn validate_run<'r>(
                 group.seed(&missing.seeded);
                 tally.dependent.push((id, missing.seeded_by));
             }
+            compare_cost(&group, id, record, manifests.declared.get(&id), cost);
             let dolos = validate::verdict(&group.receive(&record.tx.0));
             let inflight = validate::verdict(&relayed.receive(&record.tx.0));
             if let Some(feature) = declares(&record.outcome, &dolos) {
@@ -1290,6 +1364,7 @@ async fn ledger_oracle() {
     let mut pass = true;
     let manifests = Manifests::committed();
     let mut candidates = Candidates::default();
+    let mut costs = Vec::new();
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind);
         println!("{corpus}");
@@ -1299,7 +1374,12 @@ async fn ledger_oracle() {
         candidates.declared.extend(tallies.candidates.declared);
         let known = tallies.candidates.known.records;
         candidates.known.records.extend(known);
+        costs.push(tallies.cost);
     }
+    let ran_alike: usize = costs.iter().map(|c| c.ran).sum();
+    let cost_pass = cost::pass_all(&costs);
+    println!("COST all ran_alike={ran_alike} pass={cost_pass}");
+    pass &= cost_pass;
     for line in candidates.lines() {
         println!("{line}");
     }

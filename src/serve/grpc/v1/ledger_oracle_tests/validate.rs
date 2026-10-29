@@ -27,7 +27,10 @@ use pallas::{
             KeepRaw, MaybeIndefArray, Nullable, VrfCert,
         },
         traverse::MultiEraBlock,
-        validate::utils::{PostAlonzoError, ValidationError},
+        validate::{
+            phase2::{tx::TxEvalResult, Builtin},
+            utils::{PostAlonzoError, ValidationError},
+        },
     },
 };
 
@@ -205,6 +208,23 @@ impl Group {
         Ok(hash)
     }
 
+    /// The redeemer evaluations Dolos estimates for one transaction against the group's stores and mempool, with the builtins each called.
+    pub(super) fn estimate(
+        &self,
+        tx: &[u8],
+    ) -> Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError> {
+        dolos_cardano::validate::estimate_tx_calls(tx, &self.utxos())
+    }
+
+    /// The minimum fee Dolos computes for one transaction against the group's stores and mempool.
+    pub(super) fn min_fee(&self, tx: &[u8]) -> Result<Option<u64>, ChainError> {
+        dolos_cardano::validate::min_fee(tx, &self.utxos())
+    }
+
+    fn utxos(&self) -> MempoolAwareUtxoStore<'_, DomainAdapter> {
+        MempoolAwareUtxoStore::new(self.domain.state(), self.domain.mempool())
+    }
+
     /// Writes ledger outputs into the state the group reads.
     pub(super) fn seed(&self, entries: &[&UtxoEntry]) {
         let delta = UtxoSetDelta {
@@ -261,9 +281,7 @@ impl Group {
 
     /// Whether the group reads an output at the reference, from the stores or its mempool.
     pub(super) fn sees(&self, txo: TxoRef) -> bool {
-        let utxos =
-            MempoolAwareUtxoStore::<DomainAdapter>::new(self.domain.state(), self.domain.mempool());
-        !utxos.get_utxos([txo].into()).unwrap().is_empty()
+        !self.utxos().get_utxos([txo].into()).unwrap().is_empty()
     }
 }
 

@@ -129,6 +129,21 @@ supplement = describe "SUPPLEMENT" $ do
     let n = length (fixed ^. bodyTxL . outputsTxBodyL)
         crIn = mkTxInPartial (txIdTx fixed) (fromIntegral n)
     submitTx_ (mkBasicTx (mkBasicTxBody & inputsTxBodyL .~ [crIn]) :: Tx TopTx E)
+  -- (program 1.1.0 (lam ctx [[(force (builtin chooseUnit)) (con unit ())] (con unit ())]))
+  it "a V3 script calls chooseUnit" $
+    spendWithV3 "4901010023357369324d"
+  -- (program 1.1.0 (lam ctx [[(force (builtin trace)) (con string "seen")] (con unit ())]))
+  it "a V3 script calls trace" $
+    spendWithV3 "500101002335738921047365656e004981"
+  -- (program 1.1.0 (lam ctx (force [[[(force (builtin ifThenElse)) [(force (builtin nullList)) (con (list integer) [])]] (delay (con unit ()))] (delay (error))])))
+  it "a V3 script calls nullList" $
+    spendWithV3 "500101002533357346ae8d2f5802930b01"
+  -- (program 1.1.0 (lam ctx (force [[[(force (builtin ifThenElse)) [[(builtin equalsInteger) [[(builtin quotientInteger) (con integer -7)] (con integer 2)]] (con integer -3)]] (delay (con unit ()))] (delay (error))])))
+  it "a V3 script calls quotientInteger" $
+    spendWithV3 "5601010025333573466e1ccdc22401a90022400a2930b1"
+  -- (program 1.1.0 (lam ctx (force [[[(force (builtin ifThenElse)) [[(builtin equalsInteger) [(force (builtin headList)) [[(force (builtin dropList)) (con integer 2)] (con (list integer) [1, 2, 3])]]] (con integer 3)]] (delay (con unit ()))] (delay (error))])))
+  it "a V3 script calls dropList" $
+    spendWithV3 "581d01010025333573466e1cd5d099abd8480112f582050483120061498581"
 
 -- | Locks coin at a V3 script given as its CBOR hex, then spends it with that script and no datum.
 spendWithV3 :: ByteString -> ImpTestM E ()

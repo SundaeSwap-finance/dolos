@@ -3,13 +3,14 @@ use std::borrow::Cow;
 
 use dolos_core::{
     ChainError, ChainPoint, Domain, EraCbor, Genesis, MempoolAwareUtxoStore, MempoolStore,
-    MempoolTx, StateStore,
+    MempoolTx, StateStore, UtxoMap,
 };
 
 use pallas::ledger::{
     primitives::{NetworkId, TransactionInput},
     traverse::{Era, MultiEraInput, MultiEraOutput, MultiEraTx},
 };
+use pallas_validate::phase2::{script_context::SlotConfig, tx::TxEvalResult, Builtin};
 use pallas_validate::utils::{
     CertState, DijkstraProtParams, DijkstraRegistrationState, MultiEraProtocolParameters,
 };
@@ -52,28 +53,8 @@ pub fn validate_tx<D: Domain>(
         },
     };
 
-    let input_refs = tx.requires().iter().map(From::from).collect();
-
-    let utxos_matches = utxos.get_utxos(input_refs)?;
-
-    let mut pallas_utxos = pallas_validate::utils::UTxOs::new();
-
-    for (txoref, eracbor) in utxos_matches.iter() {
-        let tx_in = TransactionInput {
-            transaction_id: txoref.0,
-            index: txoref.1.into(),
-        };
-
-        let input = MultiEraInput::AlonzoCompatible(<Box<Cow<'_, TransactionInput>>>::from(
-            Cow::Owned(tx_in),
-        ));
-
-        let eracbor = eracbor.as_ref();
-
-        let output = MultiEraOutput::try_from(eracbor)?;
-
-        pallas_utxos.insert(input, output);
-    }
+    let utxos_matches = required_utxos(&tx, utxos)?;
+    let pallas_utxos = phase_one_utxos(&utxos_matches)?;
 
     let mut cert_state = certificate_state(&tx, utxos)?;
     pallas_validate::phase1::validate_tx(&tx, 0, &env, &pallas_utxos, &mut cert_state)?;
@@ -101,6 +82,36 @@ pub fn validate_tx<D: Domain>(
     Ok(tx)
 }
 
+/// The outputs the inputs of a transaction name, from the state and the mempool.
+pub fn required_utxos<D: Domain>(
+    tx: &MultiEraTx<'_>,
+    utxos: &MempoolAwareUtxoStore<D>,
+) -> Result<UtxoMap, ChainError> {
+    Ok(utxos.get_utxos(tx.requires().iter().map(From::from).collect())?)
+}
+
+/// The phase one view of resolved outputs.
+pub fn phase_one_utxos(matches: &UtxoMap) -> Result<pallas_validate::utils::UTxOs<'_>, ChainError> {
+    let mut pallas_utxos = pallas_validate::utils::UTxOs::new();
+
+    for (txoref, eracbor) in matches.iter() {
+        let tx_in = TransactionInput {
+            transaction_id: txoref.0,
+            index: txoref.1.into(),
+        };
+
+        let input = MultiEraInput::AlonzoCompatible(<Box<Cow<'_, TransactionInput>>>::from(
+            Cow::Owned(tx_in),
+        ));
+
+        let output = MultiEraOutput::try_from(eracbor.as_ref())?;
+
+        pallas_utxos.insert(input, output);
+    }
+
+    Ok(pallas_utxos)
+}
+
 pub fn evaluate_tx<D: Domain>(
     cbor: &[u8],
     utxos: &MempoolAwareUtxoStore<D>,
@@ -125,16 +136,72 @@ pub fn estimate_tx<D: Domain>(
     evaluate_decoded::<D>(&tx, utxos, &pparams, true)
 }
 
+/// [`estimate_tx`] of a Dijkstra transaction, with the builtins each redeemer's evaluation called in order of first call.
+pub fn estimate_tx_calls<D: Domain>(
+    cbor: &[u8],
+    utxos: &MempoolAwareUtxoStore<D>,
+) -> Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError> {
+    let active = crate::load_effective_pparams::<D>(utxos.state())?;
+    let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
+    let pparams = validation_parameters(&active)?;
+    estimate_decoded::<D>(&tx, utxos, &pparams)
+}
+
+/// The minimum fee the ledger charges a transaction under the active parameters, none outside Dijkstra.
+pub fn min_fee<D: Domain>(
+    cbor: &[u8],
+    utxos: &MempoolAwareUtxoStore<D>,
+) -> Result<Option<u64>, ChainError> {
+    let active = crate::load_effective_pparams::<D>(utxos.state())?;
+    let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
+    let (MultiEraProtocolParameters::Dijkstra(pp), MultiEraTx::Dijkstra(dijkstra)) =
+        (validation_parameters(&active)?, &tx)
+    else {
+        return Ok(None);
+    };
+    let matches = required_utxos(&tx, utxos)?;
+    let resolved = phase_one_utxos(&matches)?;
+    Ok(Some(pallas_validate::phase1::dijkstra::dijkstra_min_fee(
+        dijkstra, &resolved, &pp,
+    )?))
+}
+
 fn evaluate_decoded<D: Domain>(
     tx: &MultiEraTx<'_>,
     utxos: &MempoolAwareUtxoStore<D>,
     pparams: &MultiEraProtocolParameters,
     estimate: bool,
 ) -> Result<pallas_validate::phase2::EvalReport, ChainError> {
+    if estimate && tx.era() == Era::Dijkstra {
+        let estimates = estimate_decoded::<D>(tx, utxos, pparams)?;
+        return Ok(estimates.into_iter().map(|(result, _)| result).collect());
+    }
     if !requests_scripts(tx) {
         return Ok(vec![]);
     }
+    let (utxos, slot_config) = evaluation_inputs::<D>(tx, utxos)?;
+    pallas_validate::phase2::evaluate_tx(tx, pparams, &utxos, &slot_config)
+        .map_err(evaluation_error)
+}
 
+fn estimate_decoded<D: Domain>(
+    tx: &MultiEraTx<'_>,
+    utxos: &MempoolAwareUtxoStore<D>,
+    pparams: &MultiEraProtocolParameters,
+) -> Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError> {
+    if !requests_scripts(tx) {
+        return Ok(vec![]);
+    }
+    let (utxos, slot_config) = evaluation_inputs::<D>(tx, utxos)?;
+    pallas_validate::phase2::estimate_tx_calls(tx, pparams, &utxos, &slot_config)
+        .map_err(evaluation_error)
+}
+
+/// The resolved inputs and the slot configuration a phase two evaluation reads.
+fn evaluation_inputs<D: Domain>(
+    tx: &MultiEraTx<'_>,
+    utxos: &MempoolAwareUtxoStore<D>,
+) -> Result<(pallas_validate::utils::UtxoMap, SlotConfig), ChainError> {
     use dolos_core::TxoRef;
 
     let eras = crate::eras::load_era_summary::<D>(utxos.state())?;
@@ -143,10 +210,7 @@ fn evaluate_decoded<D: Domain>(
     // needs POSIXTime in milliseconds. The conversion lives in the helper.
     let slot_config = eras.to_pallas_slot_config();
 
-    let input_refs = tx.requires().iter().map(From::from).collect();
-
-    let utxos: pallas_validate::utils::UtxoMap = utxos
-        .get_utxos(input_refs)?
+    let utxos: pallas_validate::utils::UtxoMap = required_utxos(tx, utxos)?
         .into_iter()
         .map(|(TxoRef(a, b), eracbor)| {
             let era = eracbor.era().try_into()?;
@@ -158,14 +222,7 @@ fn evaluate_decoded<D: Domain>(
         })
         .collect::<Result<_, _>>()?;
 
-    let report = if estimate && tx.era() == Era::Dijkstra {
-        pallas_validate::phase2::estimate_tx(tx, pparams, &utxos, &slot_config)
-    } else {
-        pallas_validate::phase2::evaluate_tx(tx, pparams, &utxos, &slot_config)
-    }
-    .map_err(evaluation_error)?;
-
-    Ok(report)
+    Ok((utxos, slot_config))
 }
 
 /// The chain error for a phase two evaluation pallas could not complete.

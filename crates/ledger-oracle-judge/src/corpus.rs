@@ -9,10 +9,10 @@ use crate::{
 };
 
 /// The sha256 of the decompressed Imp spec corpus.
-pub const IC_SHA256: &str = "8b227044436b74fd7bab7f4cc3d1690da46f60c4e7d2a0d8b271d9248c7133a8";
+pub const IC_SHA256: &str = "50d342b65ffbc133b2ce2ab675f13194ec6e3d5545853644856443394242e746";
 
 /// The sha256 of the decompressed supplement corpus.
-pub const SUPP_SHA256: &str = "9cec50bbc6446aeab883a334d7cb8157cd1825c937fa06289372344ba79cd5e2";
+pub const SUPP_SHA256: &str = "0232f30a1ab92a4ac285899f7da5acb607f0251a6fadf0757c1e0aa8c4f1b556";
 
 const IC_GZ: &[u8] = include_bytes!("../../../test_data/ledger-oracle/ic.jsonl.gz");
 const SUPP_GZ: &[u8] = include_bytes!("../../../test_data/ledger-oracle/supp.jsonl.gz");
@@ -235,11 +235,11 @@ mod tests {
     fn committed_corpora_load_into_their_runs() {
         assert_eq!(
             load(CorpusKind::Ic).unwrap().to_string(),
-            "CORPUS ic sha=8b227044436b74fd records=1405 runs=261 kept_runs=236 kept_records=1188 excluded_epoch=19 excluded_pparams=8"
+            "CORPUS ic sha=50d342b65ffbc133 records=1405 runs=261 kept_runs=236 kept_records=1188 excluded_epoch=19 excluded_pparams=8"
         );
         assert_eq!(
             load(CorpusKind::Supp).unwrap().to_string(),
-            "CORPUS supp sha=9cec50bbc6446aea records=39 runs=12 kept_runs=12 kept_records=39 excluded_epoch=0 excluded_pparams=0"
+            "CORPUS supp sha=0232f30a1ab92a4a records=54 runs=17 kept_runs=17 kept_records=54 excluded_epoch=0 excluded_pparams=0"
         );
     }
 
@@ -251,7 +251,7 @@ mod tests {
         let e = verify(CorpusKind::Ic, &bytes, IC_SHA256).unwrap_err();
         assert!(e
             .to_string()
-            .starts_with("CORPUS ic sha mismatch expected=8b227044"));
+            .starts_with("CORPUS ic sha mismatch expected=50d342b6"));
     }
 
     #[test]
@@ -322,6 +322,6 @@ mod tests {
             input_totals(CorpusKind::Ic),
             [1476, 83, 3, 376, 378, 16, 377]
         );
-        assert_eq!(input_totals(CorpusKind::Supp), [49, 5, 1, 6, 8, 0, 8]);
+        assert_eq!(input_totals(CorpusKind::Supp), [69, 10, 1, 6, 8, 0, 8]);
     }
 }

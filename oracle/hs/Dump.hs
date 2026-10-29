@@ -8,14 +8,17 @@
 -- | One JSON line per LEDGER rule run, written from the Imp post submit hook.
 module Dump (E, dumpTo, failurePath) where
 
+import Cardano.Ledger.Alonzo.Plutus.Evaluate (evalTxExUnits)
 import Cardano.Ledger.Alonzo.Tx (IsPhase2Valid (..), isPhase2ValidTxL)
 import Cardano.Ledger.BaseTypes (Globals (..), Network, epochInfoPure, unNonZero)
 import Cardano.Ledger.Binary (serialize')
+import Cardano.Ledger.Coin (Coin (..))
 import Cardano.Ledger.Core
 import Cardano.Ledger.Dijkstra (DijkstraEra)
+import Cardano.Ledger.Plutus.ExUnits (ExUnits (..))
 import Cardano.Ledger.Shelley.LedgerState (lsCertStateL, lsUTxOStateL)
 import Cardano.Ledger.Shelley.Rules (LedgerEnv (..))
-import Cardano.Ledger.State (UTxO (..), accountsL, certDStateL, utxoL)
+import Cardano.Ledger.State (UTxO (..), accountsL, certDStateL, getMinFeeTxUtxo, utxoL)
 import Cardano.Slotting.EpochInfo (epochInfoSize)
 import Cardano.Slotting.Slot (EpochNo (..), EpochSize (..), SlotNo (..))
 import Control.Monad.IO.Class (liftIO)
@@ -145,7 +148,17 @@ dumpTo out g (TRC (env, st, stAnn)) res = liftIO $ do
           , "pre_utxo" A..= pairs pre
           , "accounts_pre" A..= accountsJson st
           , "outcome" A..= outcome
+          , "ex_units" A..= map evaluationJson (Map.toList (evalTxExUnits (ledgerPp env) tx pre (epochInfo g) (systemStart g)))
+          , "min_fee" A..= unCoin (getMinFeeTxUtxo (ledgerPp env) tx pre)
           ]
             ++ [ "globals" A..= globalsJson g e | n == 0, Just e <- [epoch] ]
   writeIORef lastPost (maybe (Just pre) Just post)
   BL8.appendFile out (A.encode line <> "\n")
+  where
+    evaluationJson (purpose, result) =
+      A.object
+        [ "purpose" A..= hex (serialize' (eraProtVerHigh @E) purpose)
+        , "evaluation" A..= case result of
+            Right (ExUnits mem steps) -> A.object ["ran" A..= [mem, steps]]
+            Left failure -> A.object ["failed" A..= take 300 (show failure)]
+        ]

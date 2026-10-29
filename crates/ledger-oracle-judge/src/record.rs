@@ -4,7 +4,7 @@ use serde::{de::Error as _, Deserialize, Deserializer};
 
 use crate::{
     accounts::LedgerAccounts,
-    cbor::{self, TxIn},
+    cbor::{self, Purpose, TxIn},
     refusal::RefusalClass,
 };
 
@@ -54,6 +54,60 @@ impl<'de> Deserialize<'de> for TxIn {
         let Bytes(raw) = Bytes::deserialize(d)?;
         cbor::txin(&raw).map_err(D::Error::custom)
     }
+}
+
+impl<'de> Deserialize<'de> for Purpose {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let Bytes(raw) = Bytes::deserialize(d)?;
+        cbor::purpose(&raw).map_err(D::Error::custom)
+    }
+}
+
+/// Execution units, memory and steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(from = "(u64, u64)")]
+pub struct Units {
+    pub mem: u64,
+    pub steps: u64,
+}
+
+impl From<(u64, u64)> for Units {
+    fn from((mem, steps): (u64, u64)) -> Self {
+        Units { mem, steps }
+    }
+}
+
+impl fmt::Display for Units {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "mem={} steps={}", self.mem, self.steps)
+    }
+}
+
+/// What one evaluation of a redeemer returned.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
+pub enum Evaluation {
+    Ran(Units),
+    Failed(String),
+}
+
+impl fmt::Display for Evaluation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Evaluation::Ran(units) => write!(f, "ran {units}"),
+            Evaluation::Failed(why) => {
+                write!(f, "failed {}", why.chars().take(120).collect::<String>())
+            }
+        }
+    }
+}
+
+/// The ledger's evaluation of one redeemer, with the redeemer's purpose.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LedgerRedeemer {
+    pub purpose: Purpose,
+    pub evaluation: Evaluation,
 }
 
 /// A list with at least one element.
@@ -189,6 +243,8 @@ pub struct Record {
     pub pre_utxo: Vec<UtxoEntry>,
     pub accounts_pre: LedgerAccounts,
     pub outcome: LedgerOutcome,
+    pub ex_units: Vec<LedgerRedeemer>,
+    pub min_fee: u64,
     #[serde(default)]
     pub globals: Option<Globals>,
 }
