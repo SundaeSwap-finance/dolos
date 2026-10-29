@@ -71,7 +71,7 @@ pallas_tree() {
 plant_rob() {
   pallas_tree "$ROB_BASE"
   git -C "$ROOT/$PALLAS" revert -m 1 --no-commit f3419a3a
-  # Adds the phase 2 unsupported type that ChainError holds, with every message unchanged.
+  # Adds the pallas items Dolos names that this commit lacks, with every refusal message unchanged.
   git -C "$ROOT/$PALLAS" apply "$HERE/plants/rob-surface.diff"
 }
 
