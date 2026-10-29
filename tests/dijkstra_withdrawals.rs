@@ -434,7 +434,11 @@ fn confirmation_rollback_and_drop_update_withdrawal_reservations() {
 }
 
 // Unregisters the synthetic credential and returns a transaction that registers it.
-fn registration(domain: &WithdrawalDomain, txs: &[Vec<u8>], credential: &n::StakeCredential) -> Vec<u8> {
+fn registration(
+    domain: &WithdrawalDomain,
+    txs: &[Vec<u8>],
+    credential: &n::StakeCredential,
+) -> Vec<u8> {
     let key = minicbor::to_vec(credential).unwrap().into();
     let w = domain.state().start_writer().unwrap();
     w.delete_entity(AccountState::NS, &key).unwrap();
@@ -499,12 +503,26 @@ fn revalidation_keeps_pending_transactions_the_ledger_still_accepts() {
     let t = domain
         .receive_tx("withdraw", &domain.read_chain(), &txs[0])
         .unwrap();
-    assert_eq!(domain.revalidate_pending(&domain.read_chain()).unwrap(), Vec::<TxHash>::new());
-    let pending: Vec<_> = domain.mempool().peek_pending().iter().map(|x| x.hash).collect();
+    assert_eq!(
+        domain.revalidate_pending(&domain.read_chain()).unwrap(),
+        Vec::<TxHash>::new()
+    );
+    let pending: Vec<_> = domain
+        .mempool()
+        .peek_pending()
+        .iter()
+        .map(|x| x.hash)
+        .collect();
     assert_eq!(pending, vec![a, t]);
     domain.mempool().mark_inflight(&[a]).unwrap();
-    assert_eq!(domain.revalidate_pending(&domain.read_chain()).unwrap(), Vec::<TxHash>::new());
-    assert_eq!(domain.mempool().check_status(&t).stage, MempoolTxStage::Pending);
+    assert_eq!(
+        domain.revalidate_pending(&domain.read_chain()).unwrap(),
+        Vec::<TxHash>::new()
+    );
+    assert_eq!(
+        domain.mempool().check_status(&t).stage,
+        MempoolTxStage::Pending
+    );
 }
 
 #[test]
@@ -522,14 +540,85 @@ fn a_pending_withdrawal_is_dropped_once_its_registration_is_dropped() {
         .mempool()
         .confirm(&ChainPoint::Slot(1400011), &[], &[], 10, 1)
         .unwrap();
-    assert_eq!(domain.revalidate_pending(&domain.read_chain()).unwrap(), vec![t]);
+    assert_eq!(
+        domain.revalidate_pending(&domain.read_chain()).unwrap(),
+        vec![t]
+    );
     assert!(domain.mempool().peek_pending().is_empty());
     let finalized = domain.mempool().dump_finalized(0, 10);
-    let stages: Vec<_> = finalized.items.iter().map(|x| (x.hash, x.stage.clone())).collect();
+    let stages: Vec<_> = finalized
+        .items
+        .iter()
+        .map(|x| (x.hash, x.stage.clone()))
+        .collect();
     assert_eq!(
         stages,
         vec![(a, MempoolTxStage::Dropped), (t, MempoolTxStage::Dropped)]
     );
+}
+
+#[test]
+fn a_rolled_back_registration_stays_ahead_of_its_pending_withdrawal() {
+    let (domain, txs, credential) = synthetic(&[0], 0);
+    let register = registration(&domain, &txs, &credential);
+    let a = domain
+        .receive_tx("register", &domain.read_chain(), &register)
+        .unwrap();
+    domain.mempool().mark_inflight(&[a]).unwrap();
+    let t = domain
+        .receive_tx("withdraw", &domain.read_chain(), &txs[0])
+        .unwrap();
+    domain
+        .mempool()
+        .confirm(&ChainPoint::Slot(1400011), &[a], &[], 10, 10)
+        .unwrap();
+    domain
+        .mempool()
+        .confirm(&ChainPoint::Slot(1400007), &[], &[a], 10, 10)
+        .unwrap();
+    let pending: Vec<_> = domain
+        .mempool()
+        .peek_pending()
+        .iter()
+        .map(|x| x.hash)
+        .collect();
+    assert_eq!(pending, vec![a, t]);
+    assert_eq!(
+        domain.revalidate_pending(&domain.read_chain()).unwrap(),
+        Vec::<TxHash>::new()
+    );
+}
+
+#[test]
+fn a_rolled_back_registration_whose_input_is_spent_drops_its_withdrawal() {
+    let (domain, txs, credential) = synthetic(&[0], 0);
+    let register = registration(&domain, &txs, &credential);
+    let a = domain
+        .receive_tx("register", &domain.read_chain(), &register)
+        .unwrap();
+    domain.mempool().mark_inflight(&[a]).unwrap();
+    let t = domain
+        .receive_tx("withdraw", &domain.read_chain(), &txs[0])
+        .unwrap();
+    domain
+        .mempool()
+        .confirm(&ChainPoint::Slot(1400011), &[a], &[], 10, 10)
+        .unwrap();
+    domain
+        .mempool()
+        .confirm(&ChainPoint::Slot(1400007), &[], &[a], 10, 10)
+        .unwrap();
+    // Model a block on the new branch spending the registration's input.
+    let mut delta = UtxoSetDelta::default();
+    delta
+        .consumed_utxo
+        .insert(TxoRef([120; 32].into(), 0), Arc::new(EraCbor(8, vec![])));
+    let w = domain.state().start_writer().unwrap();
+    w.apply_utxoset(&delta).unwrap();
+    w.commit().unwrap();
+    let dropped = domain.revalidate_pending(&domain.read_chain()).unwrap();
+    assert!(dropped.contains(&a) && dropped.contains(&t), "{dropped:?}");
+    assert!(domain.mempool().peek_pending().is_empty());
 }
 
 #[test]

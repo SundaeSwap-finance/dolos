@@ -173,8 +173,8 @@ pub trait MempoolStore: Clone + Send + Sync + 'static {
     /// queue.
     fn has_pending(&self) -> bool;
 
-    /// Returns all transactions from the pending queue in insertion order.
-    /// Does not remove them.
+    /// Returns all transactions from the pending queue in the order they were
+    /// first admitted. Does not remove them.
     fn peek_pending(&self) -> Vec<MempoolTx>;
 
     /// Moves matching transactions from pending to the inflight table
@@ -204,7 +204,8 @@ pub trait MempoolStore: Clone + Send + Sync + 'static {
     ///
     /// For `seen_txs`: transitions to `Confirmed` and increments the
     /// confirmation counter. For `unseen_txs` (rollback): moves the
-    /// transaction back to the pending queue so it can be re-submitted.
+    /// transaction back to the pending queue, at the place it was first
+    /// admitted, so it can be re-submitted.
     /// Hashes not currently tracked are silently ignored.
     ///
     /// `point` is the block's chain point. On first confirmation, it is

@@ -89,7 +89,7 @@ pub trait SubmitExt: Domain {
         Ok(hash)
     }
 
-    /// Validates each pending transaction again, in arrival order, and drops those the ledger now refuses.
+    /// Validates each pending transaction again, in queue order, and drops those the ledger now refuses.
     fn revalidate_pending(&self, chain: &Self::Chain) -> Result<Vec<TxHash>, DomainError> {
         if !self.mempool().has_pending() {
             return Ok(vec![]);

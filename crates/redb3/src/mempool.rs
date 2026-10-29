@@ -245,6 +245,8 @@ struct InflightRecord {
     confirmed_at: Option<Vec<u8>>,
     #[n(4)]
     non_confirmations: u32,
+    #[n(5)]
+    seq: Option<u64>,
 }
 
 impl redb::Value for InflightRecord {
@@ -352,13 +354,14 @@ impl FinalizedEntry {
 }
 
 impl InflightRecord {
-    fn new(payload: EraCbor) -> Self {
+    fn new(payload: EraCbor, seq: u64) -> Self {
         Self {
             stage: InflightStage::Propagated,
             confirmations: 0,
             payload,
             confirmed_at: None,
             non_confirmations: 0,
+            seq: Some(seq),
         }
     }
 
@@ -517,16 +520,25 @@ impl PendingTable {
         Ok(false)
     }
 
+    fn next_seq(wx: &redb::WriteTransaction) -> Result<u64, RedbMempoolError> {
+        let table = wx.open_table(Self::DEF)?;
+        let pending = table.last()?.map(|entry| entry.0.value().seq());
+        let inflight = InflightTable::collect_all(wx)?;
+        let held = inflight.iter().filter_map(|(_, record)| record.seq);
+        Ok(pending
+            .into_iter()
+            .chain(held)
+            .max()
+            .map_or(0, |seq| seq + 1))
+    }
+
     fn insert(
         wx: &redb::WriteTransaction,
+        seq: u64,
         hash: &TxHash,
         payload: &EraCbor,
     ) -> Result<(), RedbMempoolError> {
         let mut table = wx.open_table(Self::DEF)?;
-        let seq = match table.last()? {
-            Some(entry) => entry.0.value().seq() + 1,
-            None => 0,
-        };
         let key = DbPendingKey::new(seq, hash);
         table.insert(key, DbEraCbor(payload.clone()))?;
         Ok(())
@@ -535,13 +547,14 @@ impl PendingTable {
     fn drain_by_hashes(
         wx: &redb::WriteTransaction,
         hashes: &HashSet<TxHash>,
-    ) -> Result<Vec<(TxHash, EraCbor)>, RedbMempoolError> {
+    ) -> Result<Vec<(u64, TxHash, EraCbor)>, RedbMempoolError> {
         let mut table = wx.open_table(Self::DEF)?;
         let extracted = table.extract_if(|key, _value| hashes.contains(&key.hash()))?;
         extracted
             .map(|entry| {
                 let (key, value) = entry?;
-                Ok((key.value().hash(), value.value().0))
+                let key = key.value();
+                Ok((key.seq(), key.hash(), value.value().0))
             })
             .collect()
     }
@@ -778,7 +791,8 @@ impl RedbMempool {
         if InflightTable::read(&wx, &tx.hash)?.is_some() {
             return Err(MempoolError::DuplicateTx.into());
         }
-        PendingTable::insert(&wx, &tx.hash, &tx.payload)?;
+        let seq = PendingTable::next_seq(&wx)?;
+        PendingTable::insert(&wx, seq, &tx.hash, &tx.payload)?;
         wx.commit()?;
         self.notify(tx);
         Ok(())
@@ -816,8 +830,8 @@ impl MempoolStore for RedbMempool {
         self.with_write_tx(|wx| {
             let drained = PendingTable::drain_by_hashes(wx, &hash_set)?;
             let mut events = Vec::new();
-            for (hash, payload) in drained {
-                let record = InflightRecord::new(payload);
+            for (seq, hash, payload) in drained {
+                let record = InflightRecord::new(payload, seq);
                 let tx = record.to_mempool_tx(hash);
                 InflightTable::write(wx, &hash, &record)?;
                 debug!(tx.hash = %tx.hash, "tx inflight");
@@ -898,7 +912,11 @@ impl MempoolStore for RedbMempool {
                 } else if unseen_set.contains(&tx_hash) {
                     record.retry();
                     InflightTable::remove(wx, &tx_hash)?;
-                    PendingTable::insert(wx, &tx_hash, &record.payload)?;
+                    let seq = match record.seq {
+                        Some(seq) => seq,
+                        None => PendingTable::next_seq(wx)?,
+                    };
+                    PendingTable::insert(wx, seq, &tx_hash, &record.payload)?;
                     let mut tx = record.to_mempool_tx(tx_hash);
                     tx.retry();
                     debug!(tx.hash = %tx.hash, "retry tx");
@@ -949,8 +967,8 @@ impl MempoolStore for RedbMempool {
         self.with_write_tx(|wx| {
             let drained = PendingTable::drain_by_hashes(wx, &hash_set)?;
             let mut events = Vec::new();
-            for (hash, payload) in drained {
-                let record = InflightRecord::new(payload);
+            for (seq, hash, payload) in drained {
+                let record = InflightRecord::new(payload, seq);
                 let mut tx = record.to_mempool_tx(hash);
                 FinalizedTable::append(wx, record.into_dropped_entry(hash))?;
                 tx.stage = MempoolTxStage::Dropped;
@@ -1240,6 +1258,24 @@ mod tests {
         let page2 = store.dump_finalized(page.next_cursor.unwrap(), 50);
         assert_eq!(page2.items.len(), 1);
         assert!(page2.next_cursor.is_none());
+    }
+
+    fn pending(store: &RedbMempool) -> Vec<TxHash> {
+        store.peek_pending().iter().map(|tx| tx.hash).collect()
+    }
+
+    #[test]
+    fn a_pending_transaction_admitted_later_stays_behind_one_requeued() {
+        let store = test_store();
+        let (a, t, u) = (test_hash(1), test_hash(2), test_hash(3));
+        store.receive(test_tx(1)).unwrap();
+        store.mark_inflight(&[a]).unwrap();
+        store.receive(test_tx(2)).unwrap();
+        store.confirm(&test_point(), &[a], &[], 10, 10).unwrap();
+        store.confirm(&test_point_2(), &[], &[a], 10, 10).unwrap();
+        assert_eq!(pending(&store), [a, t]);
+        store.receive(test_tx(3)).unwrap();
+        assert_eq!(pending(&store), [a, t, u]);
     }
 
     #[test]
