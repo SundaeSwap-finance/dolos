@@ -888,6 +888,10 @@ impl MempoolStore for RedbMempool {
         self.with_write_tx(|wx| {
             let seen_set: HashSet<TxHash> = seen_txs.iter().copied().collect();
             let unseen_set: HashSet<TxHash> = unseen_txs.iter().copied().collect();
+            // A pending transaction in the block is confirmed like an inflight one.
+            for (seq, hash, payload) in PendingTable::drain_by_hashes(wx, &seen_set)? {
+                InflightTable::write(wx, &hash, &InflightRecord::new(payload, seq))?;
+            }
             let entries = InflightTable::collect_all(wx)?;
             let mut events = Vec::new();
 
@@ -1276,6 +1280,18 @@ mod tests {
         assert_eq!(pending(&store), [a, t]);
         store.receive(test_tx(3)).unwrap();
         assert_eq!(pending(&store), [a, t, u]);
+    }
+
+    #[test]
+    fn a_pending_transaction_seen_in_a_block_is_confirmed() {
+        let store = test_store();
+        let (a, t) = (test_hash(1), test_hash(2));
+        store.receive(test_tx(1)).unwrap();
+        store.receive(test_tx(2)).unwrap();
+        store.confirm(&test_point_2(), &[a], &[], 10, 10).unwrap();
+        assert_eq!(store.check_status(&a).stage, MempoolTxStage::Confirmed);
+        assert_eq!(store.check_status(&a).confirmed_at, Some(test_point_2()));
+        assert_eq!(pending(&store), [t]);
     }
 
     #[test]

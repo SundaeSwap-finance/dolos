@@ -231,20 +231,21 @@ impl MempoolStore for EphemeralMempool {
         drop_threshold: u32,
     ) -> Result<(), MempoolError> {
         let mut state = self.state.write().unwrap();
+        let seen_set: HashSet<&TxHash> = seen_txs.iter().collect();
+        let unseen_set: HashSet<&TxHash> = unseen_txs.iter().collect();
 
         // Promote Propagated txs into the acknowledged map so the confirm
         // logic below applies uniformly to every inflight tx.
         let propagated: Vec<(Seq, MempoolTx)> = state.inflight.drain(..).collect();
-        for (seq, tx) in propagated {
+        // A pending transaction in the block is confirmed like an inflight one.
+        let included = state.take_pending(&seen_set);
+        for (seq, tx) in propagated.into_iter().chain(included) {
             state.acknowledged.insert(tx.hash, (seq, tx));
         }
 
         if state.acknowledged.is_empty() {
             return Ok(());
         }
-
-        let seen_set: HashSet<&TxHash> = seen_txs.iter().collect();
-        let unseen_set: HashSet<&TxHash> = unseen_txs.iter().collect();
 
         let hashes: Vec<TxHash> = state.acknowledged.keys().copied().collect();
 
@@ -426,5 +427,22 @@ mod tests {
         assert_eq!(pending(&store), [a, t]);
         store.receive(tx(3)).unwrap();
         assert_eq!(pending(&store), [a, t, u]);
+    }
+
+    #[test]
+    fn a_pending_transaction_seen_in_a_block_is_confirmed() {
+        let store = EphemeralMempool::new();
+        let (a, t) = (tx(1).hash, tx(2).hash);
+        store.receive(tx(1)).unwrap();
+        store.receive(tx(2)).unwrap();
+        store
+            .confirm(&ChainPoint::Slot(12), &[a], &[], 10, 10)
+            .unwrap();
+        assert_eq!(store.check_status(&a).stage, MempoolTxStage::Confirmed);
+        assert_eq!(
+            store.check_status(&a).confirmed_at,
+            Some(ChainPoint::Slot(12))
+        );
+        assert_eq!(pending(&store), [t]);
     }
 }

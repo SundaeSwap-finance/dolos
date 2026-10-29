@@ -622,6 +622,37 @@ fn a_rolled_back_registration_whose_input_is_spent_drops_its_withdrawal() {
 }
 
 #[test]
+fn a_pending_registration_a_block_includes_is_confirmed() {
+    let (domain, txs, credential) = synthetic(&[0], 0);
+    let register = registration(&domain, &txs, &credential);
+    let a = domain
+        .receive_tx("register", &domain.read_chain(), &register)
+        .unwrap();
+    // Model the block's committed state: the input spent and the account registered.
+    let mut delta = UtxoSetDelta::default();
+    delta
+        .consumed_utxo
+        .insert(TxoRef([120; 32].into(), 0), Arc::new(EraCbor(8, vec![])));
+    let w = domain.state().start_writer().unwrap();
+    w.apply_utxoset(&delta).unwrap();
+    w.commit().unwrap();
+    put_account(&domain, &registered(credential.clone(), 0));
+    domain
+        .mempool()
+        .confirm(&ChainPoint::Slot(1400011), &[a], &[], 10, 10)
+        .unwrap();
+    assert_eq!(
+        domain.revalidate_pending(&domain.read_chain()).unwrap(),
+        Vec::<TxHash>::new()
+    );
+    assert_eq!(
+        domain.mempool().check_status(&a).stage,
+        MempoolTxStage::Confirmed
+    );
+    assert!(domain.mempool().dump_finalized(0, 10).items.is_empty());
+}
+
+#[test]
 fn absent_deregistered_and_unreadable_accounts_do_not_become_zero_balances() {
     let (domain, txs, credential) = synthetic(&[0], 0);
     let key = minicbor::to_vec(&credential).unwrap().into();

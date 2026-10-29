@@ -202,7 +202,7 @@ pub trait MempoolStore: Clone + Send + Sync + 'static {
 
     /// Called after each chain-sync event.
     ///
-    /// For `seen_txs`: transitions to `Confirmed` and increments the
+    /// For `seen_txs`, inflight or pending: transitions to `Confirmed` and increments the
     /// confirmation counter. For `unseen_txs` (rollback): moves the
     /// transaction back to the pending queue, at the place it was first
     /// admitted, so it can be re-submitted.
