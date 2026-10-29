@@ -54,7 +54,7 @@ use pallas::{
             dijkstra,
         },
         traverse::{ComputeHash as _, Era, MultiEraOutput, MultiEraTx, OriginalHash as _},
-        validate::phase2::{tx::TxEvalResult, Builtin},
+        validate::phase2::{audited_builtins, tx::TxEvalResult, Builtin},
     },
 };
 use seed::SeedPoint;
@@ -218,13 +218,107 @@ async fn read_params(domain: &DomainAdapter) -> cardano::PParams {
     }
 }
 
-/// The validation outcomes, state comparisons, cost comparisons and manifest candidates of one corpus.
+/// The validation outcomes, state comparisons, cost comparisons, builtin coverage and manifest candidates of one corpus.
 #[derive(Debug, Default)]
 struct Judged {
     validation: ValidationTally,
     state: StateTallies,
     cost: CostTallies,
+    coverage: Coverage,
     candidates: Candidates,
+}
+
+/// The first record whose accepted, phase two valid evaluation called each builtin in the ledger's units.
+#[derive(Debug, Default)]
+struct Coverage(Vec<(Builtin, RecordId)>);
+
+impl Coverage {
+    fn add(&mut self, id: RecordId, calls: &[Builtin]) {
+        for call in calls {
+            if self.record(*call).is_none() {
+                self.0.push((*call, id));
+            }
+        }
+    }
+
+    fn record(&self, builtin: Builtin) -> Option<RecordId> {
+        self.0
+            .iter()
+            .find(|(b, _)| *b == builtin)
+            .map(|(_, id)| *id)
+    }
+
+    fn extend(&mut self, other: Coverage) {
+        for (builtin, id) in other.0 {
+            self.add(id, &[builtin]);
+        }
+    }
+}
+
+/// The audited builtins whose coverage is reported without deciding the run.
+const BASE_BUILTINS: [Builtin; 38] = [
+    Builtin::AddInteger,
+    Builtin::SubtractInteger,
+    Builtin::MultiplyInteger,
+    Builtin::DivideInteger,
+    Builtin::ModInteger,
+    Builtin::EqualsInteger,
+    Builtin::LessThanInteger,
+    Builtin::LessThanEqualsInteger,
+    Builtin::AppendByteString,
+    Builtin::ConsByteString,
+    Builtin::LengthOfByteString,
+    Builtin::EqualsByteString,
+    Builtin::LessThanByteString,
+    Builtin::LessThanEqualsByteString,
+    Builtin::Blake2b_256,
+    Builtin::Blake2b_224,
+    Builtin::VerifyEd25519Signature,
+    Builtin::IfThenElse,
+    Builtin::FstPair,
+    Builtin::SndPair,
+    Builtin::ChooseList,
+    Builtin::MkCons,
+    Builtin::HeadList,
+    Builtin::TailList,
+    Builtin::ChooseData,
+    Builtin::ConstrData,
+    Builtin::MapData,
+    Builtin::ListData,
+    Builtin::IData,
+    Builtin::BData,
+    Builtin::UnConstrData,
+    Builtin::UnMapData,
+    Builtin::UnListData,
+    Builtin::UnIData,
+    Builtin::UnBData,
+    Builtin::EqualsData,
+    Builtin::SerialiseData,
+    Builtin::MkPairData,
+];
+
+/// The coverage line of each audited builtin, a count line, and whether every audited builtin outside the base set has a covering record.
+fn builtin_bar(audited: &[Builtin], base: &[Builtin], coverage: &Coverage) -> (Vec<String>, bool) {
+    let mut lines = Vec::new();
+    let mut counts = [[0usize; 2]; 2];
+    for builtin in audited {
+        let in_base = base.contains(builtin);
+        let record = coverage.record(*builtin);
+        lines.push(match (record, in_base) {
+            (Some(id), _) => format!("BUILTIN {builtin:?} record={id}"),
+            (None, true) => format!("BUILTIN {builtin:?} uncovered base"),
+            (None, false) => format!("BUILTIN_UNCOVERED {builtin:?}"),
+        });
+        let tally = &mut counts[usize::from(in_base)];
+        tally[0] += 1;
+        tally[1] += usize::from(record.is_some());
+    }
+    let [[added, added_covered], [base, base_covered]] = counts;
+    let pass = added_covered == added;
+    lines.push(format!(
+        "BUILTIN added covered={added_covered}/{added} base covered={base_covered}/{base} pass={pass}"
+    ));
+    (lines, pass)
 }
 
 impl Judged {
@@ -251,35 +345,41 @@ fn tag_number(tag: &RedeemerTag) -> u64 {
     }
 }
 
+/// The purpose of one evaluated redeemer in the ledger's terms.
+fn purpose(r: &TxEvalResult) -> Purpose {
+    Purpose {
+        tag: tag_number(&r.tag),
+        index: r.index.into(),
+    }
+}
+
 /// The evaluations Dolos estimates for one transaction, each in the ledger's terms.
-fn node_costs(estimate: Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError>) -> NodeCosts {
+fn node_costs(estimate: &Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError>) -> NodeCosts {
     let results = match estimate {
         Ok(results) => results,
         Err(e) => return NodeCosts::Unevaluated(e.to_string()),
     };
-    let evaluated = results.into_iter().map(|(r, _)| LedgerRedeemer {
-        purpose: Purpose {
-            tag: tag_number(&r.tag),
-            index: r.index.into(),
-        },
+    let evaluated = results.iter().map(|(r, _)| LedgerRedeemer {
+        purpose: purpose(r),
         evaluation: match r.success {
             true => Evaluation::Ran(Units {
                 mem: r.units.mem,
                 steps: r.units.steps,
             }),
-            false => Evaluation::Failed(r.failure_message.unwrap_or_default()),
+            false => Evaluation::Failed(r.failure_message.clone().unwrap_or_default()),
         },
     });
     NodeCosts::Evaluated(evaluated.collect())
 }
 
-/// Counts the redeemer evaluations and the minimum fee Dolos computes for one record against the ledger's.
+/// Counts the redeemer evaluations and the minimum fee Dolos computes for one record against the ledger's, and the builtins of each redeemer both ran alike in a phase two valid record.
 fn compare_cost(
     group: &validate::Group,
     id: RecordId,
     record: &Record,
     declared: Option<&Feature>,
     cost: &mut CostTallies,
+    coverage: &mut Coverage,
 ) {
     let skip = match (&record.outcome, declared) {
         (LedgerOutcome::Refused { .. }, _) => Some(CostSkip::Refused),
@@ -291,8 +391,17 @@ fn compare_cost(
         return;
     }
     if !record.ex_units.is_empty() {
-        let node = node_costs(group.estimate(&record.tx.0));
-        cost.add_units(id, &cost::pair(&record.ex_units, &node));
+        let estimate = group.estimate(&record.tx.0);
+        let costs = cost::pair(&record.ex_units, &node_costs(&estimate));
+        cost.add_units(id, &costs);
+        if let (Ok(results), Phase2::Valid) = (&estimate, record.phase2_valid) {
+            for alike in costs.iter().filter(|c| c.ran_alike().is_some()) {
+                let calls = results.iter().filter(|(r, _)| purpose(r) == alike.purpose);
+                for (_, calls) in calls {
+                    coverage.add(id, calls);
+                }
+            }
+        }
     }
     let fee = match group.min_fee(&record.tx.0) {
         Ok(Some(fee)) => Ok(fee),
@@ -451,6 +560,7 @@ async fn validate_run<'r>(
         validation: tally,
         state,
         cost,
+        coverage,
         candidates,
     } = tallies;
     let id_of = |record: &Record| RecordId {
@@ -474,13 +584,13 @@ async fn validate_run<'r>(
                 group.seed(&missing.seeded);
                 tally.dependent.push((id, missing.seeded_by));
             }
-            compare_cost(&group, id, record, manifests.declared.get(&id), cost);
+            let declared = manifests.declared.get(&id);
+            compare_cost(&group, id, record, declared, cost, coverage);
             let dolos = validate::verdict(&group.receive(&record.tx.0));
             let inflight = validate::verdict(&relayed.receive(&record.tx.0));
             if let Some(feature) = declares(&record.outcome, &dolos) {
                 candidates.declared.insert(id, feature);
             }
-            let declared = manifests.declared.get(&id);
             let judgement = match one_answer(&dolos, &inflight) {
                 Ok(dolos) => outcome(&record.outcome, record.phase2_valid, dolos, declared),
                 Err(fail) => Outcome::Fail(fail),
@@ -1358,6 +1468,43 @@ fn supp(n: u32) -> RecordId {
     }
 }
 
+#[test]
+fn an_uncovered_base_builtin_passes_the_bar_and_names_no_record() {
+    let mut coverage = Coverage::default();
+    coverage.add(supp(41), &[Builtin::ChooseUnit, Builtin::IfThenElse]);
+    let audited = [
+        Builtin::ChooseUnit,
+        Builtin::IfThenElse,
+        Builtin::AddInteger,
+    ];
+    let base = [Builtin::IfThenElse, Builtin::AddInteger];
+    let (lines, pass) = builtin_bar(&audited, &base, &coverage);
+    assert!(pass, "{lines:?}");
+    assert_eq!(
+        lines,
+        [
+            "BUILTIN ChooseUnit record=supp#41",
+            "BUILTIN IfThenElse record=supp#41",
+            "BUILTIN AddInteger uncovered base",
+            "BUILTIN added covered=1/1 base covered=1/2 pass=true",
+        ]
+    );
+}
+
+#[test]
+fn an_uncovered_builtin_outside_the_base_fails_the_bar() {
+    let mut coverage = Coverage::default();
+    coverage.add(supp(41), &[Builtin::ChooseUnit]);
+    let audited = [Builtin::ChooseUnit, Builtin::NullList];
+    let (lines, pass) = builtin_bar(&audited, &[], &coverage);
+    assert!(!pass);
+    assert_eq!(lines[1], "BUILTIN_UNCOVERED NullList");
+    assert_eq!(
+        lines[2],
+        "BUILTIN added covered=1/2 base covered=0/0 pass=false"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn ledger_oracle() {
@@ -1365,6 +1512,7 @@ async fn ledger_oracle() {
     let manifests = Manifests::committed();
     let mut candidates = Candidates::default();
     let mut costs = Vec::new();
+    let mut coverage = Coverage::default();
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind);
         println!("{corpus}");
@@ -1375,11 +1523,17 @@ async fn ledger_oracle() {
         let known = tallies.candidates.known.records;
         candidates.known.records.extend(known);
         costs.push(tallies.cost);
+        coverage.extend(tallies.coverage);
     }
     let ran_alike: usize = costs.iter().map(|c| c.ran).sum();
     let cost_pass = cost::pass_all(&costs);
     println!("COST all ran_alike={ran_alike} pass={cost_pass}");
     pass &= cost_pass;
+    let (lines, bar_pass) = builtin_bar(&audited_builtins(), &BASE_BUILTINS, &coverage);
+    for line in lines {
+        println!("{line}");
+    }
+    pass &= bar_pass;
     for line in candidates.lines() {
         println!("{line}");
     }
