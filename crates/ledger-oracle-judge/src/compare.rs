@@ -120,6 +120,8 @@ pub struct StateTallies {
     pub seeded_unjudged: usize,
     pub accounts: Tally,
     pub undo: Tally,
+    pub revalidate: Tally,
+    pub dependents: usize,
     pub params: Tally,
     pub readtx: Tally,
     pub script: Tally,
@@ -143,13 +145,14 @@ impl StateTallies {
         ]
     }
 
-    /// Whether every block rolled and every comparison looked at something and agreed on all of it.
+    /// Whether every block rolled, every named comparison looked at something, and every comparison agreed on all it looked at.
     pub fn pass(&self) -> bool {
         let tallies = self.named();
         let agree = tallies
             .iter()
             .all(|(_, t)| t.compared > 0 && t.disagree.is_empty());
-        agree && self.known_stale.is_empty() && self.roll_fail.is_empty()
+        let revalidated = self.revalidate.disagree.is_empty();
+        agree && revalidated && self.known_stale.is_empty() && self.roll_fail.is_empty()
     }
 
     /// The count of records in slot groups whose block the node did not apply.
@@ -226,6 +229,8 @@ impl fmt::Display for StateTallies {
             seeded_unjudged,
             accounts,
             undo,
+            revalidate,
+            dependents,
             params,
             readtx,
             script,
@@ -237,12 +242,13 @@ impl fmt::Display for StateTallies {
         write!(
             f,
             "STATE compared utxo={} as_output={} of in_run={in_run} \
-             seeded_unjudged={seeded_unjudged} accounts={} undo={} params={} readtx={} script={} \
-             datum={} rolled_failed={}",
+             seeded_unjudged={seeded_unjudged} accounts={} undo={} revalidate={} \
+             of dependents={dependents} params={} readtx={} script={} datum={} rolled_failed={}",
             utxo.compared,
             as_output.compared,
             accounts.compared,
             undo.compared,
+            revalidate.compared,
             params.compared,
             readtx.compared,
             script.compared,
@@ -258,7 +264,8 @@ impl fmt::Display for StateTallies {
         for line in known_stale {
             write!(f, "\nKNOWN_STALE {line}")?;
         }
-        for (name, t) in self.named() {
+        let revalidate = [("revalidate", &self.revalidate)];
+        for (name, t) in self.named().into_iter().chain(revalidate) {
             if !t.disagree.is_empty() {
                 write!(f, "\nSTATE {name} disagree={}", t.disagree.len())?;
                 if name == "as_output" {
@@ -310,6 +317,7 @@ mod tests {
         state.utxo.add(true, String::new);
         state.accounts.add(true, String::new);
         state.undo.add(true, String::new);
+        state.revalidate.add(true, String::new);
         state.params.add(true, String::new);
         state.readtx.add(true, String::new);
         state.script.add(true, String::new);
@@ -337,9 +345,29 @@ mod tests {
             *empty(&mut state) = Tally::default();
             assert!(!state.pass(), "{state}");
         }
-        assert!(state
-            .to_string()
-            .contains(" seeded_unjudged=0 accounts=1 undo=1 params=1 readtx=1 script=1 datum=1"));
+        assert!(state.to_string().contains(
+            " seeded_unjudged=0 accounts=1 undo=1 revalidate=1 of dependents=0 params=1 \
+                 readtx=1 script=1 datum=1"
+        ));
+    }
+
+    #[test]
+    fn a_corpus_with_no_dependent_passes_and_a_kept_dependent_fails() {
+        let mut state = compared();
+        state.as_output.add(true, String::new);
+        state.revalidate = Tally::default();
+        assert!(state.pass(), "{state}");
+        state.revalidate.add(true, String::new);
+        assert!(state.pass(), "{state}");
+        let line = "supp#2 kept_after_rollback_to=Slot(40)";
+        state.revalidate.add(false, || line.to_string());
+        assert!(!state.pass(), "{state}");
+        let text = state.to_string();
+        assert!(text.contains("\nSTATE revalidate disagree=1\n"), "{text}");
+        assert!(
+            text.contains(&format!("\nDIFF revalidate {line}")),
+            "{text}"
+        );
     }
 
     #[test]

@@ -19,8 +19,8 @@ use dolos_cardano::{
     FixedNamespace as _,
 };
 use dolos_core::{
-    AsyncQueryFacade, BlockHash, ChainError, ChainPoint, Domain as _, RawBlock, StateStore as _,
-    SyncExt as _, TxoRef,
+    AsyncQueryFacade, BlockHash, ChainError, ChainPoint, Domain as _, MempoolStore as _, RawBlock,
+    StateStore as _, SubmitExt as _, SyncExt as _, TxHash, TxoRef,
 };
 use itertools::Itertools as _;
 use ledger_oracle_judge::{
@@ -1282,14 +1282,49 @@ fn compare_as_output(
     }
 }
 
-/// Rolls a run back one block at a time to its seed point, counting what FollowTip and WatchTx serve for each undone input, what ReadUtxos serves for the inputs earlier blocks made, and the seed outputs and accounts Dolos holds at the end.
+/// Receives as pending each transaction of a block after block `i` that names an output block `i` made, returning those the mempool took.
+fn hold_dependents(
+    domain: &DomainAdapter,
+    kind: CorpusKind,
+    makers: &BTreeMap<TxIn, RecordId>,
+    rolled: &[&Rolled<'_>],
+    i: usize,
+    state: &mut StateTallies,
+) -> Vec<(RecordId, TxHash)> {
+    let made: BTreeSet<u32> = rolled[i].records.iter().map(|r| r.n).collect();
+    let mut held = vec![];
+    let later = rolled[i + 1..]
+        .iter()
+        .flat_map(|block| block.records.iter().map(move |r| (*r, block.group)));
+    for (record, group) in later {
+        let rid = RecordId {
+            corpus: kind,
+            n: record.n,
+        };
+        let depends = named_inputs(rid, record).iter().any(|input| {
+            let from = origin(input, record, makers, group);
+            matches!(from, InputOrigin::InRun { made_by } if made.contains(&made_by.n))
+        });
+        if !depends {
+            continue;
+        }
+        state.dependents += 1;
+        let received = domain.receive_tx("ledger-oracle", &domain.read_chain(), &record.tx.0);
+        if let Ok(hash) = received {
+            held.push((rid, hash));
+        }
+    }
+    held
+}
+
+/// Rolls a run back one block at a time to its seed point, counting what FollowTip and WatchTx serve for each undone input, what ReadUtxos serves for the inputs earlier blocks made, whether a pending transaction spending the undone block is dropped, and the seed outputs and accounts Dolos holds at the end.
 async fn sweep(
     domain: &DomainAdapter,
     seed: &SeedPoint,
     kind: CorpusKind,
     run: &KeptRun,
     rolled: &[&Rolled<'_>],
-    tally: &mut Tally,
+    state: &mut StateTallies,
 ) {
     let makers = run.makers(kind);
     let first = &run.records()[0];
@@ -1302,11 +1337,36 @@ async fn sweep(
             Some(previous) => &rolled[previous].point,
             None => seed.point(),
         };
+        let held = hold_dependents(domain, kind, &makers, rolled, i, state);
         let streams = serve::Streams::open(domain, &block.point).await;
-        if let Err(e) = domain.rollback(to) {
-            tally.add(false, || format!("{id} rollback to={to} {e}"));
+        let rolled_back = domain.rollback(to);
+        let pending: BTreeSet<TxHash> = domain
+            .mempool()
+            .peek_pending()
+            .iter()
+            .map(|tx| tx.hash)
+            .collect();
+        let kept: Vec<TxHash> = held
+            .iter()
+            .map(|(_, hash)| *hash)
+            .filter(|hash| pending.contains(hash))
+            .collect();
+        domain
+            .mempool()
+            .drop_pending(&kept)
+            .unwrap_or_else(|e| panic!("RUN {id} drop pending {e}"));
+        if let Err(e) = rolled_back {
+            let line = || format!("{id} rollback to={to} {e}");
+            state.undo.add(false, line);
             return;
         }
+        for (rid, hash) in &held {
+            let dropped = !pending.contains(hash);
+            state
+                .revalidate
+                .add(dropped, || format!("{rid} kept_after_rollback_to={to}"));
+        }
+        let tally = &mut state.undo;
         let services = streams.read(Event::Undo, 1, block.records.len()).await;
         for (record, checked) in compare_served(kind, &makers, block, &services).records {
             tally.compared += checked.compared;
@@ -1333,6 +1393,7 @@ async fn sweep(
             compare_utxos(domain, rid, [], &restored, tally).await;
         }
     }
+    let tally = &mut state.undo;
     compare_utxos(domain, id, [], &first.pre_utxo, tally).await;
     let mut restored = Tally::default();
     accounts::compare(&first.accounts_pre, &dolos_accounts(domain), &mut restored);
@@ -1438,7 +1499,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
             corpus.kind,
             run,
             &rolled,
-            &mut judged.state.undo,
+            &mut judged.state,
         )
         .await;
     }
@@ -1513,12 +1574,14 @@ async fn ledger_oracle() {
     let mut candidates = Candidates::default();
     let mut costs = Vec::new();
     let mut coverage = Coverage::default();
+    let mut revalidated = 0;
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind);
         println!("{corpus}");
         let tallies = judge(&corpus, &manifests, &Edits::default()).await;
         println!("{tallies}");
         pass &= tallies.pass();
+        revalidated += tallies.state.revalidate.compared;
         candidates.declared.extend(tallies.candidates.declared);
         let known = tallies.candidates.known.records;
         candidates.known.records.extend(known);
@@ -1529,6 +1592,11 @@ async fn ledger_oracle() {
     let cost_pass = cost::pass_all(&costs);
     println!("COST all ran_alike={ran_alike} pass={cost_pass}");
     pass &= cost_pass;
+    println!(
+        "REVALIDATE all compared={revalidated} pass={}",
+        revalidated > 0
+    );
+    pass &= revalidated > 0;
     let (lines, bar_pass) = builtin_bar(&audited_builtins(), &BASE_BUILTINS, &coverage);
     for line in lines {
         println!("{line}");

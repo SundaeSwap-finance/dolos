@@ -1,0 +1,10 @@
+diff --git a/crates/core/src/sync.rs b/crates/core/src/sync.rs
+--- a/crates/core/src/sync.rs
++++ b/crates/core/src/sync.rs
+@@ -203,5 +203,3 @@ pub(crate) fn rollback_to<D: Domain>(
+ fn revalidate_mempool<D: Domain>(domain: &D, chain: &D::Chain) {
+-    if let Err(e) = domain.revalidate_pending(chain) {
+-        warn!(?e, "mempool revalidation failed");
+-    }
++    let _ = (domain, chain);
+ }
