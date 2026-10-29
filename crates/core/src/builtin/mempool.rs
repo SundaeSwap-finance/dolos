@@ -237,7 +237,7 @@ impl MempoolStore for EphemeralMempool {
         // Promote Propagated txs into the acknowledged map so the confirm
         // logic below applies uniformly to every inflight tx.
         let propagated: Vec<(Seq, MempoolTx)> = state.inflight.drain(..).collect();
-        // A pending transaction in the block is confirmed like an inflight one.
+        // A pending transaction the block holds is confirmed.
         let included = state.take_pending(&seen_set);
         for (seq, tx) in propagated.into_iter().chain(included) {
             state.acknowledged.insert(tx.hash, (seq, tx));

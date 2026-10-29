@@ -888,7 +888,7 @@ impl MempoolStore for RedbMempool {
         self.with_write_tx(|wx| {
             let seen_set: HashSet<TxHash> = seen_txs.iter().copied().collect();
             let unseen_set: HashSet<TxHash> = unseen_txs.iter().copied().collect();
-            // A pending transaction in the block is confirmed like an inflight one.
+            // A pending transaction the block holds is confirmed.
             for (seq, hash, payload) in PendingTable::drain_by_hashes(wx, &seen_set)? {
                 InflightTable::write(wx, &hash, &InflightRecord::new(payload, seq))?;
             }
