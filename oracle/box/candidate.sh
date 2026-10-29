@@ -1,0 +1,100 @@
+#!/bin/sh
+# Syncs a candidate Dolos from the node beside the serving one, reads both and the node, prints each field the two serve differently, and removes the candidate.
+# Usage: CANDIDATE=<binary path or image reference> COMMIT=sha candidate.sh <dir>
+# Reads ROOT, NODE, ENDPOINT, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_NEED_G and GRPCURL from the environment.
+set -eu
+DIR=$1
+: "${CANDIDATE:?}" "${COMMIT:?}" "${ROOT:?}" "${NODE:?}" "${ENDPOINT:?}" "${SERVE_CONFIG:?}"
+: "${CANDIDATE_GRPC:?}" "${CANDIDATE_NEED_G:?}"
+NEED_G=$CANDIDATE_NEED_G
+HERE=$(cd "$(dirname "$0")" && pwd)
+GRPCURL=${GRPCURL:-grpcurl}
+NAME=${CANDIDATE_NAME:-dolos-candidate-1028}
+SYNC_MINUTES=${SYNC_MINUTES:-90}
+FIXED_SLOTS="205422 368793 783572"
+STORE="$ROOT/candidate/$(date -u +%Y%m%dT%H%M%SZ)"
+
+free_g() {
+  df -BG --output=avail "$1" | tail -1 | tr -dc 0-9
+}
+
+if [ "$(free_g "$ROOT")" -lt $((NEED_G + 3)) ] || [ "$(free_g /)" -lt 30 ]; then
+  echo "LIVE-CANDIDATE REFUSED free=$(free_g "$ROOT")G root_free=$(free_g /)G need=$((NEED_G + 3))G"
+  exit 2
+fi
+
+cleanup() {
+  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  rm -rf "$STORE"
+  echo "LIVE-CANDIDATE removed name=$NAME store=$STORE"
+}
+trap cleanup EXIT
+
+mkdir -p "$STORE" "$DIR"
+for genesis in byron shelley alonzo conway dijkstra; do
+  cat "$SERVE_CONFIG/$genesis-genesis.json" >"$STORE/$genesis-genesis.json"
+done
+# The serving configuration without its listeners, then the candidate's own.
+awk '/^\[/ { skip = ($0 ~ /^\[serve/) } !skip' "$SERVE_CONFIG/dolos.toml" >"$STORE/dolos.toml"
+printf '[serve.grpc]\nlisten_address = "%s"\n' "$CANDIDATE_GRPC" >>"$STORE/dolos.toml"
+
+case $CANDIDATE in
+  /*)
+    cp "$CANDIDATE" "$STORE/dolos-candidate"
+    docker run -d --name "$NAME" --network host --log-opt max-size=100m --log-opt max-file=2 \
+      -v "$STORE:/run-dolos" -w /run-dolos --entrypoint /run-dolos/dolos-candidate \
+      dolos-build:1 -c dolos.toml daemon >/dev/null
+    ;;
+  *)
+    docker run -d --name "$NAME" --network host --log-opt max-size=100m --log-opt max-file=2 \
+      -v "$STORE:/run-dolos" -w /run-dolos "$CANDIDATE" -c dolos.toml daemon >/dev/null
+    ;;
+esac
+echo "LIVE-CANDIDATE started name=$NAME commit=$COMMIT candidate=$CANDIDATE grpc=$CANDIDATE_GRPC"
+
+candidate_slot() {
+  "$GRPCURL" -plaintext -d '{}' "$CANDIDATE_GRPC" utxorpc.v1.sync.SyncService/ReadTip 2>/dev/null |
+    jq -r '.tip.slot // 0'
+}
+
+node_slot() {
+  docker exec "$NODE" cardano-cli latest query tip | jq -r .slot
+}
+
+start=$(date +%s)
+while :; do
+  slot=$(candidate_slot || true)
+  slot=${slot:-0}
+  node=$(node_slot)
+  if [ "$slot" -ge $((node - 100)) ]; then
+    break
+  fi
+  if [ "$(free_g "$ROOT")" -lt 3 ]; then
+    echo "LIVE-CANDIDATE REFUSED free=$(free_g "$ROOT")G during sync slot=$slot node=$node store=$(du -sh "$STORE" | cut -f1)"
+    exit 2
+  fi
+  if [ $(($(date +%s) - start)) -gt $((SYNC_MINUTES * 60)) ]; then
+    echo "LIVE-CANDIDATE sync_timeout slot=$slot node=$node minutes=$SYNC_MINUTES"
+    exit 1
+  fi
+  sleep 30
+done
+echo "LIVE-CANDIDATE synced slot=$slot node=$node seconds=$(($(date +%s) - start)) store=$(du -sh "$STORE" | cut -f1)"
+
+# The last block of the candidate's recent history whose body holds a certificate.
+recent=$("$GRPCURL" -plaintext -max-msg-sz 200000000 \
+  -d "{\"startToken\":{\"slot\":$((slot - 2000))},\"maxItems\":100,\"fieldMask\":{\"paths\":[\"cardano.header\"]}}" \
+  "$CANDIDATE_GRPC" utxorpc.v1.sync.SyncService/DumpHistory |
+  jq -r '[.block[].cardano.header | select(.bodyContainsLeiosCertificate) | .slot] | last // empty')
+if [ -z "$recent" ]; then
+  echo "LIVE-CANDIDATE no_certifying_block from=$((slot - 2000))"
+  exit 1
+fi
+echo "LIVE-CANDIDATE certifying_slot=$recent"
+
+SLOTS="$FIXED_SLOTS $recent"
+ENDPOINT=$CANDIDATE_GRPC PLAINTEXT=1 LABEL="candidate commit=$COMMIT" BATCH_SLOTS=$SLOTS \
+  sh "$HERE/live.sh" "$DIR/candidate"
+LABEL="serving endpoint=$ENDPOINT" BATCH_SLOTS=$SLOTS sh "$HERE/live.sh" "$DIR/serve"
+echo "LIVE-CANDIDATE read slots=\"$SLOTS\" commit=$COMMIT"
+sh "$HERE/fields.sh" "$DIR"
