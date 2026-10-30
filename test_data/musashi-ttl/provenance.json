@@ -1,0 +1,119 @@
+{
+  "label": "constructed test transactions captured from Musashi",
+  "network_magic": 164,
+  "era": "Dijkstra",
+  "cases": {
+    "confirmed-ttl": {
+      "original_attempt": "006",
+      "transaction": "9b354b0f9b042c677ffdb15665a914499d2bdcef093cd834d5ce0538b212f56f",
+      "historical_validation_slot": 1109036,
+      "ttl": 1112636,
+      "network_success": true,
+      "parameter_source": "captured Dolos parameters; no independent reference-node RPC",
+      "plutus_v3_coefficients": 350,
+      "input_output_sha256": [
+        {
+          "hash": "b18e0e86bb921a4545a95df10d1876adb96300603f322d780bb88062c9b5dc04",
+          "index": 1,
+          "sha256": "437fae67f9bf7d4478185db4d4017725fbaae8bc9bce62957ef144215ee6353c"
+        },
+        {
+          "hash": "b18e0e86bb921a4545a95df10d1876adb96300603f322d780bb88062c9b5dc04",
+          "index": 0,
+          "sha256": "63c4cd4b8196d3946bee4f2995d247c48e84a30219fba43c178d63ed7a0b577b"
+        }
+      ]
+    },
+    "cross-epoch-ttl": {
+      "original_attempt": "001",
+      "transaction": "3ca42322d726d25ef4fd4d24690a2fbb51766c5221f6efb913455724fe656853",
+      "historical_validation_slot": 878881,
+      "ttl": 900481,
+      "network_success": false,
+      "parameter_source": "captured Dolos parameters; no independent reference-node RPC",
+      "plutus_v3_coefficients": 251,
+      "input_output_sha256": [
+        {
+          "hash": "aeecc82416d71b1160f01fbc72faf5ae44e38753c564a484ecd6366a314b9cc8",
+          "index": 0,
+          "sha256": "63c4cd4b8196d3946bee4f2995d247c48e84a30219fba43c178d63ed7a0b577b"
+        },
+        {
+          "hash": "aeecc82416d71b1160f01fbc72faf5ae44e38753c564a484ecd6366a314b9cc8",
+          "index": 1,
+          "sha256": "437fae67f9bf7d4478185db4d4017725fbaae8bc9bce62957ef144215ee6353c"
+        }
+      ]
+    }
+  },
+  "confirmed_execution": {
+    "slot": 1109288,
+    "block": "5db7f685a86823f403496907ffa503265b49aa7db392bd2b4cbd3bbf8f5afd79",
+    "subsequent_blocks_observed": 32,
+    "success": true,
+    "wallet_output_lovelace": 1818528,
+    "collateral_lovelace": 1000000,
+    "collateral_unspent_and_byte_identical": true,
+    "rollback_observed": false,
+    "monitoring": "periodic, not continuous"
+  },
+  "capture_tools": {
+    "cli": {
+      "version": "cardano-cli 11.2.2.0 - linux-x86_64 - ghc-9.6\ngit rev afa091b4af2795d1d9c46e59145ed16127760f7b",
+      "binary_sha256": "9bf4a2576754ff76533c387687cfb8fbe0713fac6952a0db973356b00a376e9d"
+    },
+    "decoder_pallas_revision": "00f2df7d827dca6fa4e7f7019f5a0b3f2e6e05b1",
+    "rpc_schema_revision": "4bef71401bae7e9fc80b9d24379be0f9078b0ff5",
+    "upstream_node_build": null,
+    "historical_live_pallas_revision": "f6d826eca1179742299ab1e6ac99f9ec54e273f4",
+    "historical_live_dolos_revision": "afec1431636590c96d2ff0a55b012a6b2b6b2220",
+    "historical_live_binary_sha256": "04aa9afee78a1c139a0223de6dd9f9d4a81a6d96f0487fbd3e1b1d7422c1ebe5"
+  },
+  "limitations": [
+    "Cross-epoch capture is local-state regression evidence, not successful network execution.",
+    "Slot/time mapping derived from configured genesis and observed one-second slots; native LSQ era history unavailable.",
+    "Certificate presence/linkage and transaction commitments checked; BLS signatures/full consensus not independently verified.",
+    "Full consensus forecast enforcement is separate from checked affine TTL conversion."
+  ],
+  "archive": {
+    "directory": "/home/rodrigo/projects/musashi-readiness/local-dolos/ttl-fixture-consolidation-20261031",
+    "manifest": "archive-manifest.json",
+    "pallas_original_head": "3ddb154e0dab3d2320d8404ff079a3e83a17f153",
+    "dolos_original_head": "e0535256fd2e036d681f17fd601a4d3cd4d644b6",
+    "backup_branch": "local/ttl-before-fixture-consolidation-20261031",
+    "note": "Original retries, builders, logs and capture revisions retained before unpublished history consolidation; selected native bytes unchanged."
+  },
+  "decoded_cbor_sha256": [
+    {
+      "path": "confirmed-ttl/transaction.hex",
+      "bytes": 530,
+      "sha256": "831abc905df44cf68333514c8457a0935eb0b403606726876c3ed927736e1075"
+    },
+    {
+      "path": "cross-epoch-ttl/transaction.hex",
+      "bytes": 530,
+      "sha256": "8047c1c7133131516c308f97542cbe944de0fa115c88d42841c47b4a5851f924"
+    }
+  ],
+  "file_sha256": {
+    "README.md": "9debeba87d5dda66d96e4ee0556f8f8f4f02ca550b86a2a00c50447ac451ce83",
+    "confirmed-ttl/genesis.json": "894c7b0eb255ef738b34d7e838689dbfb7b5592d7a5f22e91e8ed97cb89105b4",
+    "confirmed-ttl/inputs.json": "00f72a45480f8ba861a3636322eb6f85b756c1a8b5ccd37fce5e91210fd1bc1d",
+    "confirmed-ttl/parameters.json": "021a00012e79f7c2d621d7844f8d94c7e6dd7e1746c15033ce5179a5525b8791",
+    "confirmed-ttl/replay.json": "6e7091e1f5dca63a7bfe875b7ea7eefebe57531d36e2ce387e0cd4ffceeb1789",
+    "confirmed-ttl/transaction.hex": "8cde2b54e47a0f47b19e5ba95e8e48b7787f75efaecf3f2d2a20d0b65a34f47e",
+    "confirmed-ttl/validation-tip.json": "a7992cfa6fbf7d218e15b6486390277d7ad5795a506b83113086caa8a2d341dd",
+    "cross-epoch-ttl/genesis.json": "b8c6c7639f4daedab5f88984d8d69daae931d8f4e4691322b5bc20b466f977ea",
+    "cross-epoch-ttl/inputs.json": "707b64f7314adb5f7c1b7e7190395132e2e250fbfb657552d2e6033ddfd01a9b",
+    "cross-epoch-ttl/parameters.json": "859f58eea36a81cc72a92aeadb73ea93044a6f26ca973022cba5d9ae33db8d8d",
+    "cross-epoch-ttl/replay.json": "fb8651e9ef2c8b0ac4afbac27fb0c973f9f479e2b3ceea9e87f9550e23dea89e",
+    "cross-epoch-ttl/transaction.hex": "75f3a10bc0a1c82c885bb837d396fe650e772233aa55dbb635c936121c5f1d0a",
+    "cross-epoch-ttl/validation-tip.json": "bd104f455399122ec1c19ef6d26c13b23654dfc785933fe0e8b33a36271dc6ba",
+    "genesis/alonzo.json": "5e5b1f0776c6d84bcd15bc7df4f9368884b7c433296657e54722175ce71f1318",
+    "genesis/byron.json": "e446be2aa24aa327b0cbbff57b3ab3f8dfe793959809f3b31973c7945bc64e4b",
+    "genesis/conway.json": "9a7bdb6f68c6672a8afa202e8cfc6fdf40b00de9cb9c27cbcec784cdc6deae0e",
+    "genesis/dijkstra.json": "9895c096a45225e99630b3fb866e5b115ce3d28c6ecd45ceda8feb0e29306127",
+    "genesis/shelley.json": "0c7365b3e74a52a09d1ad169438b714919dd36710c9feed8e49be65e73990ab7",
+    "verification.json": "3525e1094325512722e78fd8d2a02460c82fa8e27a10da320d21462060e2bc89"
+  }
+}

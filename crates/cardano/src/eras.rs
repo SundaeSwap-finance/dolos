@@ -101,6 +101,38 @@ impl ChainSummary {
         }
     }
 
+    /// Historical era times and the validation-slot basis used by native Plutus.
+    pub fn to_pallas_time_context(
+        &self,
+        validation_slot: u64,
+    ) -> Result<pallas::ledger::validate::utils::DijkstraTimeContext, ChainError> {
+        use pallas::ledger::validate::utils::{DijkstraTimeContext, EraTime};
+        let milliseconds = |seconds: u64| {
+            seconds.checked_mul(MS_PER_SECOND).ok_or_else(|| {
+                ChainError::InvalidConfig("chain time overflows POSIX milliseconds".into())
+            })
+        };
+        let eras = self
+            .past
+            .iter()
+            .chain(self.edge.iter())
+            .filter(|era| era.end.as_ref().is_none_or(|end| end.slot > era.start.slot))
+            .map(|era| {
+                Ok(EraTime {
+                    start_slot: era.start.slot,
+                    start_time_ms: milliseconds(era.start.timestamp)?,
+                    slot_length_ms: milliseconds(era.slot_length)?,
+                })
+            })
+            .collect::<Result<Vec<_>, ChainError>>()?;
+        // Convert with each known era's slot length, just as earlier-era
+        // SlotConfig conversion does. Epoch boundaries do not limit conversion;
+        // a full consensus forecast is a separate concern.
+        DijkstraTimeContext::new(eras, validation_slot).map_err(|error| {
+            ChainError::InvalidConfig(format!("invalid chain time history: {error}"))
+        })
+    }
+
     pub fn append_era(&mut self, protocol: u16, era: EraSummary) {
         if let Some(edge) = self.edge.take() {
             self.past.push(edge);
@@ -341,6 +373,77 @@ mod tests {
         assert_eq!(sc.slot_length, 1_000);
         assert_eq!(sc.zero_slot, 4_492_800);
         assert_eq!(sc.zero_time, 1_596_059_091_000);
+    }
+
+    #[test]
+    fn plutus_time_preserves_history_across_epochs_and_known_eras() {
+        let mut past = EraSummary {
+            start: EraBoundary {
+                epoch: 0,
+                slot: 0,
+                timestamp: 1000,
+            },
+            end: None,
+            epoch_length: 100,
+            slot_length: 20,
+            protocol: 2,
+        };
+        past.define_end(2);
+        let mut current = EraSummary {
+            start: past.end.clone().unwrap(),
+            end: None,
+            epoch_length: 100,
+            slot_length: 1,
+            protocol: 12,
+        };
+        current.define_end(4);
+        let future = EraSummary {
+            start: current.end.clone().unwrap(),
+            end: None,
+            epoch_length: 100,
+            slot_length: 2,
+            protocol: 13,
+        };
+        let mut summary = ChainSummary::default();
+        summary.append_era(2, past);
+        summary.append_era(12, current);
+        summary.append_era(13, future);
+        let time = summary.to_pallas_time_context(250).unwrap();
+        assert_eq!(time.validation_slot(), 250);
+        assert_eq!(
+            time.validity_bounds(Some(150), Some(299)).unwrap(),
+            (Some(4_000_000), Some(5_099_000))
+        );
+        assert_eq!(time.slot_to_posix_ms(300).unwrap(), 5_100_000);
+        assert_eq!(time.slot_to_posix_ms(400).unwrap(), 5_200_000);
+        assert_eq!(time.slot_to_posix_ms(450).unwrap(), 5_300_000);
+        assert_eq!(time.slot_to_posix_ms(1000).unwrap(), 6_400_000);
+    }
+
+    #[test]
+    fn plutus_time_rejects_missing_history_zero_slot_length_and_overflow() {
+        assert!(ChainSummary::default().to_pallas_time_context(0).is_err());
+        for (timestamp, slot_length) in [(1000, 0), (u64::MAX, 1)] {
+            let mut summary = ChainSummary::default();
+            summary.append_era(
+                12,
+                EraSummary {
+                    start: EraBoundary {
+                        epoch: 0,
+                        slot: 0,
+                        timestamp,
+                    },
+                    end: None,
+                    epoch_length: 100,
+                    slot_length,
+                    protocol: 12,
+                },
+            );
+            assert!(matches!(
+                summary.to_pallas_time_context(1),
+                Err(ChainError::InvalidConfig(_))
+            ));
+        }
     }
 
     fn era(protocol: u16, start_epoch: u64) -> EraSummary {

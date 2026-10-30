@@ -1,0 +1,77 @@
+{
+  "scope": "Two-case fixture consolidation; runtime code unchanged; exact new Pallas Git pin tested",
+  "pallas_revision": "4d4bb129957ac24e9388821c9cd01094673b204b",
+  "pallas_validation": {
+    "passed": 350,
+    "failed": 0,
+    "ignored": 3
+  },
+  "focused_caller_tests": {
+    "passed": 3,
+    "failed": 0
+  },
+  "default": {
+    "passed": 2121,
+    "failed": 0,
+    "ignored": 62
+  },
+  "strict": {
+    "passed": 1551,
+    "failed": 16,
+    "ignored": 67
+  },
+  "known_strict_failure_names": [
+    "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+    "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+    "every_lookup_by_hash_finds_each_sub_transaction",
+    "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+    "minibf_address_routes_count_each_sub_transaction",
+    "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+    "minibf_block_routes_count_each_sub_transaction",
+    "minibf_resolves_an_input_a_sub_transaction_made",
+    "minibf_serves_each_sub_transaction_by_its_own_hash",
+    "minikupo_matches_the_outputs_of_a_sub_transaction",
+    "serve::grpc::v1::query::tests::read_tx_answers_a_sub_transaction_hash_with_its_parent",
+    "serve::grpc::v1::query::tests::read_tx_of_an_unknown_hash_is_not_found",
+    "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+    "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+    "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+    "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+  ],
+  "known_strict_panic_locations": [
+    "crates/cardano/src/model/epoch_value.rs:236:9:"
+  ],
+  "known_failures_match_previous_run": true,
+  "checks": [
+    {
+      "command": "cargo +1.97.0 test --offline --locked -p dolos-cardano --features strict --test dijkstra_ttl",
+      "exit": 0
+    },
+    {
+      "command": "cargo +1.97.0 clippy --offline --locked --workspace --all-targets --all-features",
+      "exit": 0
+    },
+    {
+      "command": "cargo +1.97.0 build --offline --locked --workspace --all-targets --all-features",
+      "exit": 0
+    },
+    {
+      "command": "cargo +1.97.0 test --offline --locked --workspace --all-targets --no-fail-fast",
+      "exit": 0
+    },
+    {
+      "command": "cargo +1.97.0 test --offline --locked --workspace --all-features --exclude dolos-minibf --exclude dolos-minikupo --exclude dolos-trp --no-fail-fast",
+      "exit": 101
+    },
+    {
+      "command": "cargo +1.97.0 fmt --all -- --check",
+      "exit": 0
+    }
+  ],
+  "notice": "Existing proc-macro-error2 future-compatibility and stable rustfmt wrap_comments notices; no source lint warnings.",
+  "archive": "/home/rodrigo/projects/musashi-readiness/local-dolos/ttl-fixture-consolidation-20261031",
+  "native_selected_capture_bytes_unchanged": true,
+  "duplicate_successful_case_removed": true,
+  "baseline_replay": "unchanged original validation code: 3 intended TTL failures and passing signature control",
+  "fixed_replay": "same 4 assertions pass; native proof and synthetic bounds pass"
+}

@@ -56,10 +56,29 @@ pub fn validate_tx<D: Domain>(
     let utxos_matches = required_utxos(&tx, utxos)?;
     let pallas_utxos = phase_one_utxos(&utxos_matches)?;
 
+    let time = if era == Era::Dijkstra && requests_scripts(&tx) {
+        Some(
+            crate::eras::load_era_summary::<D>(utxos.state())?
+                .to_pallas_time_context(env.block_slot)?,
+        )
+    } else {
+        None
+    };
     let mut cert_state = certificate_state(&tx, utxos)?;
-    pallas_validate::phase1::validate_tx(&tx, 0, &env, &pallas_utxos, &mut cert_state)?;
+    if let Some(time) = &time {
+        pallas_validate::phase1::validate_tx_with_time(
+            &tx,
+            0,
+            &env,
+            &pallas_utxos,
+            &mut cert_state,
+            time,
+        )?;
+    } else {
+        pallas_validate::phase1::validate_tx(&tx, 0, &env, &pallas_utxos, &mut cert_state)?;
+    }
 
-    let report = evaluate_decoded::<D>(&tx, utxos, &env.prot_params, false)?;
+    let report = evaluate_decoded::<D>(&tx, utxos, &env.prot_params, false, time.as_ref())?;
 
     for eval in report.iter() {
         if !eval.success {
@@ -119,7 +138,7 @@ pub fn evaluate_tx<D: Domain>(
     let active = crate::load_effective_pparams::<D>(utxos.state())?;
     let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
     let pparams = validation_parameters(&active)?;
-    evaluate_decoded::<D>(&tx, utxos, &pparams, false)
+    evaluate_decoded::<D>(&tx, utxos, &pparams, false, None)
 }
 
 /// Estimate native script costs independently of signatures and declared budgets.
@@ -133,7 +152,7 @@ pub fn estimate_tx<D: Domain>(
     let active = crate::load_effective_pparams::<D>(utxos.state())?;
     let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
     let pparams = validation_parameters(&active)?;
-    evaluate_decoded::<D>(&tx, utxos, &pparams, true)
+    evaluate_decoded::<D>(&tx, utxos, &pparams, true, None)
 }
 
 /// [`estimate_tx`] of a Dijkstra transaction, with the builtins each redeemer's evaluation called in order of first call.
@@ -144,7 +163,7 @@ pub fn estimate_tx_calls<D: Domain>(
     let active = crate::load_effective_pparams::<D>(utxos.state())?;
     let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
     let pparams = validation_parameters(&active)?;
-    estimate_decoded::<D>(&tx, utxos, &pparams)
+    estimate_decoded::<D>(&tx, utxos, &pparams, None)
 }
 
 /// The minimum fee `dijkstra_min_fee` computes for a transaction under the active parameters, none outside Dijkstra.
@@ -171,37 +190,55 @@ fn evaluate_decoded<D: Domain>(
     utxos: &MempoolAwareUtxoStore<D>,
     pparams: &MultiEraProtocolParameters,
     estimate: bool,
+    admission_time: Option<&pallas_validate::utils::DijkstraTimeContext>,
 ) -> Result<pallas_validate::phase2::EvalReport, ChainError> {
     if estimate && tx.era() == Era::Dijkstra {
-        let estimates = estimate_decoded::<D>(tx, utxos, pparams)?;
+        let estimates = estimate_decoded::<D>(tx, utxos, pparams, admission_time)?;
         return Ok(estimates.into_iter().map(|(result, _)| result).collect());
     }
     if !requests_scripts(tx) {
         return Ok(vec![]);
     }
-    let (utxos, slot_config) = evaluation_inputs::<D>(tx, utxos)?;
-    pallas_validate::phase2::evaluate_tx(tx, pparams, &utxos, &slot_config)
-        .map_err(evaluation_error)
+    let (utxos, slot_config, time) = evaluation_inputs::<D>(tx, utxos, admission_time)?;
+    if let Some(time) = time {
+        pallas_validate::phase2::evaluate_tx_with_time(tx, pparams, &utxos, &time)
+    } else {
+        pallas_validate::phase2::evaluate_tx(tx, pparams, &utxos, &slot_config)
+    }
+    .map_err(evaluation_error)
 }
 
 fn estimate_decoded<D: Domain>(
     tx: &MultiEraTx<'_>,
     utxos: &MempoolAwareUtxoStore<D>,
     pparams: &MultiEraProtocolParameters,
+    admission_time: Option<&pallas_validate::utils::DijkstraTimeContext>,
 ) -> Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError> {
     if !requests_scripts(tx) {
         return Ok(vec![]);
     }
-    let (utxos, slot_config) = evaluation_inputs::<D>(tx, utxos)?;
-    pallas_validate::phase2::estimate_tx_calls(tx, pparams, &utxos, &slot_config)
-        .map_err(evaluation_error)
+    let (utxos, slot_config, time) = evaluation_inputs::<D>(tx, utxos, admission_time)?;
+    if let Some(time) = time {
+        pallas_validate::phase2::estimate_tx_calls_with_time(tx, pparams, &utxos, &time)
+    } else {
+        pallas_validate::phase2::estimate_tx_calls(tx, pparams, &utxos, &slot_config)
+    }
+    .map_err(evaluation_error)
 }
 
-/// The resolved inputs and the slot configuration a phase two evaluation reads.
+/// The resolved inputs and historical time mappings a phase two evaluation reads.
 fn evaluation_inputs<D: Domain>(
     tx: &MultiEraTx<'_>,
     utxos: &MempoolAwareUtxoStore<D>,
-) -> Result<(pallas_validate::utils::UtxoMap, SlotConfig), ChainError> {
+    admission_time: Option<&pallas_validate::utils::DijkstraTimeContext>,
+) -> Result<
+    (
+        pallas_validate::utils::UtxoMap,
+        SlotConfig,
+        Option<pallas_validate::utils::DijkstraTimeContext>,
+    ),
+    ChainError,
+> {
     use dolos_core::TxoRef;
 
     let eras = crate::eras::load_era_summary::<D>(utxos.state())?;
@@ -209,6 +246,21 @@ fn evaluation_inputs<D: Domain>(
     // `eras` keeps slot_length/timestamp in seconds; the Plutus ScriptContext
     // needs POSIXTime in milliseconds. The conversion lives in the helper.
     let slot_config = eras.to_pallas_slot_config();
+    let time = if tx.era() == Era::Dijkstra {
+        Some(match admission_time {
+            Some(time) => time.clone(),
+            None => {
+                let slot = utxos
+                    .state()
+                    .read_cursor()?
+                    .ok_or(ChainError::NoActiveEpoch)?
+                    .slot();
+                eras.to_pallas_time_context(slot)?
+            }
+        })
+    } else {
+        None
+    };
 
     let utxos: pallas_validate::utils::UtxoMap = required_utxos(tx, utxos)?
         .into_iter()
@@ -222,7 +274,7 @@ fn evaluation_inputs<D: Domain>(
         })
         .collect::<Result<_, _>>()?;
 
-    Ok((utxos, slot_config))
+    Ok((utxos, slot_config, time))
 }
 
 /// The chain error for a phase two evaluation pallas could not complete.

@@ -1,0 +1,16 @@
+{
+  "validation_slot": 1109036,
+  "ttl": 1112636,
+  "expected_upper_posix_ms": 1793394236000,
+  "reference_execution_units": {
+    "memory": 17788,
+    "steps": 8084282
+  },
+  "declared_execution_units": {
+    "memory": 19567,
+    "steps": 8892711
+  },
+  "txid": "9b354b0f9b042c677ffdb15665a914499d2bdcef093cd834d5ce0538b212f56f",
+  "reference_tool": "cardano-cli 11.2.2.0 - linux-x86_64 - ghc-9.6\ngit rev afa091b4af2795d1d9c46e59145ed16127760f7b",
+  "reference_era_history": "derived captured one-second mapping, not native LSQ era history"
+}
