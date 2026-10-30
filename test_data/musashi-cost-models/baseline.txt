@@ -1,0 +1,433 @@
+     Locking 13 packages to latest compatible versions
+      Adding pallas v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas)
+      Adding pallas-addresses v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-addresses)
+      Adding pallas-codec v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-codec)
+      Adding pallas-configs v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-configs)
+      Adding pallas-crypto v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-crypto)
+      Adding pallas-hardano v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-hardano)
+      Adding pallas-network v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-network)
+      Adding pallas-network2 v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-network2)
+      Adding pallas-primitives v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-primitives)
+      Adding pallas-traverse v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-traverse)
+      Adding pallas-txbuilder v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-txbuilder)
+      Adding pallas-utxorpc v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-utxorpc)
+      Adding pallas-validate v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-validate)
+   Compiling unicode-ident v1.0.18
+   Compiling proc-macro2 v1.0.95
+   Compiling libc v0.2.186
+   Compiling quote v1.0.40
+   Compiling syn v2.0.100
+   Compiling cfg-if v1.0.0
+   Compiling syn v3.0.6
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling serde_derive v1.0.229
+   Compiling autocfg v1.4.0
+   Compiling jobserver v0.1.33
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.9
+   Compiling cc v1.2.67
+   Compiling portable-atomic v1.11.0
+   Compiling critical-section v1.2.0
+   Compiling log v0.4.27
+   Compiling once_cell v1.21.4
+   Compiling equivalent v1.0.2
+   Compiling memchr v2.7.4
+   Compiling bytes v1.12.1
+   Compiling pin-project-lite v0.2.16
+   Compiling smallvec v1.15.0
+   Compiling lock_api v0.4.12
+   Compiling scopeguard v1.2.0
+   Compiling bitflags v2.13.0
+   Compiling futures-core v0.3.32
+   Compiling parking_lot_core v0.9.10
+   Compiling linux-raw-sys v0.9.4
+   Compiling either v1.15.0
+   Compiling itoa v1.0.15
+   Compiling allocator-api2 v0.2.21
+   Compiling getrandom v0.3.2
+   Compiling futures-sink v0.3.32
+   Compiling foldhash v0.1.5
+   Compiling tracing-core v0.1.36
+   Compiling hashbrown v0.15.2
+   Compiling pkg-config v0.3.32
+   Compiling slab v0.4.9
+   Compiling libm v0.2.16
+   Compiling parking_lot v0.12.3
+   Compiling mio v1.2.2
+   Compiling num-traits v0.2.19
+   Compiling tokio-macros v2.7.0
+   Compiling tracing-attributes v0.1.31
+   Compiling socket2 v0.6.3
+   Compiling signal-hook-registry v1.4.5
+   Compiling tracing v0.1.44
+   Compiling tokio v1.52.3
+   Compiling indexmap v2.9.0
+   Compiling futures-channel v0.3.32
+   Compiling zeroize_derive v1.5.0
+   Compiling futures-macro v0.3.32
+   Compiling synstructure v0.13.1
+   Compiling half v2.6.0
+   Compiling thiserror v2.0.21
+   Compiling futures-task v0.3.32
+   Compiling futures-io v0.3.32
+   Compiling futures-util v0.3.32
+   Compiling zeroize v1.9.0
+   Compiling thiserror-impl v2.0.21
+   Compiling typenum v1.20.1
+   Compiling rustix v1.0.5
+   Compiling zerofrom-derive v0.1.6
+   Compiling zerofrom v0.1.6
+   Compiling yoke-derive v0.7.5
+   Compiling stable_deref_trait v1.2.0
+   Compiling fnv v1.0.7
+   Compiling rand_core v0.10.1
+   Compiling yoke v0.7.5
+   Compiling cmake v0.1.58
+   Compiling zerovec-derive v0.10.3
+   Compiling dunce v1.0.5
+   Compiling strsim v0.11.1
+   Compiling zmij v1.0.23
+   Compiling fs_extra v1.3.0
+   Compiling crossbeam-utils v0.8.21
+   Compiling aws-lc-sys v0.45.0
+   Compiling zerovec v0.10.4
+   Compiling tokio-util v0.7.14
+   Compiling displaydoc v0.2.5
+   Compiling subtle v2.6.1
+   Compiling serde_json v1.0.151
+   Compiling anyhow v1.0.104
+   Compiling regex-syntax v0.8.5
+   Compiling heck v0.5.0
+   Compiling http v1.3.1
+   Compiling itertools v0.14.0
+   Compiling getrandom v0.2.17
+   Compiling crossbeam-epoch v0.9.20
+   Compiling hex v0.4.3
+   Compiling tinystr v0.7.6
+   Compiling ring v0.17.14
+   Compiling writeable v0.5.5
+   Compiling semver v1.0.28
+   Compiling litemap v0.7.5
+   Compiling percent-encoding v2.3.1
+   Compiling aws-lc-rs v1.18.1
+   Compiling version_check v0.9.5
+   Compiling icu_locid_transform_data v1.5.1
+   Compiling generic-array v0.14.7
+   Compiling icu_locid v1.5.0
+   Compiling rustc_version v0.4.1
+   Compiling http-body v1.0.1
+   Compiling icu_provider_macros v1.5.0
+   Compiling icu_properties_data v1.5.1
+   Compiling cpufeatures v0.3.0
+   Compiling zerocopy v0.8.24
+   Compiling minicbor v0.26.4
+   Compiling icu_provider v1.5.0
+   Compiling hybrid-array v0.4.14
+   Compiling rustls-pki-types v1.15.0
+   Compiling itertools v0.13.0
+   Compiling minicbor-derive v0.16.2
+   Compiling zerocopy-derive v0.8.24
+   Compiling getrandom v0.4.2
+   Compiling tower-service v0.3.3
+   Compiling utf8parse v0.2.2
+   Compiling icu_normalizer_data v1.5.1
+   Compiling fastrand v2.3.0
+   Compiling untrusted v0.9.0
+   Compiling same-file v1.0.6
+   Compiling walkdir v2.5.0
+   Compiling tempfile v3.20.0
+   Compiling anstyle-parse v0.2.6
+   Compiling icu_locid_transform v1.5.0
+   Compiling icu_collections v1.5.0
+   Compiling num-integer v0.1.46
+   Compiling anstyle v1.0.10
+   Compiling cmov v0.5.4
+   Compiling colorchoice v1.0.3
+   Compiling httparse v1.10.1
+   Compiling is_terminal_polyfill v1.70.1
+   Compiling rustls v0.23.45
+   Compiling anstyle-query v1.1.2
+   Compiling base64 v0.22.1
+   Compiling anstream v0.6.18
+   Compiling ctutils v0.4.2
+   Compiling icu_properties v1.5.1
+   Compiling pallas-codec v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-codec)
+   Compiling ppv-lite86 v0.2.21
+   Compiling block-buffer v0.12.1
+   Compiling crypto-common v0.2.2
+   Compiling terminal_size v0.4.2
+   Compiling rand_core v0.9.3
+   Compiling blst v0.3.16
+   Compiling atomic-waker v1.1.2
+   Compiling rayon-core v1.13.0
+   Compiling clap_lex v0.7.4
+   Compiling cryptoxide v0.4.4
+   Compiling utf8_iter v1.0.4
+   Compiling tower-layer v0.3.3
+   Compiling const-oid v0.10.2
+   Compiling utf16_iter v1.0.5
+   Compiling try-lock v0.2.5
+   Compiling write16 v1.0.0
+   Compiling icu_normalizer v1.5.0
+   Compiling want v0.3.1
+   Compiling digest v0.11.3
+   Compiling clap_builder v4.5.37
+   Compiling h2 v0.4.16
+   Compiling num-bigint v0.4.6
+   Compiling crypto-common v0.1.6
+   Compiling block-buffer v0.10.4
+   Compiling crossbeam-deque v0.8.6
+   Compiling prost-derive v0.13.5
+   Compiling clap_derive v4.5.32
+   Compiling psm v0.1.26
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling httpdate v1.0.3
+   Compiling crc-catalog v2.4.0
+   Compiling crc v3.3.0
+   Compiling hyper v1.6.0
+   Compiling clap v4.5.37
+   Compiling prost v0.13.5
+   Compiling digest v0.10.7
+   Compiling num-rational v0.4.2
+   Compiling idna_adapter v1.2.0
+   Compiling pallas-crypto v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-crypto)
+   Compiling rand_chacha v0.9.0
+   Compiling http-body-util v0.1.3
+   Compiling curve25519-dalek v4.1.3
+   Compiling form_urlencoded v1.2.1
+   Compiling tokio-stream v0.1.17
+   Compiling futures-executor v0.3.32
+   Compiling sync_wrapper v1.0.2
+   Compiling aho-corasick v1.1.3
+   Compiling stacker v0.1.21
+   Compiling alloca v0.4.0
+   Compiling socket2 v0.5.9
+   Compiling num_cpus v1.16.0
+   Compiling byteorder v1.5.0
+   Compiling ciborium-io v0.2.2
+   Compiling ipnet v2.11.0
+   Compiling openssl-probe v0.1.6
+   Compiling cpufeatures v0.2.17
+   Compiling base58 v0.2.0
+   Compiling plotters-backend v0.3.7
+   Compiling typeid v1.0.3
+   Compiling getrandom v0.1.16
+   Compiling plotters-svg v0.3.7
+   Compiling rustls-native-certs v0.8.1
+   Compiling hyper-util v0.1.15
+   Compiling ciborium-ll v0.2.2
+   Compiling threadpool v1.8.1
+   Compiling regex-automata v0.4.9
+   Compiling rustls-webpki v0.103.15
+   Compiling tower v0.5.2
+   Compiling rand v0.9.3
+   Compiling idna v1.0.3
+   Compiling rayon v1.12.0
+   Compiling tokio-rustls v0.26.2
+   Compiling num-iter v0.1.45
+   Compiling rand_core v0.6.4
+   Compiling opentelemetry v0.32.0
+   Compiling num-complex v0.4.6
+   Compiling unicode-width v0.2.0
+   Compiling paste v1.0.15
+   Compiling prettyplease v0.2.32
+   Compiling signature v2.2.0
+   Compiling cast v0.3.0
+   Compiling minicbor v0.25.1
+   Compiling iri-string v0.7.8
+   Compiling ryu v1.0.20
+   Compiling regex-lite v0.1.9
+   Compiling tower-http v0.6.8
+   Compiling serde_urlencoded v0.7.1
+   Compiling criterion-plot v0.8.2
+   Compiling ed25519 v2.2.3
+   Compiling num v0.4.3
+   Compiling console v0.16.6
+   Compiling hyper-rustls v0.27.5
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling url v2.5.4
+   Compiling regex v1.11.1
+   Compiling ciborium v0.2.2
+   Compiling plotters v0.3.7
+   Compiling sha2 v0.10.9
+   Compiling prost-types v0.13.5
+   Compiling sha2 v0.11.0
+   Compiling curve25519-dalek v5.0.0
+   Compiling tinytemplate v1.2.1
+   Compiling secp256k1-sys v0.10.1
+   Compiling minicbor-derive v0.15.3
+   Compiling encoding_rs v0.8.35
+   Compiling page_size v0.6.0
+   Compiling proc-macro-error-attr2 v2.0.0
+   Compiling similar v2.7.0
+   Compiling oorandom v11.1.5
+   Compiling ident_case v1.0.1
+   Compiling foldhash v0.2.0
+   Compiling mime v0.3.17
+   Compiling fixedbitset v0.5.7
+   Compiling simd-adler32 v0.3.9
+   Compiling adler2 v2.0.0
+   Compiling bech32 v0.11.1
+   Compiling thiserror v1.0.69
+   Compiling anes v0.1.6
+   Compiling rustversion v1.0.22
+   Compiling pallas-addresses v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-addresses)
+   Compiling criterion v0.8.2
+   Compiling miniz_oxide v0.8.8
+   Compiling petgraph v0.7.1
+   Compiling reqwest v0.13.4
+   Compiling insta v1.48.0
+   Compiling hashbrown v0.17.1
+   Compiling darling_core v0.23.0
+   Compiling proc-macro-error2 v2.0.1
+   Compiling ed25519-dalek v2.2.0
+   Compiling rand_core v0.5.1
+   Compiling erased-serde v0.4.6
+   Compiling opentelemetry_sdk v0.32.1
+   Compiling rand_chacha v0.3.1
+   Compiling pallas-primitives v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-primitives)
+   Compiling uuid v1.23.5
+   Compiling spin v0.10.1
+   Compiling thiserror-impl v1.0.69
+   Compiling serde_derive_internals v0.29.1
+   Compiling num-modular v0.6.5
+   Compiling schemars v0.8.22
+   Compiling multimap v0.10.0
+   Compiling signature v3.0.0
+   Compiling dashu-int v0.4.3
+   Compiling iana-time-zone v0.1.63
+   Compiling chumsky v1.0.0-alpha.8
+   Compiling chrono v0.4.44
+   Compiling ed25519 v3.0.0
+   Compiling prost-build v0.13.5
+   Compiling num-order v1.2.0
+   Compiling schemars_derive v0.8.22
+   Compiling amaru-deps v0.0.0 (https://github.com/rodrigomd94/amaru.git?rev=e122ffb2018196ba9c57f42b70b94ada603d3fbc#e122ffb2)
+   Compiling darling_macro v0.23.0
+   Compiling stacksafe-macro v1.0.1
+   Compiling pbjson-build v0.7.0
+   Compiling keccak v0.2.2
+   Compiling static_assertions v1.1.0
+   Compiling dyn-clone v1.0.19
+   Compiling dashu-base v0.4.3
+   Compiling indoc v2.0.7
+   Compiling unicode-segmentation v1.12.0
+   Compiling sponge-cursor v0.1.0
+   Compiling sha3 v0.12.0
+   Compiling amaru-uplc v0.4.0 (https://github.com/rodrigomd94/amaru.git?rev=e122ffb2018196ba9c57f42b70b94ada603d3fbc#e122ffb2)
+   Compiling pbjson-types v0.7.0
+   Compiling ed25519-dalek v3.0.0
+   Compiling stacksafe v1.0.1
+   Compiling darling v0.23.0
+   Compiling secp256k1 v0.30.0
+   Compiling amaru-minicbor-extra v0.1.2 (https://github.com/rodrigomd94/amaru.git?rev=e122ffb2018196ba9c57f42b70b94ada603d3fbc#e122ffb2)
+   Compiling pallas-traverse v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-traverse)
+   Compiling amaru-uplc v0.1.0
+   Compiling chacha20 v0.10.0
+   Compiling itertools v0.15.0
+   Compiling sysinfo v0.39.6
+   Compiling pin-project-internal v1.1.10
+   Compiling divan-macros v0.1.21
+   Compiling append-only-vec v0.1.8
+   Compiling cryptoxide v0.6.5
+   Compiling base64 v0.21.7
+   Compiling hamming v0.1.3
+   Compiling condtype v1.3.0
+   Compiling bech32 v0.12.0
+   Compiling bumpalo v3.20.3
+   Compiling doc-comment v0.3.3
+   Compiling divan v0.1.21
+   Compiling amaru-kernel v0.1.2 (https://github.com/rodrigomd94/amaru.git?rev=e122ffb2018196ba9c57f42b70b94ada603d3fbc#e122ffb2)
+   Compiling pbjson v0.7.0
+   Compiling pin-project v1.1.10
+   Compiling rand v0.10.1
+   Compiling serde_with_macros v3.21.0
+   Compiling async-trait v0.1.89
+   Compiling lazy_static v1.5.0
+   Compiling tonic v0.12.3
+   Compiling serde_with v3.21.0
+   Compiling zstd-sys v2.0.15+zstd.1.5.7
+   Compiling xxhash-rust v0.8.15
+   Compiling pallas-validate v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-validate)
+   Compiling binary-layout v4.0.2
+   Compiling utxorpc-spec v0.19.2 (https://github.com/SundaeSwap-finance/utxorpc-spec?rev=4bef71401bae7e9fc80b9d24379be0f9078b0ff5#4bef7140)
+   Compiling sharded-slab v0.1.7
+   Compiling pallas-network v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-network)
+   Compiling futures v0.3.32
+   Compiling opentelemetry v0.30.0
+   Compiling thread_local v1.1.8
+   Compiling trait-variant v0.1.2
+   Compiling tap v1.0.1
+   Compiling pallas-hardano v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-hardano)
+   Compiling pallas-network2 v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-network2)
+   Compiling pallas-utxorpc v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-utxorpc)
+   Compiling tracing-subscriber v0.3.23
+   Compiling pallas-configs v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-configs)
+   Compiling pallas-txbuilder v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas-txbuilder)
+   Compiling tracing-log v0.2.0
+   Compiling zstd-safe v7.2.4
+   Compiling pallas v1.4.0 (/home/rodrigo/projects/pallas/target/dijkstra-ttl-baseline-source/pallas)
+   Compiling tracing-opentelemetry v0.33.0
+   Compiling self_cell v1.2.0
+   Compiling compare v0.0.6
+   Compiling byteorder-lite v0.1.0
+   Compiling twox-hash v2.1.2
+   Compiling hashbrown v0.16.1
+   Compiling sfa v1.0.0
+   Compiling lz4_flex v0.11.6
+   Compiling quick_cache v0.6.18
+   Compiling interval-heap v0.0.5
+   Compiling dolos-core v2.0.0-alpha.0 (/home/rodrigo/projects/pallas/target/musashi-cost-model-20261029/baseline-dolos/crates/core)
+   Compiling crossbeam-skiplist v0.1.3
+   Compiling spin v0.9.8
+   Compiling enum_dispatch v0.3.13
+   Compiling varint-rs v2.2.0
+   Compiling rustc-hash v2.1.1
+   Compiling redb v3.1.0
+   Compiling byteview v0.10.1
+   Compiling hashbrown v0.14.5
+   Compiling dashmap v6.1.0
+   Compiling lsm-tree v3.1.0
+   Compiling flume v0.12.0
+   Compiling zstd v0.13.3
+   Compiling bincode v1.3.3
+   Compiling async-stream-impl v0.3.6
+   Compiling async-stream v0.3.6
+   Compiling fjall v3.1.0
+   Compiling dolos-flatfiles v2.0.0-alpha.0 (/home/rodrigo/projects/pallas/target/musashi-cost-model-20261029/baseline-dolos/crates/flatfiles)
+   Compiling wait-timeout v0.2.1
+   Compiling bit-vec v0.8.0
+   Compiling quick-error v1.2.3
+   Compiling rusty-fork v0.3.0
+   Compiling bit-set v0.8.0
+   Compiling dolos-fjall v2.0.0-alpha.0 (/home/rodrigo/projects/pallas/target/musashi-cost-model-20261029/baseline-dolos/crates/fjall)
+   Compiling dolos-cardano v2.0.0-alpha.0 (/home/rodrigo/projects/pallas/target/musashi-cost-model-20261029/baseline-dolos/crates/cardano)
+   Compiling dolos-redb3 v2.0.0-alpha.0 (/home/rodrigo/projects/pallas/target/musashi-cost-model-20261029/baseline-dolos/crates/redb3)
+   Compiling rand_xorshift v0.4.0
+   Compiling unarray v0.1.4
+   Compiling bech32 v0.9.1
+   Compiling proptest v1.7.0
+   Compiling dolos-testing v2.0.0-alpha.0 (/home/rodrigo/projects/pallas/target/musashi-cost-model-20261029/baseline-dolos/crates/testing)
+    Finished `test` profile [unoptimized] target(s) in 4m 05s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/musashi_cost_models.rs (target/musashi-cost-model-baseline-build/debug/deps/musashi_cost_models-7f7ddd3664f8bfbb)
+
+running 1 test
+
+thread 'musashi_bootstrap_uses_the_published_cost_models' (8289) panicked at crates/cardano/tests/musashi_cost_models.rs:49:5:
+assertion `left == right` failed: forced Musashi bootstrap must retain every published V3 override coefficient
+  left: [100788, 420, 1, 1, 1000, 173, 0, 1, 1000, 59957, 4, 1, 11183, 32, 201305, 8356, 4, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 100, 100, 16000, 100, 94375, 32, 132994, 32, 61462, 4, 72010, 178, 0, 1, 22151, 32, 91189, 769, 4, 2, 85848, 123203, 7305, -900, 1716, 549, 57, 85848, 0, 1, 1, 1000, 42921, 4, 2, 24548, 29498, 38, 1, 898148, 27279, 1, 51775, 558, 1, 39184, 1000, 60594, 1, 141895, 32, 83150, 32, 15299, 32, 76049, 1, 13169, 4, 22100, 10, 28999, 74, 1, 28999, 74, 1, 43285, 552, 1, 44749, 541, 1, 33852, 32, 68246, 32, 72362, 32, 7243, 32, 7391, 32, 11546, 32, 85848, 123203, 7305, -900, 1716, 549, 57, 85848, 0, 1, 90434, 519, 0, 1, 74433, 32, 85848, 123203, 7305, -900, 1716, 549, 57, 85848, 0, 1, 1, 85848, 123203, 7305, -900, 1716, 549, 57, 85848, 0, 1, 955506, 213312, 0, 2, 270652, 22588, 4, 1457325, 64566, 4, 20467, 1, 4, 0, 141992, 32, 100788, 420, 1, 1, 81663, 32, 59498, 32, 20142, 32, 24588, 32, 20744, 32, 25933, 32, 24623, 32, 43053543, 10, 53384111, 14333, 10, 43574283, 26308, 10, 16000, 100, 16000, 100, 962335, 18, 2780678, 6, 442008, 1, 52538055, 3756, 18, 267929, 18, 76433006, 8868, 18, 52948122, 18, 1995836, 36, 3227919, 12, 901022, 1, 166917843, 4307, 36, 284546, 36, 158221314, 26549, 36, 74698472, 36, 333849714, 1, 254006273, 72, 2174038, 72, 2261318, 64571, 4, 207616, 8310, 4, 1293828, 28716, 63, 0, 1, 1006041, 43623, 251, 0, 1]
+ right: [100788, 420, 1, 1, 1000, 173, 0, 1, 1000, 59957, 4, 1, 11183, 32, 201305, 8356, 4, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 100, 100, 16000, 100, 94375, 32, 132994, 32, 61462, 4, 72010, 178, 0, 1, 22151, 32, 91189, 769, 4, 2, 85848, 123203, 7305, -900, 1716, 960, 57, 85848, 0, 1, 1, 1000, 42921, 4, 2, 30623, 28755, 75, 1, 898148, 27279, 1, 51775, 558, 1, 39184, 1000, 60594, 1, 141895, 32, 83150, 32, 15299, 32, 76049, 1, 13169, 4, 22100, 10, 28999, 74, 1, 28999, 74, 1, 43285, 552, 1, 44749, 541, 1, 33852, 32, 68246, 32, 72362, 32, 7243, 32, 7391, 32, 11546, 32, 85848, 123203, 7305, -900, 1716, 960, 57, 85848, 0, 1, 90434, 519, 0, 1, 74433, 32, 85848, 123203, 7305, -900, 1716, 960, 57, 85848, 0, 1, 1, 85848, 123203, 7305, -900, 1716, 960, 57, 85848, 0, 1, 955506, 213312, 0, 2, 270652, 22588, 4, 1457325, 64566, 4, 20467, 1, 4, 0, 141992, 32, 100788, 420, 1, 1, 81663, 32, 59498, 32, 20142, 32, 24588, 32, 20744, 32, 25933, 32, 24623, 32, 43053543, 10, 53384111, 14333, 10, 43574283, 26308, 10, 16000, 100, 16000, 100, 962335, 18, 2780678, 6, 442008, 1, 52538055, 3756, 18, 267929, 18, 76433006, 8868, 18, 52948122, 18, 1995836, 36, 3227919, 12, 901022, 1, 166917843, 4307, 36, 284546, 36, 158221314, 26549, 36, 74698472, 36, 333849714, 1, 254006273, 72, 2174038, 72, 2261318, 64571, 4, 207616, 8310, 4, 1293828, 28716, 63, 0, 1, 1006041, 43623, 251, 0, 1, 100181, 726, 719, 0, 1, 100181, 726, 719, 0, 1, 100181, 726, 719, 0, 1, 107878, 680, 0, 1, 95336, 1, 281145, 18848, 0, 1, 180194, 159, 1, 1, 158519, 8942, 0, 1, 159378, 8813, 0, 1, 107490, 3298, 1, 106057, 655, 1, 1964219, 24520, 3, 607153, 231697, 53144, 0, 1, 116711, 1957, 4, 231883, 10, 1000, 24838, 7, 1, 232010, 32, 321837444, 25087669, 18, 617887431, 67302824, 36, 356924, 18413, 45, 21, 219951, 9444, 1, 1000, 172116, 183150, 6, 24, 21, 213283, 618401, 1998, 28258, 1, 1000, 38159, 2, 22, 1000, 95933, 1, 1, 11, 1000, 277577, 12, 21]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test musashi_bootstrap_uses_the_published_cost_models ... FAILED
+
+failures:
+
+failures:
+    musashi_bootstrap_uses_the_published_cost_models
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `-p dolos-cardano --test musashi_cost_models`

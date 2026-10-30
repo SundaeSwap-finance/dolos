@@ -1,0 +1,91 @@
+[
+  {
+    "name": "focused",
+    "command": [
+      "cargo",
+      "+1.97.0",
+      "test",
+      "--config",
+      "target/musashi-ttl/pallas.toml",
+      "--offline",
+      "-p",
+      "dolos-cardano",
+      "--features",
+      "strict",
+      "--test",
+      "musashi_cost_models"
+    ],
+    "exit": 0,
+    "seconds": 17.06
+  },
+  {
+    "name": "clippy",
+    "command": [
+      "cargo",
+      "+1.97.0",
+      "clippy",
+      "--config",
+      "target/musashi-ttl/pallas.toml",
+      "--offline",
+      "--workspace",
+      "--all-targets",
+      "--all-features"
+    ],
+    "exit": 0,
+    "seconds": 87.19
+  },
+  {
+    "name": "build",
+    "command": [
+      "cargo",
+      "+1.97.0",
+      "build",
+      "--config",
+      "target/musashi-ttl/pallas.toml",
+      "--offline",
+      "--workspace",
+      "--all-targets",
+      "--all-features"
+    ],
+    "exit": 0,
+    "seconds": 214.51
+  },
+  {
+    "name": "default",
+    "command": [
+      "cargo",
+      "+1.97.0",
+      "test",
+      "--config",
+      "target/musashi-ttl/pallas.toml",
+      "--offline",
+      "--workspace",
+      "--all-targets",
+      "--no-fail-fast"
+    ],
+    "exit": 101,
+    "seconds": 326.97
+  },
+  {
+    "name": "strict",
+    "command": [
+      "cargo",
+      "+1.97.0",
+      "test",
+      "--config",
+      "target/musashi-ttl/pallas.toml",
+      "--offline",
+      "--workspace",
+      "--all-features",
+      "--exclude",
+      "dolos-minibf",
+      "--exclude",
+      "dolos-minikupo",
+      "--exclude",
+      "dolos-trp",
+      "--no-fail-fast"
+    ],
+    "exit": 101,
+    "seconds": 99.03
+  }
+]

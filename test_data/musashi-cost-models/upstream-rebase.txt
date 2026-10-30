@@ -1,0 +1,27 @@
+   Compiling pallas-codec v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-crypto v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-network2 v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-addresses v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-primitives v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-network v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-traverse v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-configs v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-validate v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-hardano v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-utxorpc v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas-txbuilder v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling pallas v1.4.0 (https://github.com/SundaeSwap-finance/pallas?rev=de8177de91f353fac09e1f288da9ddad06c04861#de8177de)
+   Compiling dolos-core v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/core)
+   Compiling dolos-redb3 v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/redb3)
+   Compiling dolos-fjall v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/fjall)
+   Compiling dolos-cardano v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/cardano)
+   Compiling dolos-testing v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/testing)
+    Finished `test` profile [unoptimized] target(s) in 41.41s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/musashi_cost_models.rs (/home/rodrigo/projects/pallas/target/dijkstra-ttl-dolos-build/debug/deps/musashi_cost_models-4f132d9b8b732c43)
+
+running 1 test
+test musashi_bootstrap_uses_the_published_cost_models ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s

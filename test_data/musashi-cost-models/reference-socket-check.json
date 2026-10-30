@@ -1,0 +1,5 @@
+{
+  "socket": "/home/rodrigo/leios-testnet/node.socket",
+  "reachable": false,
+  "error": "[Errno 111] Connection refused"
+}

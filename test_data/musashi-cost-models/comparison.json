@@ -1,0 +1,33 @@
+{
+  "official_genesis_hashes_match_config": true,
+  "network_magic": 164,
+  "current_reference_query": "unavailable; known socket refuses connection and documented peer is N2N only",
+  "models": {
+    "PlutusV1": {
+      "published_entries": 332,
+      "dolos_reported_entries": 166,
+      "equal": false,
+      "prefix_differences": []
+    },
+    "PlutusV2": {
+      "published_entries": 332,
+      "dolos_reported_entries": 175,
+      "equal": false,
+      "prefix_differences": []
+    },
+    "PlutusV3": {
+      "published_entries": 350,
+      "dolos_reported_entries": 251,
+      "equal": false,
+      "prefix_differences": [
+        54,
+        64,
+        65,
+        66,
+        119,
+        135,
+        146
+      ]
+    }
+  }
+}

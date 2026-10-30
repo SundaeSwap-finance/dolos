@@ -1,0 +1,47 @@
+{
+  "observed_at_utc": "2026-10-29T16:07:31.094842+00:00",
+  "files": [
+    {
+      "url": "https://book.play.dev.cardano.org/environments-pre/leios/config.json",
+      "sha256": "542e14ee6710cee9b6a01326a4c1e2d1fecc03b7fccd31a8375153ffd0f71240",
+      "blake2b256": "c2455e9ecce10a00129f62a73c95e303714cbd70e53f4901301cf5e4d998fe04",
+      "bytes": 4223,
+      "equals_configured_file": null
+    },
+    {
+      "url": "https://book.play.dev.cardano.org/environments-pre/leios/alonzo-genesis.json",
+      "sha256": "5e5b1f0776c6d84bcd15bc7df4f9368884b7c433296657e54722175ce71f1318",
+      "blake2b256": "a0f11e3609a551b5f6cb8feeeea30cb5b70839ec9dffcd726a5323a1e3f3b12a",
+      "bytes": 16159,
+      "equals_configured_file": true
+    },
+    {
+      "url": "https://book.play.dev.cardano.org/environments-pre/leios/conway-genesis.json",
+      "sha256": "9a7bdb6f68c6672a8afa202e8cfc6fdf40b00de9cb9c27cbcec784cdc6deae0e",
+      "blake2b256": "7e237f0c935539f5571297e3171946dd83929719496cbf51d0dab814a47ae0de",
+      "bytes": 3914,
+      "equals_configured_file": true
+    },
+    {
+      "url": "https://book.play.dev.cardano.org/environments-pre/leios/dijkstra-genesis.json",
+      "sha256": "9895c096a45225e99630b3fb866e5b115ce3d28c6ecd45ceda8feb0e29306127",
+      "blake2b256": "868a465b7115ae653ec532f46eca1a31a89211a96e810d78f82d6e60e3cdca87",
+      "bytes": 2362,
+      "equals_configured_file": true
+    },
+    {
+      "url": "https://book.play.dev.cardano.org/environments-pre/leios/shelley-genesis.json",
+      "sha256": "0c7365b3e74a52a09d1ad169438b714919dd36710c9feed8e49be65e73990ab7",
+      "blake2b256": "d1b19e006c1198fb7ac9d53073c1a9f77acb1a9474c92310006ae4418290cda3",
+      "bytes": 2761,
+      "equals_configured_file": true
+    },
+    {
+      "url": "https://book.play.dev.cardano.org/environments-pre/leios/byron-genesis.json",
+      "sha256": "e446be2aa24aa327b0cbbff57b3ab3f8dfe793959809f3b31973c7945bc64e4b",
+      "blake2b256": "5a95047134142afc96e3da8e655ee477a4769f73fb5da9a26274ca03a5496218",
+      "bytes": 1384,
+      "equals_configured_file": true
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+   Compiling dolos-cardano v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/cardano)
+   Compiling dolos-testing v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/testing)
+    Finished `test` profile [unoptimized] target(s) in 16.94s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/musashi_cost_models.rs (/home/rodrigo/projects/pallas/target/dijkstra-ttl-dolos-build/debug/deps/musashi_cost_models-0e8ee77af1906589)
+
+running 1 test
+test musashi_bootstrap_uses_the_published_cost_models ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s

@@ -1,0 +1,65 @@
+   Compiling hyper-util v0.1.15
+   Compiling rustls v0.23.45
+   Compiling tokio-stream v0.1.17
+   Compiling opentelemetry_sdk v0.32.1
+   Compiling tokio-rustls v0.26.2
+   Compiling hyper-rustls v0.27.5
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling reqwest v0.13.4
+   Compiling hyper-timeout v0.5.2
+   Compiling curve25519-dalek v4.1.3
+   Compiling ed25519-dalek v2.2.0
+   Compiling amaru-deps v0.0.0 (https://github.com/rodrigomd94/amaru.git?rev=e122ffb2018196ba9c57f42b70b94ada603d3fbc#e122ffb2)
+   Compiling curve25519-dalek v5.0.0
+   Compiling ed25519-dalek v3.0.0
+   Compiling amaru-minicbor-extra v0.1.2 (https://github.com/rodrigomd94/amaru.git?rev=e122ffb2018196ba9c57f42b70b94ada603d3fbc#e122ffb2)
+   Compiling axum-core v0.4.5
+   Compiling amaru-kernel v0.1.2 (https://github.com/rodrigomd94/amaru.git?rev=e122ffb2018196ba9c57f42b70b94ada603d3fbc#e122ffb2)
+   Compiling axum v0.7.9
+   Compiling tower v0.4.13
+   Compiling amaru-uplc v0.4.0 (https://github.com/rodrigomd94/amaru.git?rev=e122ffb2018196ba9c57f42b70b94ada603d3fbc#e122ffb2)
+   Compiling tonic v0.12.3
+   Compiling pallas-validate v1.4.0 (/home/rodrigo/projects/pallas/pallas-validate)
+   Compiling utxorpc-spec v0.19.2 (https://github.com/SundaeSwap-finance/utxorpc-spec?rev=4bef71401bae7e9fc80b9d24379be0f9078b0ff5#4bef7140)
+   Compiling pallas-network2 v1.4.0 (/home/rodrigo/projects/pallas/pallas-network2)
+   Compiling tracing-opentelemetry v0.33.0
+   Compiling tonic v0.14.6
+   Compiling md-5 v0.10.6
+   Compiling hmac v0.12.1
+   Compiling oci-client v0.17.0
+   Compiling postgres-protocol v0.6.10
+   Compiling stelae v0.2.0 (https://github.com/txpipe/stelae?tag=v0.2.0#703cc34b)
+   Compiling pallas-utxorpc v1.4.0 (/home/rodrigo/projects/pallas/pallas-utxorpc)
+   Compiling pallas v1.4.0 (/home/rodrigo/projects/pallas/pallas)
+   Compiling dolos-core v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/core)
+   Compiling postgres-types v0.2.12
+   Compiling tonic-prost v0.14.6
+   Compiling tokio-postgres v0.7.16
+   Compiling dolos-cardano v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/cardano)
+   Compiling dolos-redb3 v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/redb3)
+   Compiling dolos-fjall v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/fjall)
+   Compiling stelae-driver v0.2.0 (https://github.com/txpipe/stelae?tag=v0.2.0#703cc34b)
+   Compiling reqwest v0.12.28
+   Compiling tonic-types v0.14.6
+   Compiling opentelemetry-proto v0.32.0
+   Compiling dolos v2.0.0-alpha.0 (/home/rodrigo/projects/dolos)
+   Compiling opentelemetry-http v0.32.0
+   Compiling axum-core v0.5.2
+   Compiling axum v0.8.4
+   Compiling gasket v0.9.0
+   Compiling opentelemetry-otlp v0.32.0
+   Compiling dolos-snapshot v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/snapshot)
+   Compiling dolos-testing v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/testing)
+   Compiling dolos-minibf v2.0.0-alpha.0 (/home/rodrigo/projects/dolos/crates/minibf)
+   Compiling postgres-native-tls v0.5.2
+   Compiling postgres v0.19.12
+   Compiling xtask v0.1.0 (/home/rodrigo/projects/dolos/xtask)
+    Finished `test` profile [unoptimized] target(s) in 1m 32s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/storage_perf_smoke.rs (/home/rodrigo/projects/pallas/target/dijkstra-ttl-dolos-build/debug/deps/storage_perf_smoke-5f8e15e42c11250f)
+
+running 1 test
+test smoke_preset_runs_every_workload_and_verifies_bodies ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 1.45s

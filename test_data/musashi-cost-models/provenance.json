@@ -1,0 +1,82 @@
+{
+  "network": "Musashi",
+  "magic": 164,
+  "base": "5192df0590fb8e65656a5710da1bbfec2f0c6328",
+  "parser_base": "f3419a3a1e3e7c33d0b9027343089b5030ec8ef3",
+  "bootstrap_before": "runtime assertion fails: 251 V3 coefficients instead of exact 350-entry override",
+  "bootstrap_after": "same assertion passes; exact V1/V2/V3 retained and V4 preserved",
+  "separate_build_targets": true,
+  "default_suite": {
+    "passed": 2001,
+    "failed": 1,
+    "ignored": 37
+  },
+  "strict_suite": {
+    "passed": 1432,
+    "failed": 16,
+    "ignored": 42
+  },
+  "strict_failure_names_match_historical": true,
+  "strict_failure_names": [
+    "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+    "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+    "every_lookup_by_hash_finds_each_sub_transaction",
+    "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+    "minibf_address_routes_count_each_sub_transaction",
+    "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+    "minibf_block_routes_count_each_sub_transaction",
+    "minibf_resolves_an_input_a_sub_transaction_made",
+    "minibf_serves_each_sub_transaction_by_its_own_hash",
+    "minikupo_matches_the_outputs_of_a_sub_transaction",
+    "serve::grpc::v1::query::tests::read_tx_answers_a_sub_transaction_hash_with_its_parent",
+    "serve::grpc::v1::query::tests::read_tx_of_an_unknown_hash_is_not_found",
+    "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+    "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+    "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+    "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+  ],
+  "default_failure": "unrelated storage smoke reader-ops > 0 assertion; isolated rerun passed",
+  "build": "passed",
+  "clippy": "passed with existing warnings in unchanged files",
+  "independent_active_parameter_query": false,
+  "running_state_changed": false,
+  "transactions_submitted": false,
+  "source_sha256": {
+    "crates/cardano/src/genesis/mod.rs": "2f78e8c9de1b0d0c68b70d8de7fe2d15bfee793dbac5181a570056c28a06558a",
+    "crates/cardano/tests/musashi_cost_models.rs": "e27e8d68153954c38b78f75978f1d081a4ab6c381b272ffc4dbb277ccf0c0c31"
+  },
+  "logs": "/home/rodrigo/projects/pallas/target/musashi-cost-model-20261029",
+  "file_sha256": {
+    "local-active-parameters.json": "537ea3db5f40c7d193677decbb493e6f2c36e633ffe59aaaf4b3c80c9bde6851",
+    "alonzo-transition-07d904eb.hs": "81518f0e410bd27d640cbfc5d3cc658c9c2c49dbe3bbf40267f6a30657c4a523",
+    "conway-transition-07d904eb.hs": "f71c44727ba75ad5fc900c454c16abfa6008a63638a133f28e66c6934ca56ab1",
+    "README.md": "2ed45e48a7f99731a613b686917d09496db96f6533132963e0952253eed5c30a",
+    "reference-socket-check.json": "1677dc6681ef112ab8f884769430c5c117a238c38a3b0630c5acbfc3282643b7",
+    "public-source.json": "1f4ecf3239b0a7d5e51089f72e257191a70f220c106bc9f98703511652e8dc4b",
+    "dijkstra-genesis.json": "9895c096a45225e99630b3fb866e5b115ce3d28c6ecd45ceda8feb0e29306127",
+    "fixed.txt": "f3076b25032b53d292f7f716412b3e98c206b9f83333dbc03f695af21434b311",
+    "reference-source.json": "252af6dcde623334bcccec171c368592ad0152ceb1f129d7b6663aeb7cdc0928",
+    "alonzo-genesis.json": "5e5b1f0776c6d84bcd15bc7df4f9368884b7c433296657e54722175ce71f1318",
+    "conway-genesis.json": "9a7bdb6f68c6672a8afa202e8cfc6fdf40b00de9cb9c27cbcec784cdc6deae0e",
+    "baseline.txt": "4c272cc969ce7cfecdbb70b79faf3e2011524132ae0d080cccd4e32d6c23bdc6",
+    "local-tip.json": "1aed3bbdabfff66e73c16108acf5302acc2819bb2200d51ce21111eb166a79ac",
+    "storage-smoke-rerun.txt": "7e4d4f311961c98fd33c2adf5ff87f8e433fc0e7ba90b2f5318d5b4a74959393",
+    "verification.json": "a5b16538221017107a6a9a22ccf6d5fe3b12f718252e16db4ae007edf2f4aa22",
+    "byron-genesis.json": "e446be2aa24aa327b0cbbff57b3ab3f8dfe793959809f3b31973c7945bc64e4b",
+    "shelley-genesis.json": "0c7365b3e74a52a09d1ad169438b714919dd36710c9feed8e49be65e73990ab7",
+    "dolos-checks.json": "7b7a1f3521a0def8a048c850ec6b076fa80217003b1634e38cc17292488d88ed",
+    "config.json": "542e14ee6710cee9b6a01326a4c1e2d1fecc03b7fccd31a8375153ffd0f71240",
+    "comparison.json": "7f08cc3aa43b3a2de8380fdb39bd13d3370b8223abba4bc70702418683848d3e",
+    "upstream-rebase.txt": "3b33f75df0527c19b6b869abaa998722339bd7668a9fcdf8fb420733c3653211"
+  },
+  "paired_pallas_commit": "03b1ac838ca7084be752878619ff18cad60237d0",
+  "historical_verification_note": "running_state_changed and transactions_submitted describe the original offline bootstrap investigation; later successful replay/submission is documented separately in the TTL capture.",
+  "upstream_rebase": {
+    "dolos": "58d91ebb43aecca9d9027f0b6e86cee12113dfc3",
+    "pallas": "de8177de91f353fac09e1f288da9ddad06c04861",
+    "upstream_fix": "fc2dd7b2",
+    "extra_local_bootstrap_code_removed": true,
+    "published_models_test_passed": true,
+    "current_test_source_sha256": "5b1eee04b59f283414d888bf02aee91c418cbe16f2d5f22b5c07b2333007f7d0"
+  }
+}

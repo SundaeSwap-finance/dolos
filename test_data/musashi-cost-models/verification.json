@@ -1,0 +1,49 @@
+{
+  "network": "Musashi",
+  "magic": 164,
+  "base": "5192df0590fb8e65656a5710da1bbfec2f0c6328",
+  "parser_base": "f3419a3a1e3e7c33d0b9027343089b5030ec8ef3",
+  "bootstrap_before": "runtime assertion fails: 251 V3 coefficients instead of exact 350-entry override",
+  "bootstrap_after": "same assertion passes; exact V1/V2/V3 retained and V4 preserved",
+  "separate_build_targets": true,
+  "default_suite": {
+    "passed": 2001,
+    "failed": 1,
+    "ignored": 37
+  },
+  "strict_suite": {
+    "passed": 1432,
+    "failed": 16,
+    "ignored": 42
+  },
+  "strict_failure_names_match_historical": true,
+  "strict_failure_names": [
+    "a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent",
+    "every_harvested_block_makes_its_outputs_and_spends_its_inputs",
+    "every_lookup_by_hash_finds_each_sub_transaction",
+    "every_transaction_of_every_harvested_block_is_served_at_its_own_slot",
+    "minibf_address_routes_count_each_sub_transaction",
+    "minibf_block_route_lists_a_sub_transaction_under_the_address_it_spends",
+    "minibf_block_routes_count_each_sub_transaction",
+    "minibf_resolves_an_input_a_sub_transaction_made",
+    "minibf_serves_each_sub_transaction_by_its_own_hash",
+    "minikupo_matches_the_outputs_of_a_sub_transaction",
+    "serve::grpc::v1::query::tests::read_tx_answers_a_sub_transaction_hash_with_its_parent",
+    "serve::grpc::v1::query::tests::read_tx_of_an_unknown_hash_is_not_found",
+    "serve::grpc::v1alpha::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+    "serve::grpc::v1beta::query::tests::read_tx_answers_a_sub_transaction_by_its_own_hash",
+    "the_lenient_rule_changes_nothing_for_the_harvested_blocks",
+    "the_spender_of_a_sub_transaction_input_is_that_sub_transaction"
+  ],
+  "default_failure": "unrelated storage smoke reader-ops > 0 assertion; isolated rerun passed",
+  "build": "passed",
+  "clippy": "passed with existing warnings in unchanged files",
+  "independent_active_parameter_query": false,
+  "running_state_changed": false,
+  "transactions_submitted": false,
+  "source_sha256": {
+    "crates/cardano/src/genesis/mod.rs": "2f78e8c9de1b0d0c68b70d8de7fe2d15bfee793dbac5181a570056c28a06558a",
+    "crates/cardano/tests/musashi_cost_models.rs": "e27e8d68153954c38b78f75978f1d081a4ab6c381b272ffc4dbb277ccf0c0c31"
+  },
+  "logs": "/home/rodrigo/projects/pallas/target/musashi-cost-model-20261029"
+}
