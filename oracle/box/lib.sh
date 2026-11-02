@@ -5,12 +5,15 @@ IN_IMAGE=${IN_IMAGE:-$HERE/in-image.sh}
 # One line for each unit of the target dir, the tree ids of the scratch trees its last build read and its output files.
 BUILT="$ROOT/${TARGET:-target}/built-units"
 # The arms that plant a defect, each judged on the records plants/<arm>.records names.
-PLANTED_ARMS="colret coin inflight rodrigo-reverted rob-reverted cost revalidate revalidate-drops subouts byron-attrs byron-signer byron-guard chaincode minfee-subtx emptyguards tag24 v1v2 byron-out tag24-ref unreg-refund drep-deposit upper-inclusive slot-off-by-one horizon-removed system-start cost-models"
+PLANTED_ARMS="colret coin inflight rodrigo-reverted rob-reverted cost revalidate revalidate-drops subouts byron-attrs byron-signer byron-guard chaincode minfee-subtx emptyguards tag24 v1v2 byron-out tag24-ref unreg-refund drep-deposit upper-inclusive slot-off-by-one horizon-removed system-start cost-models guard-ref-reverted native-ref-reencoded v2-ref-dropped v4-ref-refused v1-ref-exposed pointer-refused script-payment-swap signatories-unsorted withdrawal-order cert-unwrapped script-guard-admitted v3-cert-wrapped v2-withdrawal-unwrapped top-guards-admitted"
 
 # Whether an arm plants its defect in pallas.
 pallas_arm() {
   case $1 in
     rob-reverted | cost | byron-attrs | byron-signer | byron-guard | chaincode | minfee-subtx | emptyguards | tag24 | v1v2 | byron-out | tag24-ref | unreg-refund | upper-inclusive | slot-off-by-one | horizon-removed | cost-models) return 0 ;;
+    guard-ref-reverted | native-ref-reencoded | v2-ref-dropped | v4-ref-refused | v1-ref-exposed | pointer-refused) return 0 ;;
+    script-payment-swap | signatories-unsorted | withdrawal-order | cert-unwrapped | script-guard-admitted) return 0 ;;
+    v3-cert-wrapped | v2-withdrawal-unwrapped | top-guards-admitted) return 0 ;;
     *) return 1 ;;
   esac
 }

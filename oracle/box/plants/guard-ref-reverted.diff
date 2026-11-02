@@ -1,0 +1,30 @@
+diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
+index 11e515c8..3a983de0 100644
+--- a/pallas-validate/src/phase2/dijkstra.rs
++++ b/pallas-validate/src/phase2/dijkstra.rs
+@@ -126,7 +126,24 @@ fn context_output(output: &MultiEraOutput<'_>, _reference: bool) -> Result<Conte
+     if !matches!(address, Address::Shelley(_)) {
+         return unsupported("output address (requires Shelley)");
+     }
+-    let script = output.multi_era_script_ref().map(|s| s.hash());
++    let script = output.multi_era_script_ref();
++    if let Some(MultiEraScriptRef::Dijkstra(s)) = &script
++        && let n::ScriptRef::NativeScript(s) = s.as_ref()
++    {
++        let mut pending = vec![&**s];
++        while let Some(s) = pending.pop() {
++            match s {
++                n::NativeScript::ScriptRequireGuard(_) => {
++                    return unsupported("native script guards");
++                }
++                n::NativeScript::ScriptAll(xs)
++                | n::NativeScript::ScriptAny(xs)
++                | n::NativeScript::ScriptNOfK(_, xs) => pending.extend(xs.iter()),
++                _ => {}
++            }
++        }
++    }
++    let script = script.map(|s| s.hash());
+     Ok(ContextOutput {
+         address,
+         value: output.value().into_conway(),

@@ -1,0 +1,15 @@
+diff --git a/pallas-traverse/src/script_ref.rs b/pallas-traverse/src/script_ref.rs
+index 245103af..b86fb22e 100644
+--- a/pallas-traverse/src/script_ref.rs
++++ b/pallas-traverse/src/script_ref.rs
+@@ -117,9 +117,7 @@ impl<'b> MultiEraScriptRef<'b> {
+             },
+             #[cfg(feature = "unstable")]
+             Self::Dijkstra(x) => match x.deref() {
+-                dijkstra::ScriptRef::NativeScript(s) => {
+-                    MultiEraNativeScript::from_dijkstra(s).hash()
+-                }
++                dijkstra::ScriptRef::NativeScript(s) => s.compute_hash(),
+                 dijkstra::ScriptRef::PlutusV1Script(s) => s.compute_hash(),
+                 dijkstra::ScriptRef::PlutusV2Script(s) => s.compute_hash(),
+                 dijkstra::ScriptRef::PlutusV3Script(s) => s.compute_hash(),

@@ -1,0 +1,12 @@
+diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
+index 11e515c8..308bdf5a 100644
+--- a/pallas-validate/src/phase2/dijkstra.rs
++++ b/pallas-validate/src/phase2/dijkstra.rs
+@@ -562,7 +562,6 @@ pub(super) fn eval_tx_with_mode(
+                 })
+                 .collect(),
+         };
+-        keys.sort();
+         keys.dedup();
+         keys
+     };

@@ -1,0 +1,13 @@
+diff --git a/pallas-validate/src/phase2/to_plutus_data.rs b/pallas-validate/src/phase2/to_plutus_data.rs
+index 25096050..47b18f70 100644
+--- a/pallas-validate/src/phase2/to_plutus_data.rs
++++ b/pallas-validate/src/phase2/to_plutus_data.rs
+@@ -694,7 +694,7 @@ impl ToPlutusData for WithRegistrationDeposit<'_, Certificate> {
+             Certificate::Reg(stake_credential, amount) => wrap_multiple_with_constr(
+                 0,
+                 vec![
+-                    stake_credential.to_plutus_data(),
++                    WithWrappedStakeCredential(stake_credential).to_plutus_data(),
+                     self.1.then_some(*amount).to_plutus_data(),
+                 ],
+             ),

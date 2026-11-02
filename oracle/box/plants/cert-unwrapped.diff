@@ -1,0 +1,18 @@
+diff --git a/pallas-validate/src/phase2/to_plutus_data.rs b/pallas-validate/src/phase2/to_plutus_data.rs
+index 25096050..fdc91a62 100644
+--- a/pallas-validate/src/phase2/to_plutus_data.rs
++++ b/pallas-validate/src/phase2/to_plutus_data.rs
+@@ -632,10 +632,9 @@ impl ToPlutusData for WithPartialCertificates<'_, Certificate> {
+         match self.0 {
+             // The V1/V2 certificate credential is wrapped in the StakingHash constructor.
+             Certificate::StakeRegistration(stake_credential)
+-            | Certificate::Reg(stake_credential, _) => wrap_with_constr(
+-                0,
+-                WithWrappedStakeCredential(stake_credential).to_plutus_data(),
+-            ),
++            | Certificate::Reg(stake_credential, _) => {
++                wrap_with_constr(0, stake_credential.to_plutus_data())
++            }
+ 
+             Certificate::StakeDeregistration(stake_credential)
+             | Certificate::UnReg(stake_credential, _) => wrap_with_constr(

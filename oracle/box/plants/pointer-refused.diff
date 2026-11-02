@@ -1,0 +1,16 @@
+diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
+index 11e515c8..860e9462 100644
+--- a/pallas-validate/src/phase2/dijkstra.rs
++++ b/pallas-validate/src/phase2/dijkstra.rs
+@@ -126,6 +126,11 @@ fn context_output(output: &MultiEraOutput<'_>, _reference: bool) -> Result<Conte
+     if !matches!(address, Address::Shelley(_)) {
+         return unsupported("output address (requires Shelley)");
+     }
++    if let Address::Shelley(a) = &address
++        && let pallas_addresses::ShelleyDelegationPart::Pointer(_) = a.delegation()
++    {
++        return unsupported("pointer address in a V3 script context");
++    }
+     let script = output.multi_era_script_ref().map(|s| s.hash());
+     Ok(ContextOutput {
+         address,

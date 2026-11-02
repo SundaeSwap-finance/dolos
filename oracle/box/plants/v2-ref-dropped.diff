@@ -1,0 +1,13 @@
+diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
+index 11e515c8..ea127a47 100644
+--- a/pallas-validate/src/phase2/dijkstra.rs
++++ b/pallas-validate/src/phase2/dijkstra.rs
+@@ -74,7 +74,7 @@ impl LegacyContextData for ContextOutput {
+                 self.address.to_plutus_data(),
+                 WithZeroAdaAsset(&self.value).to_plutus_data(),
+                 self.datum.to_plutus_data(),
+-                self.script.to_plutus_data(),
++                None::<n::ScriptHash>.to_plutus_data(),
+             ],
+         )
+     }

@@ -121,6 +121,11 @@ caught() {
     byron-out) pattern='^UNSUPPORTED_UNEXPECTED [a-z]+#[0-9]+ label=(bootstrap or reward address|output address)' ;;
     minfee-subtx) pattern='^DIFF fee [a-z]+#[0-9]+ ledger=[0-9]+ dolos=[0-9]+$' ;;
     v1v2) pattern='^UNSUPPORTED_UNEXPECTED [a-z]+#[0-9]+ label=new script language ' ;;
+    native-ref-reencoded | v2-ref-dropped | v1-ref-exposed | script-payment-swap | signatories-unsorted | withdrawal-order | cert-unwrapped | script-guard-admitted) pattern='^DISAGREE [a-z]+#[0-9]+ ' ;;
+    v3-cert-wrapped | v2-withdrawal-unwrapped | top-guards-admitted | subtx-script-admitted) pattern='^DISAGREE [a-z]+#[0-9]+ ' ;;
+    guard-ref-reverted) pattern='^UNSUPPORTED_UNEXPECTED [a-z]+#[0-9]+ label=native script guards$' ;;
+    v4-ref-refused) pattern='^UNSUPPORTED_UNEXPECTED [a-z]+#[0-9]+ label=reference script language ' ;;
+    pointer-refused) pattern='^UNSUPPORTED_UNEXPECTED [a-z]+#[0-9]+ label=pointer address ' ;;
   esac
   if [ ! -f "$OUT/head.log" ]; then
     echo "ARM $arm NO_HEAD_LOG"
@@ -190,6 +195,9 @@ for arm in $ARMS; do
     drep-deposit) plant=plant_drep_deposit ;;
     cost) plant=plant_cost ;;
     rob-reverted | byron-attrs | byron-signer | byron-guard | chaincode | minfee-subtx | emptyguards | tag24 | v1v2 | byron-out | tag24-ref | unreg-refund | upper-inclusive | slot-off-by-one | horizon-removed | cost-models) plant="plant_pallas $arm" ;;
+    guard-ref-reverted | native-ref-reencoded | v2-ref-dropped | v4-ref-refused | v1-ref-exposed | pointer-refused) plant="plant_pallas $arm" ;;
+    script-payment-swap | signatories-unsorted | withdrawal-order | cert-unwrapped | script-guard-admitted) plant="plant_pallas $arm" ;;
+    v3-cert-wrapped | v2-withdrawal-unwrapped | top-guards-admitted | subtx-script-admitted) plant="plant_pallas $arm" ;;
     system-start) plant="plant_dolos $arm" ;;
     *) echo "unknown arm $arm" ; exit 2 ;;
   esac

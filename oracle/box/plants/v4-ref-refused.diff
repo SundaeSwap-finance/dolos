@@ -1,0 +1,19 @@
+diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
+index 11e515c8..1f4775ee 100644
+--- a/pallas-validate/src/phase2/dijkstra.rs
++++ b/pallas-validate/src/phase2/dijkstra.rs
+@@ -126,7 +126,13 @@ fn context_output(output: &MultiEraOutput<'_>, _reference: bool) -> Result<Conte
+     if !matches!(address, Address::Shelley(_)) {
+         return unsupported("output address (requires Shelley)");
+     }
+-    let script = output.multi_era_script_ref().map(|s| s.hash());
++    let script = output.multi_era_script_ref();
++    if let Some(MultiEraScriptRef::Dijkstra(s)) = &script
++        && let n::ScriptRef::PlutusV4Script(_) = s.as_ref()
++    {
++        return unsupported("reference script language (requires V3)");
++    }
++    let script = script.map(|s| s.hash());
+     Ok(ContextOutput {
+         address,
+         value: output.value().into_conway(),
