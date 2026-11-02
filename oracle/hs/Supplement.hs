@@ -17,10 +17,12 @@ import Cardano.Crypto.Hashing (unsafeAbstractHashFromBytes)
 import Cardano.Ledger.Address (Addr (..), BootstrapAddress (..), Withdrawals (..), bootstrapKeyHash)
 import Cardano.Ledger.Alonzo.Scripts (AsIx (..), PlutusBinary (..), mkBinaryPlutusScript, pattern SpendingPurpose)
 import Cardano.Ledger.Alonzo.TxWits (Redeemers (..), TxDats (..))
-import Cardano.Ledger.BaseTypes (Globals (..), Network (..), StrictMaybe (..), epochInfoPure, natVersion)
+import Cardano.Ledger.BaseTypes (Globals (..), Network (..), StrictMaybe (..), epochInfoPure, mkCertIxPartial, mkTxIxPartial, natVersion, strictMaybeToMaybe)
 import Cardano.Ledger.Coin (Coin (..))
-import Cardano.Ledger.Credential (Credential (..), StakeReference (..))
+import Cardano.Ledger.Conway.TxCert (pattern RegDepositTxCert)
+import Cardano.Ledger.Credential (Credential (..), Ptr (..), SlotNo32 (..), StakeReference (..))
 import Cardano.Ledger.Dijkstra.Core
+import Cardano.Ledger.Dijkstra.Scripts (pattern RequireGuard)
 import Cardano.Ledger.Hashes (EraIndependentTxBody, SafeHash, extractHash, hashAnnotated)
 import Cardano.Ledger.Keys (KeyHash (..), coerceKeyRole)
 import Cardano.Ledger.Keys.Bootstrap (BootstrapWitness (..), ChainCode (..), bootstrapWitKeyHash, makeBootstrapWitness)
@@ -29,7 +31,8 @@ import Cardano.Ledger.Metadata (Metadatum (..))
 import Cardano.Ledger.Plutus.Data (Data (..), Datum (..), dataToBinaryData, hashData)
 import Cardano.Ledger.Plutus.ExUnits (ExUnits (..))
 import Cardano.Ledger.Plutus.Language (Language (..))
-import Cardano.Ledger.Shelley.Scripts (pattern RequireSignature)
+import Cardano.Ledger.Plutus.TxInfo (transAddr, transCoinToLovelace, transCred, transKeyHash, transScriptHash)
+import Cardano.Ledger.Shelley.Scripts (pattern RequireAllOf, pattern RequireSignature)
 import Cardano.Ledger.Tools (setMinCoinTxOut)
 import Cardano.Ledger.TxIn (mkTxInPartial)
 import Cardano.Ledger.Val (inject)
@@ -55,6 +58,7 @@ import Edit
 import Lens.Micro ((%~), (&), (.~), (^.))
 import Lens.Micro.Mtl (use, (%=))
 import qualified PlutusLedgerApi.V1 as PV1
+import qualified PlutusLedgerApi.V3 as PV3
 import Test.Cardano.Ledger.Core.KeyPair (ByronKeyPair (..))
 import Test.Cardano.Ledger.Core.Utils (txInAt)
 import Test.Cardano.Ledger.Dijkstra.ImpTest
@@ -195,6 +199,7 @@ supplement = describe "SUPPLEMENT" $ do
   it "a V3 script at UPLC 1.2.0" $
     spendWithV3 "450102002499"
   validityBounds
+  contextValues
 
 -- | Spends at a validator that succeeds when the transaction's validity range equals its redeemer, each case with the range the ledger is expected to build.
 validityBounds :: SpecWith (ImpInit (LedgerSpec E))
@@ -253,6 +258,125 @@ posixAt g s = PV1.POSIXTime (floor (utcTimeToPOSIXSeconds start * 1000) + toInte
 -- | Locks coin at the range checking validator, then submits a spend of it with the validity interval and the range as its redeemer.
 spendInRange :: (Tx TopTx E -> ImpTestM E ()) -> ValidityInterval -> PV1.POSIXTimeRange -> ImpTestM E ()
 spendInRange submit interval range = spendWithV3In submit interval (Data (PV1.toData range)) rangeIsRedeemer
+
+-- | Spends whose script context holds a hash, credential or reference the ledger builds from the transaction, each case with the value the ledger is expected to build or the refusal it is expected to give.
+contextValues :: SpecWith (ImpInit (LedgerSpec E))
+contextValues = describe "context values" $ do
+  it "a V3 script sees a reference input holding a native script with a guard" $ do
+    guard <- KeyHashObj <$> freshKeyHash
+    seesReferenceScript PlutusV3 (fromNativeScript (RequireGuard guard))
+  it "a V3 script sees a reference input holding a native script with a nested guard" $ do
+    guard <- KeyHashObj <$> freshKeyHash
+    seesReferenceScript PlutusV3 (fromNativeScript (RequireAllOf [RequireGuard guard]))
+  it "a V3 script sees a reference input holding a native script written with nonminimal lengths" $ do
+    holder <- freshKeyAddrNoPtr_
+    script <- fromNativeScript . RequireSignature <$> freshKeyHash
+    let nonminimal = TTagged 24 (TBytes "\x82\x00\x98\x02\x18\x01\x80")
+    made <- withPostFixup (editTx noEdit {editBody = overKey 1 (overFirst (overKey 3 (const nonminimal)))}) (submitTx (mkBasicTx (mkBasicTxBody & outputsTxBodyL .~ [referenceOutput holder script])))
+    let ref = txInAt 0 made
+    held <- expectJust . strictMaybeToMaybe . (^. referenceScriptTxOutL) =<< impGetUTxO ref
+    hashScript held `shouldNotBe` hashScript script
+    walkSpend PlutusV3 [0, 1, 0, 1, 3] (PV1.toData (Just (transScriptHash (hashScript held)))) (bodyTxL . referenceInputsTxBodyL .~ [ref])
+  it "a V2 script sees a reference input holding a V3 script" $
+    seesReferenceScript PlutusV2 =<< plutusScript PlutusV3 "4901010023357369324d"
+  it "a V3 script sees a reference input holding a V4 script" $
+    seesReferenceScript PlutusV3 =<< plutusScript PlutusV4 "450101004981"
+  it "a V1 script sees an output holding a reference script" $ do
+    holder <- freshKeyAddrNoPtr_
+    script <- plutusScript PlutusV3 "4901010023357369324d"
+    address <- expectJust (transAddr holder)
+    let out = PV1.TxOut address (PV1.singleton PV1.adaSymbol PV1.adaToken 20_000_000) Nothing
+    walkSpend PlutusV1 [0, 1, 0] (PV1.toData out) (bodyTxL . outputsTxBodyL .~ [referenceOutput holder script])
+  it "a V3 script sees an output to a pointer address" $ do
+    key <- freshKeyHash
+    seesOutputAddress (Addr Testnet (KeyHashObj key) (StakeRefPtr (Ptr (SlotNo32 1) (mkTxIxPartial 2) (mkCertIxPartial 3))))
+  it "a V3 script sees an output to a script address with a key stake credential" $ do
+    script <- impAddNativeScript . RequireSignature =<< freshKeyHash
+    stake <- freshKeyHash
+    seesOutputAddress (Addr Testnet (ScriptHashObj script) (StakeRefBase (KeyHashObj stake)))
+  it "a V3 script sees guards given in descending order" $ do
+    a <- freshKeyHash
+    b <- freshKeyHash
+    let (low, high) = (min a b, max a b)
+    walkSpend PlutusV3 [0, 8] (PV1.toData ([transKeyHash low, transKeyHash high] :: [PV1.PubKeyHash])) (bodyTxL . guardsTxBodyL .~ [KeyHashObj high, KeyHashObj low])
+  it "a V3 script sees withdrawals from a key and a script credential" $ do
+    key <- KeyHashObj <$> freshKeyHash
+    script <- ScriptHashObj <$> (impAddNativeScript . RequireSignature =<< freshKeyHash)
+    keyAccount <- registerStakeCredential key
+    scriptAccount <- registerStakeCredential script
+    let withdrawn = PV1.Map [(PV1.toData (transCred script), PV1.I 0), (PV1.toData (transCred key), PV1.I 0)]
+    walkSpend PlutusV3 [0, 6] withdrawn (bodyTxL . withdrawalsTxBodyL .~ Withdrawals [(keyAccount, Coin 0), (scriptAccount, Coin 0)])
+  it "a V2 script sees a stake registration certificate" $ do
+    key <- KeyHashObj <$> freshKeyHash
+    deposit <- getsPParams ppKeyDepositL
+    walkSpend PlutusV2 [0, 5, 0] (PV1.toData (PV1.DCertDelegRegKey (PV1.StakingHash (transCred key)))) (bodyTxL . certsTxBodyL .~ [RegDepositTxCert key deposit])
+  it "a V3 script spends with a native script guard" $ do
+    guard <- impAddNativeScript . RequireSignature =<< freshKeyHash
+    spendWithV3Using (void . expectLeft <=< trySubmitTx . (bodyTxL . guardsTxBodyL .~ [ScriptHashObj guard])) "4901010023357369324d"
+  it "a V3 script sees a stake registration certificate" $ do
+    key <- KeyHashObj <$> freshKeyHash
+    deposit <- getsPParams ppKeyDepositL
+    walkSpend PlutusV3 [0, 5, 0] (PV3.toData (PV3.TxCertRegStaking (transCred key) (Just (transCoinToLovelace deposit)))) (bodyTxL . certsTxBodyL .~ [RegDepositTxCert key deposit])
+  it "a V2 script sees a withdrawal from a key credential" $ do
+    key <- KeyHashObj <$> freshKeyHash
+    account <- registerStakeCredential key
+    walkSpend PlutusV2 [0, 6] (PV1.Map [(PV1.toData (PV1.StakingHash (transCred key)), PV1.I 0)]) (bodyTxL . withdrawalsTxBodyL .~ Withdrawals [(account, Coin 0)])
+  it "a V3 script spends with a required top-level guard" $ do
+    guard <- KeyHashObj <$> freshKeyHash
+    spendWithV3Using (void . expectLeft <=< trySubmitTx . (bodyTxL . guardsTxBodyL .~ [guard]) . (bodyTxL . requiredTopLevelGuardsTxBodyL .~ [(guard, SNothing)])) "4901010023357369324d"
+
+-- (program 1.1.0 [(lam nth [(lam step [(lam walk [(lam check (lam ctx [[check [(force (builtin headList)) [(force (builtin tailList)) [(force (force (builtin sndPair))) [(builtin unConstrData) ctx]]]]] ctx])) (lam r (lam ctx [(lam fields (force [[[(force (builtin ifThenElse)) [[(builtin equalsData) [[walk ctx] [(builtin unListData) [(force (builtin headList)) fields]]]] [(force (builtin headList)) [(force (builtin tailList)) fields]]]] (delay (con unit ()))] (delay (error))])) [(force (force (builtin sndPair))) [(builtin unConstrData) r]]]))]) [(lam f [(lam x [f (lam v [[x x] v])]) (lam x [f (lam v [[x x] v])])]) (lam walk (lam d (lam path (force [[[(force (force (builtin chooseList))) path] (delay d)] (delay [[walk [[step d] [(builtin unIData) [(force (builtin headList)) path]]]] [(force (builtin tailList)) path]])]))))]]) (lam d (lam k (force [[[[[[(force (builtin chooseData)) d] (delay [[nth [(force (force (builtin sndPair))) [(builtin unConstrData) d]]] k])] (delay [(lam p [(builtin listData) [[(force (builtin mkCons)) [(force (force (builtin fstPair))) p]] [[(force (builtin mkCons)) [(force (force (builtin sndPair))) p]] [(builtin mkNilData) (con unit ())]]]]) [[nth [(builtin unMapData) d]] k]])] (delay [[nth [(builtin unListData) d]] k])] (delay (error))] (delay (error))])))]) [(lam f [(lam x [f (lam v [[x x] v])]) (lam x [f (lam v [[x x] v])])]) (lam nth (lam xs (lam k (force [[[(force (builtin ifThenElse)) [[(builtin equalsInteger) k] (con integer 0)]] (delay [(force (builtin headList)) xs])] (delay [[nth [(force (builtin tailList)) xs]] [[(builtin subtractInteger) k] (con integer 1)]])]))))]])
+-- The V1 and V2 validator is the same program at version 1.0.0 whose check takes the datum, the redeemer and the context as three arguments.
+
+-- | The validator of a language that succeeds when the value its redeemer's path reaches in the script context equals the value its redeemer names, as CBOR hex.
+walker :: Language -> ByteString
+walker PlutusV1 = walkerV1V2
+walker PlutusV2 = walkerV1V2
+walker PlutusV3 = "58cd01010032323232233002357426ae88d55cf1baa00100122325333573466ebccc010008dd61aba1001357426ae880045261635573c6ea8008c8c8c0088cc0080080048c0088cc0080080048894ccd55cf8008801099801998020011bad357420026ae88004894cccccd5d20010998019aab9e37540040022646e9ccd5d01aab9d0013357406aae78004dd8a4c660066eac0080044cc00cdd60010008b0b19191801119801001000918011198010010009112999ab9a3370e002900009aba10021330033574400466e0400520021"
+walker PlutusV4 = error "a V4 walking validator is not written"
+
+-- | The walking validator of V1 and V2, as CBOR hex.
+walkerV1V2 :: ByteString
+walkerV1V2 = "58c5010000323232322223300400200122325333573466ebccc010008dd61aba1001357426ae880045261635573c6ea8008c8c8c0088cc0080080048c0088cc0080080048894ccd55cf8008801099801998020011bad357420026ae88004894cccccd5d20010998019aab9e37540040022646e9ccd5d01aab9d0013357406aae78004dd8a4c660066eac0080044cc00cdd60010008b0b19191801119801001000918011198010010009112999ab9a3370e002900009aba10021330033574400466e04005200201"
+
+-- | Locks coin under a datum hash at the walking validator of a language, then spends it, after the change to the spend, with the path into the script context and the value expected there as its redeemer.
+walkSpend :: Language -> [Integer] -> PV1.Data -> (Tx TopTx E -> Tx TopTx E) -> ImpTestM E ()
+walkSpend language path expected change = do
+  script <- plutusScript language (walker language)
+  let hash = hashScript script
+      datum = Data (PV1.I 0) :: Data E
+      redeemer = Data (PV1.Constr 0 [PV1.List (map PV1.I path), expected]) :: Data E
+      out = mkBasicTxOut (Addr Testnet (ScriptHashObj hash) StakeRefNull) (inject (Coin 50_000_000)) & datumTxOutL .~ DatumHash (hashData datum)
+  made <- submitTx (mkBasicTx (mkBasicTxBody & outputsTxBodyL .~ [out]) :: Tx TopTx E)
+  collateral <- makeCollateralInput
+  submitTx_ . change $
+    mkBasicTx (mkBasicTxBody & inputsTxBodyL .~ [txInAt 0 made] & collateralInputsTxBodyL .~ [collateral] & feeTxBodyL .~ Coin 400_000)
+      & witsTxL . scriptTxWitsL .~ [(hash, script)]
+      & witsTxL . datsTxWitsL .~ TxDats [(hashData datum, datum)]
+      & witsTxL . rdmrsTxWitsL .~ Redeemers [(SpendingPurpose (AsIx 0), (redeemer, ExUnits 1_000_000 1_000_000_000))]
+
+-- | Spends at the walking validator of a language with a reference input whose output holds the script, expecting the context to give the script's hash.
+seesReferenceScript :: Language -> Script E -> ImpTestM E ()
+seesReferenceScript language script = do
+  holder <- freshKeyAddrNoPtr_
+  made <- submitTx (mkBasicTx (mkBasicTxBody & outputsTxBodyL .~ [referenceOutput holder script]) :: Tx TopTx E)
+  walkSpend language [0, 1, 0, 1, 3] (PV1.toData (Just (transScriptHash (hashScript script)))) (bodyTxL . referenceInputsTxBodyL .~ [txInAt 0 made])
+
+-- | Spends at the V3 walking validator with a first output to the address, expecting the context to give the address the ledger builds.
+seesOutputAddress :: Addr -> ImpTestM E ()
+seesOutputAddress address = do
+  expected <- expectJust (transAddr address)
+  walkSpend PlutusV3 [0, 2, 0, 0] (PV1.toData expected) (bodyTxL . outputsTxBodyL .~ [mkBasicTxOut address (inject (Coin 5_000_000))])
+
+-- | An output to the address holding the script as its reference script.
+referenceOutput :: Addr -> Script E -> TxOut E
+referenceOutput holder script = mkBasicTxOut holder (inject (Coin 20_000_000)) & referenceScriptTxOutL .~ SJust script
+
+-- | The Plutus script of a language given as its CBOR hex.
+plutusScript :: Language -> ByteString -> ImpTestM E (Script E)
+plutusScript language hex = do
+  plutus :: PlutusScript E <- expectJust $ mkBinaryPlutusScript language . PlutusBinary . toShort =<< either (const Nothing) Just (B16.decode hex)
+  pure (fromPlutusScript plutus)
 
 -- | Transactions whose bytes break one rule of the node's decoder, or one it reads differently from the CDDL, each case at a slot of its own.
 decoderRules :: SpecWith (ImpInit (LedgerSpec E))

@@ -9,6 +9,7 @@ module Edit (
   Edit (..),
   noEdit,
   submitEdited,
+  editTx,
   emptySet,
   setKey,
   dupKey,

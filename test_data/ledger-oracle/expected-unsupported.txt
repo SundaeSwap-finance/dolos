@@ -57,3 +57,4 @@ ic#9684 new script language (requires V3)
 ic#9686 reference script language (requires V3)
 ic#9820 witness fields
 ic#9846 witness fields
+supp#153 new script language (requires V3)
