@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, and which arms an overlay switches.
+# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, which arms an overlay switches, and when two test logs differ.
 # Usage: lib_test.sh <empty work dir>
 set -eu
 W=$(cd "$1" && pwd)
@@ -105,6 +105,24 @@ arms() {
 }
 # Must fire for a and b, and must not for c, d, e and f, and b's quick tier files are the one file its switch is in.
 expect arms "$(arms)" "a:yy:Cargo.toml,Cargo.lock b:yn:src/one.rs c:nn: d:ny:Cargo.toml,Cargo.lock e:nn:crates/core/src/n.rs f:nn:"
+
+# A head control log, the same log with another run time, and the same log with one record judged differently.
+L=$W/logs
+rm -rf "$L"
+mkdir -p "$L"
+printf '%s\n' 'AGREE tx=aa' 'AGREE tx=bb' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.88s' >"$L/head"
+printf '%s\n' 'AGREE tx=aa' 'AGREE tx=bb' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.29s' >"$L/retimed"
+printf '%s\n' 'AGREE tx=aa' 'DISAGREE tx=bb' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.88s' >"$L/differs"
+same() {
+  (
+    HERE=$H
+    . "$LIB"
+    if same_log "$1" "$2"; then echo same; else echo differs; fi
+  )
+}
+# Must not fire on a run time alone, and must fire on one record.
+expect retimed "$(same "$L/head" "$L/retimed")" same
+expect differs "$(same "$L/head" "$L/differs")" differs
 
 if [ "$failed" -eq 0 ]; then
   echo "LIB-TEST RESULT PASS"

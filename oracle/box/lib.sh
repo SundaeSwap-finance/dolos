@@ -48,6 +48,13 @@ plant_files() {
   sed -n 's#^+++ b/##p' "$HERE/plants/$1.diff"
 }
 
+# Whether two test logs are the same but for the test harness's run time.
+same_log() {
+  sed 's/; finished in [0-9.]*s$//' "$1" >"$1.untimed"
+  sed 's/; finished in [0-9.]*s$//' "$2" >"$2.untimed"
+  cmp -s "$1.untimed" "$2.untimed"
+}
+
 # Exits when the build root has less than MIN_FREE_G gigabytes free.
 require_free() {
   free=$(df -BG --output=avail "$ROOT" | tail -1 | tr -dc 0-9)

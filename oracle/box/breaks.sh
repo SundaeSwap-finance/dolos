@@ -218,13 +218,6 @@ control_clean() {
   return $clean
 }
 
-# Whether two test logs are the same but for the test harness's run time.
-same_log() {
-  sed 's/; finished in [0-9.]*s$//' "$1" >"$1.untimed"
-  sed 's/; finished in [0-9.]*s$//' "$2" >"$2.untimed"
-  cmp -s "$1.untimed" "$2.untimed"
-}
-
 # Whether the overlay build with no switch set prints the head's control logs, on every planted arm's records and in each switched crate test.
 overlay_control_clean() {
   if ! build_overlay; then
