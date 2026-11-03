@@ -3,6 +3,7 @@
 # Usage: [REV=ref] [BASE=ref] run.sh quick|done|ship|live|regen
 # The quick tier judges the head on both corpora, the control and each arm whose plant changes a file that differs between BASE and REV, a pallas arm when Cargo.toml or Cargo.lock differ. BASE defaults to the commit of the last done or ship run that passed, and when there is none every arm runs. The done tier judges the head, the control and every arm. The ship tier, run once before a rollout, is the done tier while the live leg runs. Only the ship tier and the live leg read the live node, and the done and ship tiers record their commit when they pass.
 # The live leg reads ENDPOINT, NODE, NODE_DB, GRPCURL, SERVE_CONFIG and CANDIDATE_GRPC from $LIVE_ENV.
+# The live leg starts its candidate from the store the last passing live leg kept, or from an empty store when LIVE_FROM is genesis.
 set -eu
 ROOT=${ROOT:-/opt/build/ledger-oracle-1027}
 REV=${REV:-feat/ledger-oracle}
@@ -32,16 +33,21 @@ if [ -z "${JUDGED:-}" ]; then
 fi
 export ROOT REV MIN_FREE_G CANDIDATE_NEED_G OUT
 . "$HERE/lib.sh"
+. "$HERE/snapshot.sh"
 
-# Exits when the test of the stale unit check or of the field comparison fails.
+# Exits when the test of the stale unit check, of the field comparison or of the kept candidate store fails.
 require_lib_test() {
-  mkdir -p "$OUT/lib-test" "$OUT/fields-test"
+  mkdir -p "$OUT/lib-test" "$OUT/fields-test" "$OUT/snapshot-test"
   if ! sh "$HERE/lib_test.sh" "$OUT/lib-test" >"$OUT/lib-test.log" 2>&1; then
     echo "REFUSED lib_test log=$OUT/lib-test.log"
     exit 2
   fi
   if ! sh "$HERE/fields_test.sh" "$OUT/fields-test" >"$OUT/fields-test.log" 2>&1; then
     echo "REFUSED fields_test log=$OUT/fields-test.log"
+    exit 2
+  fi
+  if ! sh "$HERE/snapshot_test.sh" "$OUT/snapshot-test" >"$OUT/snapshot-test.log" 2>&1; then
+    echo "REFUSED snapshot_test log=$OUT/snapshot-test.log"
     exit 2
   fi
 }
@@ -111,12 +117,17 @@ live_shift() {
   echo "live-shift=$verdict"
 }
 
-# Builds the candidate and the live judge, syncs the candidate and judges its reads.
+# Builds the candidate and the live judge, syncs the candidate, judges its reads and keeps its store when they pass.
 live_leg() {
   build_candidate && build_live_judge || return 1
   fields=0
   sync_candidate || fields=$?
-  judge_live && [ "$fields" -eq 0 ]
+  live=FAIL
+  if judge_live && [ "$fields" -eq 0 ]; then
+    live=PASS
+  fi
+  settle_held "$live"
+  [ "$live" = PASS ]
 }
 
 # Runs the live leg alone at REV.
@@ -124,6 +135,7 @@ live_run() {
   mkdir -p "$OUT"
   require_free
   require_lib_test
+  live_from >/dev/null || exit 2
   reset_scratch
   commit=$(git -C "$ROOT/$SCRATCH" rev-parse HEAD)
   live=FAIL
@@ -195,11 +207,12 @@ done_run() {
   echo "$commit" >"$LAST_DONE"
 }
 
-# Builds the candidate, syncs it while the arms run, judges its reads, and records the commit when every verdict passes.
+# Builds the candidate, syncs it while the arms run, judges its reads, keeps its store when they pass, and records the commit when every verdict passes.
 ship_run() {
   mkdir -p "$OUT"
   require_free
   require_lib_test
+  live_from >/dev/null || exit 2
   reset_scratch
   commit=$(git -C "$ROOT/$SCRATCH" rev-parse HEAD)
   sync=
@@ -217,6 +230,7 @@ ship_run() {
   if judge_live && [ "$fields" -eq 0 ]; then
     live=PASS
   fi
+  settle_held "$live" >>"$OUT/live-leg.out"
   cat "$OUT/live-leg.out"
   verdicts=$(sed -n 's/^ARMS \(.*\) logs=.*/\1/p' "$OUT/breaks.out")
   grep -E '^(LIVE|KNOWN|KNOWN_STALE|LIVE-DIFF|LIVE-GAP) ' "$OUT/live.log" | cut -c1-400 || true
@@ -230,6 +244,7 @@ regen() {
   mkdir -p "$OUT"
   require_free
   require_lib_test
+  live_from >/dev/null || exit 2
   reset_scratch
   commit=$(git -C "$ROOT/$SCRATCH" rev-parse HEAD)
   if ! built=$(build_judge "$OUT/head.build" --locked); then
