@@ -193,49 +193,59 @@ caught() {
   [ -s "$at.new" ]
 }
 
-# Whether a control run, its judge log in $OUT/$1.log and each crate test's in $OUT/$1-<arm>.log, judges every planted arm's records with a pass and no arm's line, the case where each arm must not fire.
+# Whether the unplanted head judges every planted arm's records with a pass and no arm's line, the case where each arm must not fire.
 control_clean() {
-  if ! grep -q '^RESULT PASS' "$OUT/$1.log"; then
-    echo "ARM control RESULT not PASS log=$OUT/$1.log"
+  if ! grep -q '^RESULT PASS' "$OUT/control.log"; then
+    echo "ARM control RESULT not PASS log=$OUT/control.log"
     return 1
   fi
   clean=0
-  mkdir -p "$OUT/$1"
+  mkdir -p "$OUT/control"
   for a in $PLANTED_ARMS; do
-    log=$OUT/$1.log
+    log=$OUT/control.log
     if crate_test "$a" >/dev/null; then
-      log=$OUT/$1-$a.log
+      log=$OUT/control-$a.log
       if ! grep -q '^test result: ok\. 1 passed' "$log"; then
         echo "ARM control CRATE_TEST_FAILED arm=$a log=$log"
         clean=1
       fi
     fi
-    if caught "$a" "$log" "$OUT/$1/$a" >/dev/null; then
-      echo "ARM control FIRED arm=$a lines=$OUT/$1/$a.new"
+    if caught "$a" "$log" "$OUT/control/$a" >/dev/null; then
+      echo "ARM control FIRED arm=$a lines=$OUT/control/$a.new"
       clean=1
     fi
   done
   return $clean
 }
 
-# Whether the overlay build with no switch set judges every planted arm's records as the head does, its judge and crate test logs named overlay-control.
+# Whether two test logs are the same but for the test harness's run time.
+same_log() {
+  sed 's/; finished in [0-9.]*s$//' "$1" >"$1.untimed"
+  sed 's/; finished in [0-9.]*s$//' "$2" >"$2.untimed"
+  cmp -s "$1.untimed" "$2.untimed"
+}
+
+# Whether the overlay build with no switch set prints the head's control logs, on every planted arm's records and in each switched crate test.
 overlay_control_clean() {
   if ! build_overlay; then
     echo "ARM control OVERLAY_UNBUILT"
     return 1
   fi
+  clean=0
   run_overlay control "" "$OUT/overlay-control.log" "$records"
+  if ! same_log "$OUT/control.log" "$OUT/overlay-control.log"; then
+    echo "ARM control OVERLAY_DIFFERS log=$OUT/overlay-control.log"
+    clean=1
+  fi
   for a in $(switches "$HERE"/overlay/*.diff); do
     if crate_test "$a" >/dev/null; then
       run_overlay "$a" "" "$OUT/overlay-control-$a.log"
+      if ! same_log "$OUT/control-$a.log" "$OUT/overlay-control-$a.log"; then
+        echo "ARM control OVERLAY_DIFFERS log=$OUT/overlay-control-$a.log"
+        clean=1
+      fi
     fi
   done
-  clean=0
-  control_clean overlay-control || clean=1
-  if grep -l '^ORACLE_PLANT reached ' "$OUT"/overlay-control*.log; then
-    echo "ARM control REACHED a switch with ORACLE_PLANT unset"
-    clean=1
-  fi
   return $clean
 }
 
@@ -343,7 +353,7 @@ for arm in $ARMS; do
       fi
     done
     control=CLEAN
-    control_clean control || control=FIRED
+    control_clean || control=FIRED
     # The overlay arms' verdicts hold only if the overlay build with no switch set is the head.
     if [ -n "$overlay_arms" ]; then
       started=$(date +%s)
