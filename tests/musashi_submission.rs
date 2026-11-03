@@ -418,7 +418,7 @@ fn pending_registration_reserves_credential_without_changing_ledger_state() {
 }
 
 #[test]
-fn v4_reference_script_is_rejected_by_native_evaluation() {
+fn v4_reference_script_beside_a_v3_script_evaluates() {
     use pallas::codec::utils::CborWrap;
     use std::sync::Arc;
     let (domain, bytes) = support::fixture(true);
@@ -459,10 +459,10 @@ fn v4_reference_script_is_rejected_by_native_evaluation() {
     body.reference_inputs = n::NonEmptySet::from_vec(references);
     native.transaction_body = KeepRaw::from(body);
     let mutated = minicbor::to_vec(native.to_mempool_transaction()).unwrap();
-    let error = evaluate(&domain, &mutated).unwrap_err();
+    let results = evaluate(&domain, &mutated).unwrap();
     assert!(
-        format!("{error:?}").contains("reference script language (requires V3)"),
-        "{error:?}"
+        !results.is_empty() && results.iter().all(|x| x.success),
+        "{results:?}"
     );
 }
 
