@@ -1,0 +1,153 @@
+diff --git a/crates/cardano/src/forks.rs b/crates/cardano/src/forks.rs
+index dbabe5f2..2f571fd1 100644
+--- a/crates/cardano/src/forks.rs
++++ b/crates/cardano/src/forks.rs
+@@ -106,7 +106,10 @@ pub fn from_shelley_genesis(shelley: &shelley::GenesisFile) -> PParamsSet {
+     let version = &shelley.protocol_version;
+ 
+     PParamsSet::default()
+-        .with(Val::SystemStart(system_start.timestamp() as u64))
++        .with(Val::SystemStart(
++            system_start.timestamp() as u64
++                + u64::from(pallas::crypto::oracle_plant("system-start")),
++        ))
+         .with(Val::ProtocolVersion(version.clone().into()))
+         .with(Val::EpochLength(epoch_length as u64))
+         .with(Val::SlotLength(slot_length as u64))
+diff --git a/crates/cardano/src/utxoset.rs b/crates/cardano/src/utxoset.rs
+index c91bdb20..d9adb395 100644
+--- a/crates/cardano/src/utxoset.rs
++++ b/crates/cardano/src/utxoset.rs
+@@ -165,7 +165,12 @@ fn apply_txs_lenient(
+                 }
+             }
+ 
+-            for (idx, produced) in tx.produces() {
++            let produces = if pallas::crypto::oracle_plant("colret") {
++                tx.outputs().into_iter().enumerate().collect()
++            } else {
++                tx.produces()
++            };
++            for (idx, produced) in produces {
+                 let utxo_ref = TxoRef(tx_hash, idx as u32);
+                 let body: Arc<EraCbor> = Arc::new(produced.into());
+ 
+@@ -261,7 +266,12 @@ fn apply_txs(
+         for_each_applied_tx(tx, |tx| {
+             let tx_hash = tx.hash();
+ 
+-            for (idx, produced) in tx.produces() {
++            let produces = if pallas::crypto::oracle_plant("colret") {
++                tx.outputs().into_iter().enumerate().collect()
++            } else {
++                tx.produces()
++            };
++            for (idx, produced) in produces {
+                 let uxto_ref = TxoRef(tx_hash, idx as u32);
+                 delta
+                     .produced_utxo
+diff --git a/crates/cardano/src/validate.rs b/crates/cardano/src/validate.rs
+index 79705fd3..584bae3e 100644
+--- a/crates/cardano/src/validate.rs
++++ b/crates/cardano/src/validate.rs
+@@ -579,7 +579,11 @@ fn with_unconfirmed<'a, S: DijkstraLedgerState + ?Sized>(
+ /// The mempool transactions, inflight before pending, each once.
+ fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx> {
+     let pending = utxos.pending();
+-    let inflight = utxos.mempool().peek_inflight();
++    let inflight = if pallas::crypto::oracle_plant("inflight") {
++        Vec::new()
++    } else {
++        utxos.mempool().peek_inflight()
++    };
+     // Relay can move a transaction between these two reads. Count it once.
+     let mut seen = std::collections::HashSet::new();
+     inflight
+diff --git a/crates/cardano/src/validate/ledger.rs b/crates/cardano/src/validate/ledger.rs
+index 42a31b71..b794b524 100644
+--- a/crates/cardano/src/validate/ledger.rs
++++ b/crates/cardano/src/validate/ledger.rs
+@@ -201,7 +201,13 @@ impl<D: Domain> DijkstraLedgerState for StoredLedger<'_, D> {
+             .map_err(unavailable)?;
+         Ok(drep
+             .filter(|x| x.registered_at.is_some() && !x.is_unregistered())
+-            .map(|x| DijkstraDRep { deposit: x.deposit }))
++            .map(|x| DijkstraDRep {
++                deposit: if pallas::crypto::oracle_plant("drep-deposit") {
++                    0
++                } else {
++                    x.deposit
++                },
++            }))
+     }
+ 
+     fn committee(&self) -> Result<Option<BTreeMap<StakeCredential, Epoch>>, ValidationError> {
+diff --git a/crates/core/src/submit.rs b/crates/core/src/submit.rs
+index 3e75980e..a11b237c 100644
+--- a/crates/core/src/submit.rs
++++ b/crates/core/src/submit.rs
+@@ -113,6 +113,9 @@ pub trait SubmitExt: Domain {
+                 kept.clone(),
+             );
+             match chain.validate_tx(&tx.payload().1, &utxos, tip.clone(), &genesis) {
++                Ok(_) if pallas::crypto::oracle_plant("revalidate-drops") => {
++                    refused.push(tx.hash())
++                }
+                 Ok(_) => kept.push(tx),
+                 Err(error) => {
+                     debug!(tx.hash = %tx.hash(), %error, "pending tx refused on revalidation");
+diff --git a/crates/core/src/sync.rs b/crates/core/src/sync.rs
+index 4f6ccb08..4960e805 100644
+--- a/crates/core/src/sync.rs
++++ b/crates/core/src/sync.rs
+@@ -201,6 +201,9 @@ impl<D: Domain> SyncExt for D {
+ 
+ /// Drops the pending transactions the ledger refuses once the state has moved.
+ fn revalidate_mempool<D: Domain>(domain: &D, chain: &D::Chain) {
++    if pallas::crypto::oracle_plant("revalidate") {
++        return;
++    }
+     if let Err(e) = domain.revalidate_pending(chain) {
+         warn!(?e, "mempool revalidation failed");
+     }
+diff --git a/src/serve/grpc/block_context.rs b/src/serve/grpc/block_context.rs
+index 87249add..29d2a093 100644
+--- a/src/serve/grpc/block_context.rs
++++ b/src/serve/grpc/block_context.rs
+@@ -32,6 +32,9 @@ pub(super) struct BlockContext<C: ChainReads> {
+ fn made_outputs(block: &MultiEraBlock<'_>) -> UtxoMap {
+     dolos_core::applied_txs(block)
+         .into_iter()
++        .filter(|(_, tx)| {
++            !pallas::crypto::oracle_plant("subouts") || tx.as_dijkstra_sub().is_none()
++        })
+         .flat_map(|(_, tx)| {
+             let hash = tx.hash();
+             tx.produces()
+@@ -70,8 +73,10 @@ impl<C: ChainReads> BlockContext<C> {
+                 // The v1 mapper resolves every child separately. Its inputs
+                 // need not also occur in the parent's reference inputs.
+                 let mut refs = named_inputs(tx);
+-                for sub in tx.sub_transactions() {
+-                    refs.extend(named_inputs(&sub));
++                if !pallas::crypto::oracle_plant("rodrigo-reverted") {
++                    for sub in tx.sub_transactions() {
++                        refs.extend(named_inputs(&sub));
++                    }
+                 }
+                 refs
+             })
+diff --git a/src/serve/grpc/v1/query.rs b/src/serve/grpc/v1/query.rs
+index 3db11ef0..034d25e5 100644
+--- a/src/serve/grpc/v1/query.rs
++++ b/src/serve/grpc/v1/query.rs
+@@ -801,6 +801,9 @@ async fn into_u5c_utxo<S: Domain>(
+ 
+     let parsed_output = MultiEraOutput::try_from(body)?;
+     let mut parsed = mapper.map_tx_output(&parsed_output, None);
++    if pallas::crypto::oracle_plant("coin") {
++        parsed.coin = None;
++    }
+ 
+     // If the output has a datum hash, try to fetch the datum value from storage
+     if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {

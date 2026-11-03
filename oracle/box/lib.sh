@@ -7,15 +7,23 @@ BUILT="$ROOT/${TARGET:-target}/built-units"
 # The arms that plant a defect, each judged on the records plants/<arm>.records names.
 PLANTED_ARMS="colret coin inflight rodrigo-reverted rob-reverted cost revalidate revalidate-drops subouts byron-attrs byron-signer byron-guard chaincode minfee-subtx emptyguards tag24 v1v2 byron-out tag24-ref unreg-refund drep-deposit upper-inclusive slot-off-by-one horizon-removed system-start cost-models guard-ref-reverted native-ref-reencoded v2-ref-dropped v4-ref-refused v1-ref-exposed pointer-refused script-payment-swap signatories-unsorted withdrawal-order cert-unwrapped script-guard-admitted v3-cert-wrapped v2-withdrawal-unwrapped top-guards-admitted"
 
+# The arms whose switch an overlay diff adds, one per line.
+switches() {
+  sed -n 's/^+.*oracle_plant("\([a-z0-9-]*\)").*/\1/p' "$@" | sort -u
+}
+
+# Whether an arm is a switch of the overlay, judged on the one overlay build with ORACLE_PLANT naming it.
+overlay_arm() {
+  switches "$HERE"/overlay/*.diff | grep -q -x -F "$1"
+}
+
 # Whether an arm plants its defect in pallas.
 pallas_arm() {
-  case $1 in
-    rob-reverted | cost | byron-attrs | byron-signer | byron-guard | chaincode | minfee-subtx | emptyguards | tag24 | v1v2 | byron-out | tag24-ref | unreg-refund | upper-inclusive | slot-off-by-one | horizon-removed | cost-models) return 0 ;;
-    guard-ref-reverted | native-ref-reencoded | v2-ref-dropped | v4-ref-refused | v1-ref-exposed | pointer-refused) return 0 ;;
-    script-payment-swap | signatories-unsorted | withdrawal-order | cert-unwrapped | script-guard-admitted) return 0 ;;
-    v3-cert-wrapped | v2-withdrawal-unwrapped | top-guards-admitted) return 0 ;;
-    *) return 1 ;;
-  esac
+  if overlay_arm "$1"; then
+    switches "$HERE/overlay/pallas.diff" | grep -q -x -F "$1"
+  else
+    sed -n 's#^+++ b/##p' "$HERE/plants/$1.diff" 2>/dev/null | grep -q '^pallas'
+  fi
 }
 
 # The cargo arguments of the crate test an arm runs in place of the judge, none for an arm the judge runs.
@@ -32,11 +40,12 @@ plant_files() {
     printf 'Cargo.toml\nCargo.lock\n'
     return
   fi
-  case $1 in
-    rodrigo-reverted) diff=rodrigo ;;
-    *) diff=$1 ;;
-  esac
-  sed -n 's#^+++ b/##p' "$HERE/plants/$diff.diff"
+  if overlay_arm "$1"; then
+    awk -v call="oracle_plant(\"$1\")" '/^\+\+\+ b\// { file = substr($0, 7) } /^\+/ && index($0, call) { print file }' \
+      "$HERE/overlay/dolos.diff" | sort -u
+    return
+  fi
+  sed -n 's#^+++ b/##p' "$HERE/plants/$1.diff"
 }
 
 # Exits when the build root has less than MIN_FREE_G gigabytes free.

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages.
+# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, and which arms an overlay switches.
 # Usage: lib_test.sh <empty work dir>
 set -eu
 W=$(cd "$1" && pwd)
@@ -79,6 +79,32 @@ build x=false y=false >/dev/null
 change_a
 expect between "$(build y=true)" "exit=0 "
 expect skipped "$(build x=true y=true)" "exit=1 STALE unit=/w/target/release/deps/libx-1.rlib file=a.rs"
+
+# An overlay whose added lines switch a in pallas and b in Dolos, with c only on a context line and f only on a removed one, and plants of their own for d in pallas and e in Dolos.
+H=$W/arms
+rm -rf "$H"
+mkdir -p "$H/overlay" "$H/plants"
+printf '%s\n' '+++ b/pallas-validate/src/x.rs' '@@ -1,2 +1,2 @@' ' oracle_plant("c")' '+oracle_plant("a")' '-oracle_plant("f")' \
+  >"$H/overlay/pallas.diff"
+printf '%s\n' '+++ b/src/one.rs' '@@ -1 +1,2 @@' ' fn one() {}' '+pallas::crypto::oracle_plant("b")' \
+  '+++ b/src/two.rs' '@@ -1 +1,2 @@' ' fn two() {}' '+let other = 1;' >"$H/overlay/dolos.diff"
+printf '%s\n' '+++ b/pallas-primitives/src/m.rs' >"$H/plants/d.diff"
+printf '%s\n' '+++ b/crates/core/src/n.rs' >"$H/plants/e.diff"
+arms() {
+  (
+    HERE=$H
+    . "$LIB"
+    for arm in a b c d e f; do
+      overlay=n
+      pallas=n
+      if overlay_arm "$arm"; then overlay=y; fi
+      if pallas_arm "$arm"; then pallas=y; fi
+      echo "$arm:$overlay$pallas:$(plant_files "$arm" 2>/dev/null | paste -sd, -)"
+    done | paste -sd ' ' -
+  )
+}
+# Must fire for a and b, and must not for c, d, e and f, and b's quick tier files are the one file its switch is in.
+expect arms "$(arms)" "a:yy:Cargo.toml,Cargo.lock b:yn:src/one.rs c:nn: d:ny:Cargo.toml,Cargo.lock e:nn:crates/core/src/n.rs f:nn:"
 
 if [ "$failed" -eq 0 ]; then
   echo "LIB-TEST RESULT PASS"
