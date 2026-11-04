@@ -1,4 +1,4 @@
-# Functions for the candidate store a passing live leg keeps for the next sync to start from, reading ROOT.
+# Functions for the candidate store a passing live leg keeps for the next sync to start from, reading ROOT and the functions of lib.sh.
 
 # The store the last passing live leg kept, with a snapshot.txt naming its commit and slot.
 SNAPSHOT=$ROOT/candidate/snapshot
@@ -6,6 +6,25 @@ SNAPSHOT=$ROOT/candidate/snapshot
 HELD=$ROOT/candidate/held
 ADVANCE_MINUTES=${ADVANCE_MINUTES:-10}
 SNAPSHOT_MIN_FREE_G=${SNAPSHOT_MIN_FREE_G:-10}
+# The paths whose change can alter how a candidate reads the blocks a snapshot already holds.
+OLD_READ_PATHS="$PALLAS_PIN_FILES crates/cardano/"
+
+# The start a candidate at commit $3 takes from a snapshot written by the commit $2 of the repository $1, genesis with its reason unless the diff of OLD_READ_PATHS between them ran and is empty.
+snapshot_start() {
+  for known in "$2" "$3"; do
+    if ! git -C "$1" cat-file -e "$known^{commit}" 2>/dev/null; then
+      echo "genesis reason=unknown_commit commit=$known"
+      return
+    fi
+  done
+  if ! paths=$(differing_files "$1" "$2" "$3" $OLD_READ_PATHS); then
+    echo "genesis reason=diff_failed"
+  elif [ -n "$paths" ]; then
+    echo "genesis reason=reads_old_blocks paths=$(echo "$paths" | paste -sd, -)"
+  else
+    echo "snapshot checked=$(echo "$OLD_READ_PATHS" | tr ' ' ,)"
+  fi
+}
 
 # The whole gibibytes free on the filesystem holding $1, rounded down.
 free_g() {

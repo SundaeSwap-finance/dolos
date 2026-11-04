@@ -34,10 +34,42 @@ crate_test() {
   esac
 }
 
+# The Dolos files that name the pallas commit Dolos builds against.
+PALLAS_PIN_FILES="Cargo.toml Cargo.lock"
+
+# The pallas entries of the file $3 at the commit $2 of the repository $1, its pallas lines for Cargo.toml and its pallas packages for Cargo.lock.
+pallas_entries() {
+  git -C "$1" show "$2:$3" 2>/dev/null | case $3 in
+    Cargo.lock) awk -v RS= '/name = "pallas/' ;;
+    *) grep '^pallas' ;;
+  esac
+}
+
+# The files under the paths after $3 that differ between the commits $2 and $3 of the repository $1, a pallas pin file only when its pallas entries differ.
+differing_files() {
+  repo=$1
+  from=$2
+  to=$3
+  shift 3
+  names=$(git -C "$repo" diff --name-only "$from" "$to" -- "$@") || return
+  echo "$names" | while read -r name; do
+    case " $PALLAS_PIN_FILES " in
+      *" $name "*)
+        if [ "$(pallas_entries "$repo" "$from" "$name")" = "$(pallas_entries "$repo" "$to" "$name")" ]; then
+          continue
+        fi
+        ;;
+    esac
+    if [ -n "$name" ]; then
+      echo "$name"
+    fi
+  done
+}
+
 # The Dolos files whose change puts an arm in the quick tier, the pin files for a pallas arm.
 plant_files() {
   if pallas_arm "$1"; then
-    printf 'Cargo.toml\nCargo.lock\n'
+    printf '%s\n' $PALLAS_PIN_FILES
     return
   fi
   if overlay_arm "$1"; then

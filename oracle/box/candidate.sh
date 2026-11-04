@@ -14,17 +14,28 @@ SYNC_MINUTES=${SYNC_MINUTES:-150}
 SAMPLE_MINUTES=${SAMPLE_MINUTES:-5}
 FIXED_SLOTS="205422 368793 783572"
 STORE="$ROOT/candidate/$(date -u +%Y%m%dT%H%M%SZ)"
+. "$HERE/lib.sh"
 . "$HERE/snapshot.sh"
 
 MODE=$(live_from)
-drop_stale "$MODE"
-FROM=0
-START="start=genesis"
 if [ "$MODE" = snapshot ]; then
   if ! meta=$(snapshot_meta "$SNAPSHOT"); then
     echo "LIVE-CANDIDATE SNAPSHOT-UNUSABLE reason=missing snapshot=$SNAPSHOT"
     exit 1
   fi
+  rule=$(snapshot_start "$ROOT/dolos.git" "${meta% *}" "$COMMIT")
+  case $rule in
+    snapshot\ *) echo "LIVE-CANDIDATE snapshot_usable ${rule#snapshot } snapshot_commit=${meta% *} commit=$COMMIT" ;;
+    *)
+      echo "LIVE-CANDIDATE GENESIS ${rule#genesis } snapshot_commit=${meta% *} commit=$COMMIT"
+      MODE=genesis
+      ;;
+  esac
+fi
+drop_stale "$MODE"
+FROM=0
+START="start=genesis"
+if [ "$MODE" = snapshot ]; then
   FROM=${meta#* }
   START="start=snapshot snapshot_commit=${meta% *} snapshot_slot=$FROM"
   # The snapshot holds every block up to its slot, so the store grows only by the blocks since.

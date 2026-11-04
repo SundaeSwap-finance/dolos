@@ -1,9 +1,9 @@
 #!/bin/sh
 # Runs the oracle on the build box, its quick, done or ship tier, its live leg alone or the regeneration of its committed manifests.
 # Usage: [REV=ref] [BASE=ref] run.sh quick|done|ship|live|regen
-# The quick tier judges the head on both corpora, the control and each arm whose plant changes a file that differs between BASE and REV, a pallas arm when Cargo.toml or Cargo.lock differ. BASE defaults to the commit of the last done or ship run that passed, and when there is none every arm runs. The done tier judges the head, the control and every arm. The ship tier, run once before a rollout, is the done tier while the live leg runs. Only the ship tier and the live leg read the live node, and the done and ship tiers record their commit when they pass.
+# The quick tier judges the head on both corpora, the control and each arm whose plant changes a file that differs between BASE and REV, a pallas arm when the pallas entries of Cargo.toml or Cargo.lock differ. BASE defaults to the commit of the last done or ship run that passed, and when there is none every arm runs. The done tier judges the head, the control and every arm. The ship tier, run once before a rollout, is the done tier while the live leg runs. Only the ship tier and the live leg read the live node, and the done and ship tiers record their commit when they pass.
 # The live leg reads ENDPOINT, NODE, NODE_DB, GRPCURL, SERVE_CONFIG and CANDIDATE_GRPC from $LIVE_ENV.
-# The live leg starts its candidate from the store the last passing live leg kept, or from an empty store when LIVE_FROM is genesis.
+# The live leg starts its candidate from the store the last passing live leg kept, or from an empty store when LIVE_FROM is genesis or a path that can alter how old blocks are read differs since that store's commit.
 set -eu
 ROOT=${ROOT:-/opt/build/ledger-oracle-1027}
 REV=${REV:-feat/ledger-oracle}
@@ -150,7 +150,7 @@ live_run() {
 
 # The arms whose plant changes a file that differs between the commits $1 and $2 of the scratch tree, one per line.
 touched_arms() {
-  git -C "$ROOT/$SCRATCH" diff --name-only "$1" "$2" >"$OUT/changed"
+  differing_files "$ROOT/$SCRATCH" "$1" "$2" >"$OUT/changed"
   for arm in $PLANTED_ARMS; do
     if plant_files "$arm" | grep -q -x -F -f "$OUT/changed"; then
       echo "$arm"
