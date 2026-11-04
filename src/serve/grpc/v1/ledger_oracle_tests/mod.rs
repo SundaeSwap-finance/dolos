@@ -53,11 +53,11 @@ use pallas::{
     },
     crypto::hash::Hasher,
     ledger::{
-        primitives::{
-            conway::{DatumOption, RedeemerTag},
-            dijkstra,
+        primitives::{conway::DatumOption, dijkstra},
+        traverse::{
+            ComputeHash as _, Era, MultiEraOutput, MultiEraRedeemerTag as RedeemerTag, MultiEraTx,
+            OriginalHash as _,
         },
-        traverse::{ComputeHash as _, Era, MultiEraOutput, MultiEraTx, OriginalHash as _},
         validate::phase2::{audited_builtins, tx::TxEvalResult, Builtin},
     },
 };
@@ -376,6 +376,8 @@ fn tag_number(tag: &RedeemerTag) -> u64 {
         RedeemerTag::Reward => 3,
         RedeemerTag::Vote => 4,
         RedeemerTag::Propose => 5,
+        RedeemerTag::Guarding => 6,
+        other => panic!("unsupported ledger-oracle redeemer purpose: {other:?}"),
     }
 }
 
@@ -385,6 +387,19 @@ fn purpose(r: &TxEvalResult) -> Purpose {
         tag: tag_number(&r.tag),
         index: r.index.into(),
     }
+}
+
+#[test]
+fn guarding_result_uses_ledger_tag_and_original_index() {
+    let result = TxEvalResult {
+        tag: RedeemerTag::Guarding,
+        index: 9,
+        units: pallas::ledger::primitives::ExUnits { mem: 11, steps: 23 },
+        success: true,
+        logs: vec![],
+        failure_message: None,
+    };
+    assert_eq!(purpose(&result), Purpose { tag: 6, index: 9 });
 }
 
 /// The evaluations Dolos estimates for one transaction, each in the ledger's terms.

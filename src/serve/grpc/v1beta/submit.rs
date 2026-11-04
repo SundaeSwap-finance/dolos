@@ -89,7 +89,7 @@ fn tx_eval_to_u5c(
         });
     }
     for entry in report {
-        use pallas::ledger::primitives::conway::RedeemerTag;
+        use pallas::ledger::traverse::MultiEraRedeemerTag as RedeemerTag;
         use u5c::cardano::RedeemerPurpose;
         let purpose = match entry.tag {
             RedeemerTag::Spend => RedeemerPurpose::Spend,
@@ -98,6 +98,18 @@ fn tx_eval_to_u5c(
             RedeemerTag::Reward => RedeemerPurpose::Reward,
             RedeemerTag::Vote => RedeemerPurpose::Vote,
             RedeemerTag::Propose => RedeemerPurpose::Propose,
+            other => {
+                return u5c::cardano::TxEval {
+                    errors: vec![u5c::cardano::EvalReport {
+                        msg: format!(
+                            "RPC v1beta cannot represent redeemer {other:?}[{}]",
+                            entry.index
+                        ),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                };
+            }
         };
         let named = |msg| u5c::cardano::EvalReport {
             msg,
@@ -294,5 +306,31 @@ mod mapping_tests {
                 (Some(P::Cert as i32), Some(2))
             ]
         );
+    }
+    #[test]
+    fn guarding_results_are_explicitly_rejected() {
+        for success in [false, true] {
+            for position in 0..3 {
+                let mut guard = entry(RedeemerTag::Guarding, 9, success);
+                guard.logs = vec!["guard log".into()];
+                guard.failure_message = Some("guard rejected".into());
+                let mut entries = vec![
+                    entry(RedeemerTag::Spend, 4, true),
+                    entry(RedeemerTag::Cert, 2, false),
+                ];
+                entries.insert(position, guard);
+                let report = tx_eval_to_u5c(Ok(entries));
+                assert_eq!(
+                    report.errors,
+                    vec![u5c::cardano::EvalReport {
+                        msg: "RPC v1beta cannot represent redeemer Guarding[9]".into(),
+                        ..Default::default()
+                    }]
+                );
+                assert!(report.redeemers.is_empty());
+                assert!(report.traces.is_empty());
+                assert!(report.ex_units.is_none());
+            }
+        }
     }
 }

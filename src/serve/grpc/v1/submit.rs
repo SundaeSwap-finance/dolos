@@ -89,15 +89,28 @@ fn tx_eval_to_u5c(
         });
     }
     for entry in report {
-        use pallas::ledger::primitives::conway::RedeemerTag;
+        use pallas::ledger::traverse::MultiEraRedeemerTag;
         use u5c::cardano::RedeemerPurpose;
         let purpose = match entry.tag {
-            RedeemerTag::Spend => RedeemerPurpose::Spend,
-            RedeemerTag::Mint => RedeemerPurpose::Mint,
-            RedeemerTag::Cert => RedeemerPurpose::Cert,
-            RedeemerTag::Reward => RedeemerPurpose::Reward,
-            RedeemerTag::Vote => RedeemerPurpose::Vote,
-            RedeemerTag::Propose => RedeemerPurpose::Propose,
+            MultiEraRedeemerTag::Spend => RedeemerPurpose::Spend,
+            MultiEraRedeemerTag::Mint => RedeemerPurpose::Mint,
+            MultiEraRedeemerTag::Cert => RedeemerPurpose::Cert,
+            MultiEraRedeemerTag::Reward => RedeemerPurpose::Reward,
+            MultiEraRedeemerTag::Vote => RedeemerPurpose::Vote,
+            MultiEraRedeemerTag::Propose => RedeemerPurpose::Propose,
+            MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
+            other => {
+                return u5c::cardano::TxEval {
+                    errors: vec![u5c::cardano::EvalReport {
+                        msg: format!(
+                            "RPC v1 cannot represent redeemer {other:?}[{}]",
+                            entry.index
+                        ),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }
+            }
         };
         let named = |msg| u5c::cardano::EvalReport {
             msg,
@@ -261,6 +274,80 @@ mod mapping_tests {
     include!("../submit_mapping_tests.rs");
 
     #[test]
+    fn guarding_result_keeps_identity_and_budget() {
+        let mut success = entry(RedeemerTag::Guarding, 9, true);
+        success.logs = vec!["guard completed".into()];
+        let report = tx_eval_to_u5c(Ok(vec![success]));
+        assert_eq!(
+            report.traces,
+            vec![u5c::cardano::EvalReport {
+                msg: "guard completed".into(),
+                purpose: Some(u5c::cardano::RedeemerPurpose::Guarding as i32),
+                index: Some(9),
+            }]
+        );
+
+        assert!(report.errors.is_empty(), "{report:?}");
+        assert_eq!(report.redeemers.len(), 1);
+
+        let redeemer = &report.redeemers[0];
+        assert_eq!(
+            redeemer.purpose,
+            u5c::cardano::RedeemerPurpose::Guarding as i32
+        );
+        assert_eq!(redeemer.index, 9);
+
+        let expected_units = Some(ExUnits {
+            memory: 18_485,
+            steps: 4_805_428,
+        });
+        assert_eq!(redeemer.ex_units, expected_units);
+        assert_eq!(report.ex_units, expected_units);
+    }
+
+    #[test]
+    fn guarding_failure_keeps_details() {
+        use u5c::cardano::RedeemerPurpose as P;
+
+        let mut failed = entry(RedeemerTag::Guarding, 7, false);
+        failed.failure_message = Some("guard rejected".into());
+        failed.logs = vec!["before failure".into(), "detail".into()];
+        failed.units = PallasUnits { mem: 11, steps: 23 };
+
+        let report = tx_eval_to_u5c(Ok(vec![failed]));
+
+        assert_eq!(report.errors.len(), 1);
+        let error = &report.errors[0];
+        assert_eq!(error.msg, "Guarding[7]: guard rejected");
+        assert_eq!(
+            (error.purpose, error.index),
+            (Some(P::Guarding as i32), Some(7))
+        );
+
+        assert_eq!(report.traces.len(), 2);
+        assert_eq!(report.traces[0].msg, "before failure");
+        assert_eq!(report.traces[1].msg, "detail");
+        for trace in &report.traces {
+            assert_eq!(
+                (trace.purpose, trace.index),
+                (Some(P::Guarding as i32), Some(7))
+            );
+        }
+
+        assert_eq!(report.redeemers.len(), 1);
+        let redeemer = &report.redeemers[0];
+        assert_eq!(redeemer.purpose, P::Guarding as i32);
+        assert_eq!(redeemer.index, 7);
+
+        let expected_units = Some(ExUnits {
+            memory: 11,
+            steps: 23,
+        });
+        assert_eq!(redeemer.ex_units, expected_units);
+        assert_eq!(report.ex_units, expected_units);
+    }
+
+    #[test]
     fn a_transaction_level_error_names_no_redeemer() {
         let failed = tx_eval_to_u5c(Err(DomainError::Internal("unbalanced".into())));
         let mut huge = entry(RedeemerTag::Spend, 0, true);
@@ -275,22 +362,43 @@ mod mapping_tests {
     #[test]
     fn redeemer_errors_and_traces_name_their_redeemer() {
         use u5c::cardano::RedeemerPurpose as P;
-        let mut failed = entry(RedeemerTag::Spend, 3, false);
+        let mut failed = entry(RedeemerTag::Guarding, 3, false);
         failed.logs = vec!["before failure".into()];
         let mut success = entry(RedeemerTag::Cert, 2, true);
         success.logs = vec!["completed".into()];
 
         let report = tx_eval_to_u5c(Ok(vec![failed, success]));
+        assert_eq!(report.redeemers.len(), 2);
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(
+            report.errors[0].msg,
+            "Guarding[3]: script evaluation failed"
+        );
+        assert_eq!(
+            report.ex_units,
+            Some(ExUnits {
+                memory: 2 * 18_485,
+                steps: 2 * 4_805_428
+            })
+        );
+        assert_eq!(
+            (report.redeemers[0].purpose, report.redeemers[0].index),
+            (P::Guarding as i32, 3)
+        );
+        assert_eq!(
+            (report.redeemers[1].purpose, report.redeemers[1].index),
+            (P::Cert as i32, 2)
+        );
         let named = |x: &u5c::cardano::EvalReport| (x.purpose, x.index);
 
         assert_eq!(
             report.errors.iter().map(named).collect::<Vec<_>>(),
-            [(Some(P::Spend as i32), Some(3))]
+            [(Some(P::Guarding as i32), Some(3))]
         );
         assert_eq!(
             report.traces.iter().map(named).collect::<Vec<_>>(),
             [
-                (Some(P::Spend as i32), Some(3)),
+                (Some(P::Guarding as i32), Some(3)),
                 (Some(P::Cert as i32), Some(2))
             ]
         );

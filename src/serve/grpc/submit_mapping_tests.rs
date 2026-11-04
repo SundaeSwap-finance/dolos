@@ -1,8 +1,8 @@
-// Synthetic reports exercise both versioned protobuf mappings, including logs
+// Synthetic reports exercise the versioned protobuf mappings, including logs
 // unavailable from the currently supported native Trace builtin subset.
 use super::*;
 use pallas::ledger::{
-    primitives::{conway::RedeemerTag, ExUnits as PallasUnits},
+    primitives::ExUnits as PallasUnits, traverse::MultiEraRedeemerTag as RedeemerTag,
     validate::phase2::tx::TxEvalResult,
 };
 

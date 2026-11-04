@@ -87,7 +87,7 @@ fn tx_eval_to_u5c(
         });
     }
     for entry in report {
-        use pallas::ledger::primitives::conway::RedeemerTag;
+        use pallas::ledger::traverse::MultiEraRedeemerTag as RedeemerTag;
         use u5c::cardano::RedeemerPurpose;
         let purpose = match entry.tag {
             RedeemerTag::Spend => RedeemerPurpose::Spend,
@@ -96,6 +96,17 @@ fn tx_eval_to_u5c(
             RedeemerTag::Reward => RedeemerPurpose::Reward,
             RedeemerTag::Vote => RedeemerPurpose::Vote,
             RedeemerTag::Propose => RedeemerPurpose::Propose,
+            other => {
+                return u5c::cardano::TxEval {
+                    errors: vec![u5c::cardano::EvalError {
+                        msg: format!(
+                            "RPC v1alpha cannot represent redeemer {other:?}[{}]",
+                            entry.index
+                        ),
+                    }],
+                    ..Default::default()
+                };
+            }
         };
         if !entry.success {
             result.errors.push(u5c::cardano::EvalError {
@@ -259,4 +270,29 @@ mod tests {
 #[cfg(test)]
 mod mapping_tests {
     include!("../submit_mapping_tests.rs");
+    #[test]
+    fn guarding_results_are_explicitly_rejected() {
+        for success in [false, true] {
+            for position in 0..3 {
+                let mut guard = entry(RedeemerTag::Guarding, 9, success);
+                guard.logs = vec!["guard log".into()];
+                guard.failure_message = Some("guard rejected".into());
+                let mut entries = vec![
+                    entry(RedeemerTag::Spend, 4, true),
+                    entry(RedeemerTag::Cert, 2, false),
+                ];
+                entries.insert(position, guard);
+                let report = tx_eval_to_u5c(Ok(entries));
+                assert_eq!(
+                    report.errors,
+                    vec![u5c::cardano::EvalError {
+                        msg: "RPC v1alpha cannot represent redeemer Guarding[9]".into(),
+                    }]
+                );
+                assert!(report.redeemers.is_empty());
+                assert!(report.traces.is_empty());
+                assert!(report.ex_units.is_none());
+            }
+        }
+    }
 }
