@@ -114,7 +114,7 @@ index 8825dbf3..7f39d2e2 100644
          .concat(),
      )
 diff --git a/pallas-validate/src/phase1/dijkstra.rs b/pallas-validate/src/phase1/dijkstra.rs
-index 16d3d47f..81129de1 100644
+index 4c570a06..eec064cc 100644
 --- a/pallas-validate/src/phase1/dijkstra.rs
 +++ b/pallas-validate/src/phase1/dijkstra.rs
 @@ -198,6 +198,11 @@ pub(super) fn validate_dijkstra_tx_inner<S: DijkstraLedgerState + ?Sized>(
@@ -246,9 +246,9 @@ index 16d3d47f..81129de1 100644
 +            {
 +                Err(DijkstraUnsupported("new script language (requires V3)"))
 +            }
-             ScriptRef::PlutusV1Script(s) => well_formed_plutus(s.as_ref()),
-             ScriptRef::PlutusV2Script(s) => well_formed_plutus(s.as_ref()),
-             ScriptRef::PlutusV3Script(s) => well_formed_plutus(s.as_ref()),
+             ScriptRef::PlutusV1Script(s) => well_formed_plutus(&Language::PlutusV1, s.as_ref()),
+             ScriptRef::PlutusV2Script(s) => well_formed_plutus(&Language::PlutusV2, s.as_ref()),
+             ScriptRef::PlutusV3Script(s) => well_formed_plutus(&Language::PlutusV3, s.as_ref()),
 diff --git a/pallas-validate/src/phase1/dijkstra_ledger.rs b/pallas-validate/src/phase1/dijkstra_ledger.rs
 index 67fb1a3d..5ed5e907 100644
 --- a/pallas-validate/src/phase1/dijkstra_ledger.rs
@@ -292,7 +292,7 @@ index 67fb1a3d..5ed5e907 100644
          Certificate::StakeDelegation(c, pool) => {
              registered(state, c)?;
 diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
-index 44cf5f1f..4e7aad2a 100644
+index c9c045b4..e7d0ad72 100644
 --- a/pallas-validate/src/phase2/dijkstra.rs
 +++ b/pallas-validate/src/phase2/dijkstra.rs
 @@ -57,14 +57,15 @@ impl LegacyContextData for ContextOutput {
@@ -429,20 +429,20 @@ index 44cf5f1f..4e7aad2a 100644
                  failure_message: result.failure.map(|f| f.message),
              };
 diff --git a/pallas-validate/src/phase2/native_evaluator.rs b/pallas-validate/src/phase2/native_evaluator.rs
-index 75898ce6..1f8fae9c 100644
+index 73d352c4..81f4f756 100644
 --- a/pallas-validate/src/phase2/native_evaluator.rs
 +++ b/pallas-validate/src/phase2/native_evaluator.rs
-@@ -63,6 +63,11 @@ pub(crate) fn eval_native(
-         Language::PlutusV2 => PlutusVersion::V2,
-         Language::PlutusV3 => PlutusVersion::V3,
-     };
+@@ -58,6 +58,11 @@ pub(crate) fn eval_native(
+     let program = args.iter().fold(program, |program, arg| {
+         program.apply(&arena, plutus_data_to_term(&arena, arg))
+     });
 +    let mut costs = costs.to_vec();
 +    if language == Language::PlutusV3 && pallas_crypto::oracle_plant("cost") {
 +        costs[173] /= 2;
 +    }
 +    let costs = &costs[..];
      let mut calls = Vec::new();
-     let result = run(
+     let (value, info) = run(
          &arena,
 diff --git a/pallas-validate/src/phase2/to_plutus_data.rs b/pallas-validate/src/phase2/to_plutus_data.rs
 index 25096050..471715c5 100644

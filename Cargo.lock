@@ -57,7 +57,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 [[package]]
 name = "amaru-deps"
 version = "0.0.0"
-source = "git+https://github.com/SundaeSwap-finance/amaru.git?rev=ede1c76be037b16412c24b2590456e0fdee8fe4a#ede1c76be037b16412c24b2590456e0fdee8fe4a"
+source = "git+https://github.com/SundaeSwap-finance/amaru.git?rev=1b86d6c05e15e68c07e448e181de4cb30b546abe#1b86d6c05e15e68c07e448e181de4cb30b546abe"
 dependencies = [
  "bitflags",
  "blst",
@@ -68,9 +68,11 @@ dependencies = [
  "clap",
  "clap_builder",
  "console 0.16.6",
+ "crc32fast",
  "criterion",
  "crossbeam-epoch",
  "crossbeam-utils",
+ "dashu-base",
  "digest 0.10.7",
  "digest 0.11.3",
  "ed25519 2.2.3",
@@ -93,11 +95,12 @@ dependencies = [
  "insta",
  "ipnet",
  "itertools 0.13.0",
+ "itertools 0.14.0",
  "js-sys",
  "libc",
+ "libm",
  "log",
  "memchr",
- "miniz_oxide",
  "mio",
  "num",
  "num-bigint",
@@ -113,6 +116,7 @@ dependencies = [
  "ppv-lite86",
  "proc-macro2",
  "quote",
+ "rand 0.10.1",
  "rand 0.9.3",
  "rand_chacha 0.3.1",
  "rand_chacha 0.9.0",
@@ -160,16 +164,16 @@ dependencies = [
 [[package]]
 name = "amaru-kernel"
 version = "0.1.2"
-source = "git+https://github.com/SundaeSwap-finance/amaru.git?rev=ede1c76be037b16412c24b2590456e0fdee8fe4a#ede1c76be037b16412c24b2590456e0fdee8fe4a"
+source = "git+https://github.com/SundaeSwap-finance/amaru.git?rev=1b86d6c05e15e68c07e448e181de4cb30b546abe#1b86d6c05e15e68c07e448e181de4cb30b546abe"
 dependencies = [
  "amaru-deps",
  "amaru-minicbor-extra",
  "anyhow",
  "base58",
  "bech32 0.12.0",
+ "blake2 0.11.0",
  "bytes",
  "crc",
- "cryptoxide 0.6.5",
  "dashu-base",
  "dashu-int",
  "ed25519-dalek 3.0.0",
@@ -185,19 +189,19 @@ dependencies = [
  "stacksafe",
  "sysinfo",
  "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]
 name = "amaru-minicbor-extra"
 version = "0.1.2"
-source = "git+https://github.com/SundaeSwap-finance/amaru.git?rev=ede1c76be037b16412c24b2590456e0fdee8fe4a#ede1c76be037b16412c24b2590456e0fdee8fe4a"
+source = "git+https://github.com/SundaeSwap-finance/amaru.git?rev=1b86d6c05e15e68c07e448e181de4cb30b546abe#1b86d6c05e15e68c07e448e181de4cb30b546abe"
 dependencies = [
  "amaru-deps",
  "anyhow",
+ "dashu-int",
  "hex",
  "minicbor 0.25.1",
- "num",
- "num-bigint",
  "serde",
 ]
 
@@ -228,24 +232,28 @@ dependencies = [
 [[package]]
 name = "amaru-uplc"
 version = "0.4.0"
-source = "git+https://github.com/SundaeSwap-finance/amaru.git?rev=ede1c76be037b16412c24b2590456e0fdee8fe4a#ede1c76be037b16412c24b2590456e0fdee8fe4a"
+source = "git+https://github.com/SundaeSwap-finance/amaru.git?rev=1b86d6c05e15e68c07e448e181de4cb30b546abe#1b86d6c05e15e68c07e448e181de4cb30b546abe"
 dependencies = [
  "amaru-deps",
  "amaru-kernel",
  "amaru-minicbor-extra",
  "append-only-vec",
+ "blake2 0.11.0",
  "blst",
  "bumpalo",
  "chumsky",
- "cryptoxide 0.6.5",
+ "dashu-base",
+ "dashu-int",
+ "ed25519-dalek 3.0.0",
  "hamming",
  "hex",
  "indoc",
  "minicbor 0.25.1",
- "num",
- "num-bigint",
  "once_cell",
+ "ripemd",
  "secp256k1",
+ "sha2 0.11.0",
+ "sha3",
  "stacksafe",
  "thiserror 2.0.21",
  "walkdir",
@@ -650,7 +658,7 @@ checksum = "90dbd31c98227229239363921e60fcf5e558e43ec69094d46fc4996f08d1d5bc"
 dependencies = [
  "bitcoin_hashes",
  "rand 0.8.6",
- "rand_core 0.5.1",
+ "rand_core 0.6.4",
  "serde",
  "unicode-normalization",
 ]
@@ -710,6 +718,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
 dependencies = [
  "digest 0.10.7",
+]
+
+[[package]]
+name = "blake2"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b5d4d889834ee8ecfc0f8426ad30faf7cdcb10f741a8e6d7224d95325479f6f"
+dependencies = [
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -1381,12 +1398,6 @@ name = "cryptoxide"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "facfae029ec4373769eb4bd936bcf537de1052abaee9f246e667c9443be6aa95"
-
-[[package]]
-name = "cryptoxide"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8bb2a43afb0fd8b53101f79f153795c449ba80762361d8b868f4a75c6d03057"
 
 [[package]]
 name = "csv"
@@ -3113,6 +3124,9 @@ name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "iri-string"
@@ -4287,7 +4301,7 @@ dependencies = [
 [[package]]
 name = "pallas"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "pallas-addresses",
  "pallas-codec",
@@ -4306,7 +4320,7 @@ dependencies = [
 [[package]]
 name = "pallas-addresses"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "base58",
  "bech32 0.11.1",
@@ -4321,7 +4335,7 @@ dependencies = [
 [[package]]
 name = "pallas-codec"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "hex",
  "minicbor 0.26.4",
@@ -4332,7 +4346,7 @@ dependencies = [
 [[package]]
 name = "pallas-configs"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "base64 0.22.1",
  "num-rational",
@@ -4347,7 +4361,7 @@ dependencies = [
 [[package]]
 name = "pallas-crypto"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "cryptoxide 0.4.4",
  "hex",
@@ -4360,7 +4374,7 @@ dependencies = [
 [[package]]
 name = "pallas-hardano"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "binary-layout",
  "hex",
@@ -4380,7 +4394,7 @@ dependencies = [
 [[package]]
 name = "pallas-network"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "byteorder",
  "hex",
@@ -4397,7 +4411,7 @@ dependencies = [
 [[package]]
 name = "pallas-network2"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "byteorder",
  "chrono",
@@ -4416,7 +4430,7 @@ dependencies = [
 [[package]]
 name = "pallas-primitives"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "hex",
  "pallas-codec",
@@ -4428,7 +4442,7 @@ dependencies = [
 [[package]]
 name = "pallas-traverse"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "hex",
  "itertools 0.14.0",
@@ -4444,7 +4458,7 @@ dependencies = [
 [[package]]
 name = "pallas-txbuilder"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "hex",
  "pallas-addresses",
@@ -4460,7 +4474,7 @@ dependencies = [
 [[package]]
 name = "pallas-utxorpc"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "pallas-codec",
  "pallas-crypto",
@@ -4474,7 +4488,7 @@ dependencies = [
 [[package]]
 name = "pallas-validate"
 version = "1.4.0"
-source = "git+https://github.com/SundaeSwap-finance/pallas?rev=3ccc547491240e149c7fd9ff648c816292e52020#3ccc547491240e149c7fd9ff648c816292e52020"
+source = "git+https://github.com/SundaeSwap-finance/pallas?rev=03a00e7eaae2ae774ba040700e5497a573644a3c#03a00e7eaae2ae774ba040700e5497a573644a3c"
 dependencies = [
  "amaru-kernel",
  "amaru-uplc 0.1.0",
@@ -5321,6 +5335,15 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "ripemd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dd4211456b4172d7e44261920c25acf07367c4f04bb5f5d54fc21b090d9b159"
+dependencies = [
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -8112,6 +8135,7 @@ version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 
