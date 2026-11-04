@@ -7,8 +7,9 @@ HELD=$ROOT/candidate/held
 ADVANCE_MINUTES=${ADVANCE_MINUTES:-10}
 SNAPSHOT_MIN_FREE_G=${SNAPSHOT_MIN_FREE_G:-10}
 
+# The whole gibibytes free on the filesystem holding $1, rounded down.
 free_g() {
-  df -BG --output=avail "$1" | tail -1 | tr -dc 0-9
+  echo $(($(df -B1 --output=avail "$1" | tail -1 | tr -dc 0-9) / 1073741824))
 }
 
 # The start a candidate syncs from, snapshot when LIVE_FROM is unset, refusing any value but genesis or snapshot.

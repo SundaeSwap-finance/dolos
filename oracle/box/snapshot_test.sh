@@ -57,6 +57,27 @@ root() {
   esac
 }
 
+# The free gibibytes of a filesystem holding DF_BYTES bytes free, with a df that answers -B1 in bytes and -BG in gibibytes rounded up.
+free_of() {
+  (
+    ROOT=$W/free
+    . "$HERE/snapshot.sh"
+    df() {
+      echo Avail
+      case $1 in
+        -B1) echo "$DF_BYTES" ;;
+        -BG) echo "$(((DF_BYTES + 1073741823) / 1073741824))G" ;;
+      esac
+    }
+    DF_BYTES=$1 free_g /
+  )
+}
+
+# Must not fire: exactly 10 gibibytes free is 10.
+expect free_whole "$(free_of 10737418240)" 10
+# Must fire: one byte short of 10 gibibytes is 9, so a 10 gibibyte floor refuses it.
+expect free_short "$(free_of 10737418239)" 9
+
 # Must not fire: the two named starts, and snapshot when none is named.
 expect genesis "$(LIVE_FROM=genesis run r live_from)" "exit=0 genesis"
 expect snapshot "$(LIVE_FROM=snapshot run r live_from)" "exit=0 snapshot"
