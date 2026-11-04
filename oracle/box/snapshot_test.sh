@@ -87,10 +87,14 @@ expect unset "$(unset LIVE_FROM; run r live_from)" "exit=0 snapshot"
 # Must fire: any other start.
 expect misspelt "$(LIVE_FROM=gensis run r live_from)" "exit=2 LIVE-CANDIDATE REFUSED live_from=gensis want=genesis,snapshot"
 
-# A repository whose base commit pins pallas in Cargo.toml and Cargo.lock beside serde, with a file in each of crates/cardano, crates/core, crates/fjall and oracle/box.
+# A repository whose base commit pins pallas in Cargo.toml and Cargo.lock beside serde, with a file in each dir it makes.
 R=$W/repo
 rm -rf "$R"
-mkdir -p "$R/crates/cardano/src" "$R/crates/core/src" "$R/crates/fjall/src" "$R/oracle/box"
+for dir in crates/cardano/src crates/core/src crates/fjall/src crates/redb3/src crates/flatfiles/src oracle/box docs adrs \
+  crates/ledger-oracle-judge/src test_data/ledger-oracle src/serve/grpc/v1/ledger_oracle_tests; do
+  mkdir -p "$R/$dir"
+  echo 1 >"$R/$dir/f"
+done
 git -C "$R" init -q
 TOML='[workspace.dependencies]
 pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "aaaa" }
@@ -129,31 +133,51 @@ derive() {
 start_of() {
   run r snapshot_start "$R" "${2:-$BASE}" "$1"
 }
-CHECKED="checked=Cargo.toml,Cargo.lock,crates/cardano/,crates/core/,crates/fjall/"
 
-# Must not fire: a change to the oracle's scripts only, and a change to a dependency that is not pallas, start from the snapshot.
-expect oracle_only "$(start_of "$(derive oracle/box/run.sh 2)")" "exit=0 snapshot $CHECKED"
+# Must not fire: a change to the oracle's scripts, a document, the docs or adrs dirs, the judge crate, its corpus or its test module only, starts from the snapshot.
+expect oracle_only "$(start_of "$(derive oracle/box/run.sh 2)")" "exit=0 snapshot unbuilt_paths=oracle/box/run.sh"
+expect md_only "$(start_of "$(derive crates/core/README.md 2)")" "exit=0 snapshot unbuilt_paths=crates/core/README.md"
+expect docs_only "$(start_of "$(derive docs/f 2)")" "exit=0 snapshot unbuilt_paths=docs/f"
+expect adrs_only "$(start_of "$(derive adrs/f 2)")" "exit=0 snapshot unbuilt_paths=adrs/f"
+expect judge_crate "$(start_of "$(derive crates/ledger-oracle-judge/src/f 2)")" \
+  "exit=0 snapshot unbuilt_paths=crates/ledger-oracle-judge/src/f"
+expect judge_corpus "$(start_of "$(derive test_data/ledger-oracle/f 2)")" \
+  "exit=0 snapshot unbuilt_paths=test_data/ledger-oracle/f"
+expect judge_tests "$(start_of "$(derive src/serve/grpc/v1/ledger_oracle_tests/f 2)")" \
+  "exit=0 snapshot unbuilt_paths=src/serve/grpc/v1/ledger_oracle_tests/f"
 git -C "$R" checkout -q --detach "$BASE"
 printf '%s\n' "$TOML" | sed 's/^serde = "1.0.0"$/serde = "1.0.1"/' >"$R/Cargo.toml"
 printf '%s\n' "$LOCK" | sed '8s/1.0.0/1.0.1/' >"$R/Cargo.lock"
 other_dep=$(fixture_commit)
-expect other_dep "$(start_of "$other_dep")" "exit=0 snapshot $CHECKED"
 # Must not fire: the quick tier lists a pin file only when its pallas entries differ.
 expect other_dep_files "$(run r differing_files "$R" "$BASE" "$other_dep" | paste -sd, -)" "exit=0 "
-# Must fire: a new pallas rev or version in Cargo.lock, a new pallas entry in Cargo.toml, a change under crates/cardano, crates/core or crates/fjall, and a snapshot commit the repository does not hold.
+# Must fire: a change to a dependency that is not pallas, a new pallas rev or version in Cargo.lock, a new pallas entry in Cargo.toml, a change under crates/cardano, core, fjall, redb3, flatfiles or src, a file moved from crates/core to docs, and a snapshot commit the repository does not hold.
+expect other_dep "$(start_of "$other_dep")" "exit=0 genesis reason=built_paths_differ paths=Cargo.lock,Cargo.toml"
+expect other_lock "$(start_of "$(derive Cargo.lock "$(printf '%s\n' "$LOCK" | sed '8s/1.0.0/1.0.1/')")")" \
+  "exit=0 genesis reason=built_paths_differ paths=Cargo.lock"
 pallas_lock=$(derive Cargo.lock "$(printf '%s\n' "$LOCK" | sed 's/aaaa#aaaa/bbbb#bbbb/')")
-expect pallas_lock "$(start_of "$pallas_lock")" "exit=0 genesis reason=reads_old_blocks paths=Cargo.lock"
+expect pallas_lock "$(start_of "$pallas_lock")" "exit=0 genesis reason=built_paths_differ paths=Cargo.lock"
 expect pallas_lock_files "$(run r differing_files "$R" "$BASE" "$pallas_lock" | paste -sd, -)" "exit=0 Cargo.lock"
 expect pallas_version "$(start_of "$(derive Cargo.lock "$(printf '%s\n' "$LOCK" | sed '3s/1.0.0/1.0.1/')")")" \
-  "exit=0 genesis reason=reads_old_blocks paths=Cargo.lock"
+  "exit=0 genesis reason=built_paths_differ paths=Cargo.lock"
 expect pallas_toml "$(start_of "$(derive Cargo.toml "$(printf '%s\n' "$TOML" | sed 's/rev = "aaaa"/rev = "aaaa", features = ["relaxed"]/')")")" \
-  "exit=0 genesis reason=reads_old_blocks paths=Cargo.toml"
+  "exit=0 genesis reason=built_paths_differ paths=Cargo.toml"
 expect cardano "$(start_of "$(derive crates/cardano/src/lib.rs 2)")" \
-  "exit=0 genesis reason=reads_old_blocks paths=crates/cardano/src/lib.rs"
+  "exit=0 genesis reason=built_paths_differ paths=crates/cardano/src/lib.rs"
 expect core "$(start_of "$(derive crates/core/src/lib.rs 2)")" \
-  "exit=0 genesis reason=reads_old_blocks paths=crates/core/src/lib.rs"
+  "exit=0 genesis reason=built_paths_differ paths=crates/core/src/lib.rs"
 expect fjall "$(start_of "$(derive crates/fjall/src/lib.rs 2)")" \
-  "exit=0 genesis reason=reads_old_blocks paths=crates/fjall/src/lib.rs"
+  "exit=0 genesis reason=built_paths_differ paths=crates/fjall/src/lib.rs"
+expect redb3 "$(start_of "$(derive crates/redb3/src/f 2)")" \
+  "exit=0 genesis reason=built_paths_differ paths=crates/redb3/src/f"
+expect flatfiles "$(start_of "$(derive crates/flatfiles/src/f 2)")" \
+  "exit=0 genesis reason=built_paths_differ paths=crates/flatfiles/src/f"
+expect root_src "$(start_of "$(derive src/serve/grpc/v1/f 2)")" \
+  "exit=0 genesis reason=built_paths_differ paths=src/serve/grpc/v1/f"
+git -C "$R" checkout -q --detach "$BASE"
+git -C "$R" mv crates/core/src/lib.rs docs/lib.rs
+expect moved_out "$(start_of "$(fixture_commit)")" \
+  "exit=0 genesis reason=built_paths_differ paths=crates/core/src/lib.rs"
 expect unknown_commit "$(start_of "$BASE" "$SHA")" "exit=0 genesis reason=unknown_commit commit=$SHA"
 
 # Must not fire: a meta file naming a commit and a slot.

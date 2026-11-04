@@ -6,10 +6,16 @@ SNAPSHOT=$ROOT/candidate/snapshot
 HELD=$ROOT/candidate/held
 ADVANCE_MINUTES=${ADVANCE_MINUTES:-10}
 SNAPSHOT_MIN_FREE_G=${SNAPSHOT_MIN_FREE_G:-10}
-# The paths whose change can alter the state a snapshot holds or how a candidate reads it.
-OLD_READ_PATHS="$PALLAS_PIN_FILES crates/cardano/ crates/core/ crates/fjall/"
+# Whether the path $1 is one the candidate's release build of the dolos binary does not read: oracle tooling, documentation, and the judge's crate, corpus and test module.
+unbuilt_path() {
+  case $1 in
+    oracle/* | docs/* | adrs/* | *.md) ;;
+    crates/ledger-oracle-judge/* | test_data/ledger-oracle/* | src/serve/grpc/v1/ledger_oracle_tests/*) ;;
+    *) return 1 ;;
+  esac
+}
 
-# The start a candidate at commit $3 takes from a snapshot written by the commit $2 of the repository $1, genesis with its reason unless the diff of OLD_READ_PATHS between them ran and is empty.
+# The start a candidate at commit $3 takes from a snapshot written by the commit $2 of the repository $1, snapshot only when the diff between them ran and every path it lists is unbuilt.
 snapshot_start() {
   for known in "$2" "$3"; do
     if ! git -C "$1" cat-file -e "$known^{commit}" 2>/dev/null; then
@@ -17,13 +23,25 @@ snapshot_start() {
       return
     fi
   done
-  if ! paths=$(differing_files "$1" "$2" "$3" $OLD_READ_PATHS); then
+  if ! paths=$(git -C "$1" diff --no-renames --name-only "$2" "$3"); then
     echo "genesis reason=diff_failed"
-  elif [ -n "$paths" ]; then
-    echo "genesis reason=reads_old_blocks paths=$(echo "$paths" | paste -sd, -)"
-  else
-    echo "snapshot checked=$(echo "$OLD_READ_PATHS" | tr ' ' ,)"
+    return
   fi
+  unbuilt=$(echo "$paths" | while read -r path; do
+    if [ -n "$path" ] && unbuilt_path "$path"; then
+      echo "$path"
+    fi
+  done)
+  if [ "$unbuilt" = "$paths" ]; then
+    echo "snapshot unbuilt_paths=$(echo "$paths" | paste -sd, -)"
+    return
+  fi
+  built=$(echo "$paths" | while read -r path; do
+    if ! unbuilt_path "$path"; then
+      echo "$path"
+    fi
+  done)
+  echo "genesis reason=built_paths_differ paths=$(echo "$built" | paste -sd, -)"
 }
 
 # The whole gibibytes free on the filesystem holding $1, rounded down.
