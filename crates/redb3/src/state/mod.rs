@@ -141,7 +141,7 @@ impl StateStore {
 
         {
             let mut cursor = wx.open_table(CURSOR_TABLE)?;
-            cursor.insert(REVISION_KEY, &revision.to_be_bytes().to_vec())?;
+            cursor.insert(REVISION_KEY, revision.to_be_bytes().to_vec())?;
         }
 
         wx.commit()?;

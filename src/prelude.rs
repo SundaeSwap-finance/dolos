@@ -129,7 +129,6 @@ pub fn start_crawler<D: Domain>(
 
 #[cfg(test)]
 mod tests {
-    use dolos_core::{ArchiveStore as _, ArchiveWriter as _, SyncExt as _};
     use dolos_testing::blocks::make_conway_block;
     use dolos_testing::toy_domain::ToyDomain;
 

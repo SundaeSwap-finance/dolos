@@ -679,7 +679,6 @@ mod endorser_retry;
 #[cfg(test)]
 mod tests {
     use dolos_core::import::{seed_wal_from_state, WalSeed};
-    use dolos_core::{StateStore as _, StateWriter as _};
     use pallas::ledger::traverse::MultiEraBlock;
     use pallas::network::facades::PeerServer;
 

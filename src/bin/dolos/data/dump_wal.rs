@@ -45,13 +45,7 @@ impl Formatter {
                 let deltas = log.delta.len().to_string();
                 let inputs = log.inputs.len().to_string();
 
-                table.add_row(vec![
-                    format!("{slot}"),
-                    format!("{hash}"),
-                    format!("{size}"),
-                    format!("{deltas}"),
-                    format!("{inputs}"),
-                ]);
+                table.add_row(vec![slot, hash, size, deltas, inputs]);
             }
         }
     }

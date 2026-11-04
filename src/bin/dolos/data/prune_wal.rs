@@ -24,7 +24,9 @@ pub fn run(config: &RootConfig, args: &Args) -> miette::Result<()> {
         Some(x) => x,
         None => match config.sync.max_rollback {
             Some(x) => x,
-            None => bail!("neither args or config provided for max_slots"),
+            None => {
+                bail!("neither args or config provided for max_slots");
+            }
         },
     };
 

@@ -159,13 +159,13 @@ pub fn run(
 
     match &mut stores.archive {
         ArchiveStoreBackend::LogsOnly(_) if !args.skip_sanitization => {
-            bail!("archive sanitization needs exclusive access to the archive database")
+            bail!("archive sanitization needs exclusive access to the archive database");
         }
         // The memory archive holds its blocks in process, so there is no
         // `<root>/archive` for `--include-archive` to pick up. The other
         // stores may still be on disk, so only the archive half is refused.
         ArchiveStoreBackend::Memory(_) if args.include_archive => {
-            bail!("the in-memory archive keeps nothing on disk to export")
+            bail!("the in-memory archive keeps nothing on disk to export");
         }
         // Sanitization requires direct backend access: fjall major-compacts
         // both keyspaces (an LSM has no offline integrity check to run).
@@ -177,7 +177,7 @@ pub fn run(
         | ArchiveStoreBackend::LogsOnly(_)
         | ArchiveStoreBackend::Fjall(_) => {}
         ArchiveStoreBackend::NoOp(_) => {
-            bail!("export command is not available for noop archive backend")
+            bail!("export command is not available for noop archive backend");
         }
     }
 

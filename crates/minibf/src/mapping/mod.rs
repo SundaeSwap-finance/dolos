@@ -2545,7 +2545,7 @@ impl IntoModel<TxContentPoolCertsInnerRelaysInner> for alonzo::Relay {
                         // cardano-ledger serializes relay IPv6 addresses as
                         // four 32-bit words in little-endian order; swap each
                         // word back to network order (same as dbsync).
-                        for word in bytes.chunks_exact_mut(4) {
+                        for word in bytes.as_chunks_mut::<4>().0 {
                             word.reverse();
                         }
                         std::net::Ipv6Addr::from(bytes).to_string()

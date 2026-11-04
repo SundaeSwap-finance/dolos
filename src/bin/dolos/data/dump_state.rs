@@ -77,7 +77,7 @@ impl TableRow for AccountState {
         let epoch = self.stake.epoch().unwrap_or_default();
 
         vec![
-            format!("{}", hex::encode(key)),
+            hex::encode(key),
             format!("{}", self.registered_at.unwrap_or_default()),
             format!("{}", self.deregistered_at.unwrap_or_default()),
             format_stake_at(self, epoch - 3),
@@ -146,13 +146,10 @@ impl TableRow for EpochState {
                 "{}",
                 self.pparams.live().map(|x| x.len()).unwrap_or_default()
             ),
-            format!(
-                "{}",
-                self.nonces
-                    .as_ref()
-                    .map(|x| hex::encode(x.active))
-                    .unwrap_or("".to_string())
-            ),
+            self.nonces
+                .as_ref()
+                .map(|x| hex::encode(x.active))
+                .unwrap_or("".to_string()),
         ]
     }
 }
@@ -186,7 +183,7 @@ impl TableRow for EraSummary {
         }
 
         vec![
-            format!("{}", hex::encode(key)),
+            hex::encode(key),
             format!("{}", self.start.epoch),
             format!("{}", self.start.slot),
             format!("{}", self.start.timestamp),
@@ -303,15 +300,12 @@ impl TableRow for PoolState {
         let pool_bech32 = bech32::encode::<bech32::Bech32>(POOL_HRP, pool_hash).unwrap();
 
         vec![
-            format!("{}", pool_hex),
-            format!("{}", pool_bech32),
+            pool_hex,
+            pool_bech32,
             format!("{}", self.register_slot),
-            format!(
-                "{}",
-                self.retiring_epoch
-                    .map(|x| x.to_string())
-                    .unwrap_or_default()
-            ),
+            self.retiring_epoch
+                .map(|x| x.to_string())
+                .unwrap_or_default(),
             format_pool_epoch(&self.snapshot, 3),
             format_pool_epoch(&self.snapshot, 2),
             format_pool_epoch(&self.snapshot, 1),
@@ -409,30 +403,18 @@ impl TableRow for ProposalState {
         };
 
         vec![
-            format!("{}", hex::encode(key)),
-            format!("{}", hex::encode(self.tx)),
+            hex::encode(key),
+            hex::encode(self.tx),
             format!("{}", self.idx),
-            format!("{}", action),
-            format!(
-                "{}",
-                self.max_epoch.map(|x| x.to_string()).unwrap_or_default()
-            ),
-            format!(
-                "{}",
-                self.ratified_epoch
-                    .map(|x| x.to_string())
-                    .unwrap_or_default()
-            ),
-            format!(
-                "{}",
-                self.canceled_epoch
-                    .map(|x| x.to_string())
-                    .unwrap_or_default()
-            ),
-            format!(
-                "{}",
-                self.deposit.map(|x| x.to_string()).unwrap_or_default()
-            ),
+            action,
+            self.max_epoch.map(|x| x.to_string()).unwrap_or_default(),
+            self.ratified_epoch
+                .map(|x| x.to_string())
+                .unwrap_or_default(),
+            self.canceled_epoch
+                .map(|x| x.to_string())
+                .unwrap_or_default(),
+            self.deposit.map(|x| x.to_string()).unwrap_or_default(),
             format!("{}", self.reward_account.is_some()),
         ]
     }

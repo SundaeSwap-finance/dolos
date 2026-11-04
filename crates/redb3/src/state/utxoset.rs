@@ -58,7 +58,7 @@ impl UtxosTable {
         let mut out = HashMap::new();
 
         for key in refs {
-            if let Some(body) = table.get(&(&key.0 as &[u8; 32], key.1))? {
+            if let Some(body) = table.get((&key.0 as &[u8; 32], key.1))? {
                 let (era, cbor) = body.value();
                 let cbor = cbor.to_owned();
                 let value = Arc::new(EraCbor(era, cbor));

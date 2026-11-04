@@ -68,7 +68,7 @@ impl ArchiveShape {
     /// The stable key of entity `i`, identical in every epoch.
     pub fn entity(&self, i: u64) -> EntityKey {
         let mut bytes = [0u8; 32];
-        for chunk in bytes.chunks_exact_mut(8) {
+        for chunk in bytes.as_chunks_mut::<8>().0 {
             chunk.copy_from_slice(&i.to_be_bytes());
         }
         EntityKey::from(&bytes)
@@ -82,7 +82,7 @@ impl ArchiveShape {
 
 fn block_point(slot: BlockSlot) -> ChainPoint {
     let mut bytes = [0u8; 32];
-    for chunk in bytes.chunks_exact_mut(8) {
+    for chunk in bytes.as_chunks_mut::<8>().0 {
         chunk.copy_from_slice(&slot.to_be_bytes());
     }
     ChainPoint::Specific(slot, pallas::crypto::hash::Hash::new(bytes))

@@ -72,8 +72,10 @@ impl BlockLocation {
 /// per slot is one entry long and reads the same either way.
 pub fn decode_locations(bytes: &[u8]) -> impl DoubleEndedIterator<Item = BlockLocation> + '_ {
     bytes
-        .chunks_exact(BLOCK_LOCATION_SIZE)
-        .map(BlockLocation::from_bytes)
+        .as_chunks::<BLOCK_LOCATION_SIZE>()
+        .0
+        .iter()
+        .map(|chunk| BlockLocation::from_bytes(chunk.as_slice()))
 }
 
 /// Pack a slot's blocks back into an index value, newest first.

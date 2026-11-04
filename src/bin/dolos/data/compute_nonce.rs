@@ -39,7 +39,7 @@ pub fn compute_nonce<D: Domain>(epoch: u64, domain: &D) -> miette::Result<Hash<3
         .unwrap_or((0, 0));
 
     if epoch < first_shelley_epoch {
-        bail!("Epoch is before shelley, no nonce.")
+        bail!("Epoch is before shelley, no nonce.");
     }
 
     if epoch == first_shelley_epoch {

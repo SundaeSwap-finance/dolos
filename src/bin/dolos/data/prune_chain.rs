@@ -24,7 +24,9 @@ pub fn run(config: &RootConfig, args: &Args) -> miette::Result<()> {
         Some(x) => x,
         None => match config.sync.max_history {
             Some(x) => x,
-            None => bail!("neither args or config provided for max_slots"),
+            None => {
+                bail!("neither args or config provided for max_slots");
+            }
         },
     };
 
@@ -39,7 +41,7 @@ pub fn run(config: &RootConfig, args: &Args) -> miette::Result<()> {
     // Compaction requires direct backend access
     match &mut stores.archive {
         ArchiveStoreBackend::LogsOnly(_) => {
-            bail!("chain compaction needs exclusive access to the archive database")
+            bail!("chain compaction needs exclusive access to the archive database");
         }
         ArchiveStoreBackend::Fjall(s) => {
             // Background compaction would reclaim the space eventually; a

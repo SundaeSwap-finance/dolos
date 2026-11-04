@@ -26,10 +26,7 @@ impl Formatter {
     fn write(&mut self, pool_id: Hash<28>, delegation: u128) {
         match self {
             Formatter::Table(table) => {
-                table.add_row(vec![
-                    format!("{}", hex::encode(pool_id)),
-                    format!("{}", delegation),
-                ]);
+                table.add_row(vec![hex::encode(pool_id), format!("{}", delegation)]);
             }
         }
     }

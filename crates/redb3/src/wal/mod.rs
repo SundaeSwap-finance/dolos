@@ -308,11 +308,7 @@ where
 
         let start = self.find_tip()?;
 
-        if start.is_none() {
-            return Ok(true);
-        }
-
-        Ok(false)
+        Ok(start.is_none())
     }
 
     pub fn memory() -> Result<Self, WalError> {

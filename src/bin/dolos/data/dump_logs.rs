@@ -241,7 +241,7 @@ impl TableRow for StakeLog {
 
         vec![
             //format!("{}", pool_hex),
-            format!("{}", pool_bech32),
+            pool_bech32,
             format!("{}", epoch),
             format!("{}", self.blocks_minted),
             format!("{}", self.total_stake),
