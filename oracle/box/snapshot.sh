@@ -6,8 +6,8 @@ SNAPSHOT=$ROOT/candidate/snapshot
 HELD=$ROOT/candidate/held
 ADVANCE_MINUTES=${ADVANCE_MINUTES:-10}
 SNAPSHOT_MIN_FREE_G=${SNAPSHOT_MIN_FREE_G:-10}
-# The paths whose change can alter how a candidate reads the blocks a snapshot already holds.
-OLD_READ_PATHS="$PALLAS_PIN_FILES crates/cardano/"
+# The paths whose change can alter the state a snapshot holds or how a candidate reads it.
+OLD_READ_PATHS="$PALLAS_PIN_FILES crates/cardano/ crates/core/ crates/fjall/"
 
 # The start a candidate at commit $3 takes from a snapshot written by the commit $2 of the repository $1, genesis with its reason unless the diff of OLD_READ_PATHS between them ran and is empty.
 snapshot_start() {

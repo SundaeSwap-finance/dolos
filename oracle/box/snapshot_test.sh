@@ -87,10 +87,10 @@ expect unset "$(unset LIVE_FROM; run r live_from)" "exit=0 snapshot"
 # Must fire: any other start.
 expect misspelt "$(LIVE_FROM=gensis run r live_from)" "exit=2 LIVE-CANDIDATE REFUSED live_from=gensis want=genesis,snapshot"
 
-# A repository whose base commit pins pallas in Cargo.toml and Cargo.lock beside serde, with a file in crates/cardano and one in oracle/box.
+# A repository whose base commit pins pallas in Cargo.toml and Cargo.lock beside serde, with a file in each of crates/cardano, crates/core, crates/fjall and oracle/box.
 R=$W/repo
 rm -rf "$R"
-mkdir -p "$R/crates/cardano/src" "$R/oracle/box"
+mkdir -p "$R/crates/cardano/src" "$R/crates/core/src" "$R/crates/fjall/src" "$R/oracle/box"
 git -C "$R" init -q
 TOML='[workspace.dependencies]
 pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "aaaa" }
@@ -109,6 +109,8 @@ dependencies = [
 printf '%s\n' "$TOML" >"$R/Cargo.toml"
 printf '%s\n' "$LOCK" >"$R/Cargo.lock"
 echo 1 >"$R/crates/cardano/src/lib.rs"
+echo 1 >"$R/crates/core/src/lib.rs"
+echo 1 >"$R/crates/fjall/src/lib.rs"
 echo 1 >"$R/oracle/box/run.sh"
 # Commits the repository's files and prints the commit.
 fixture_commit() {
@@ -127,7 +129,7 @@ derive() {
 start_of() {
   run r snapshot_start "$R" "${2:-$BASE}" "$1"
 }
-CHECKED="checked=Cargo.toml,Cargo.lock,crates/cardano/"
+CHECKED="checked=Cargo.toml,Cargo.lock,crates/cardano/,crates/core/,crates/fjall/"
 
 # Must not fire: a change to the oracle's scripts only, and a change to a dependency that is not pallas, start from the snapshot.
 expect oracle_only "$(start_of "$(derive oracle/box/run.sh 2)")" "exit=0 snapshot $CHECKED"
@@ -138,7 +140,7 @@ other_dep=$(fixture_commit)
 expect other_dep "$(start_of "$other_dep")" "exit=0 snapshot $CHECKED"
 # Must not fire: the quick tier lists a pin file only when its pallas entries differ.
 expect other_dep_files "$(run r differing_files "$R" "$BASE" "$other_dep" | paste -sd, -)" "exit=0 "
-# Must fire: a new pallas rev or version in Cargo.lock, a new pallas entry in Cargo.toml, a change under crates/cardano, and a snapshot commit the repository does not hold.
+# Must fire: a new pallas rev or version in Cargo.lock, a new pallas entry in Cargo.toml, a change under crates/cardano, crates/core or crates/fjall, and a snapshot commit the repository does not hold.
 pallas_lock=$(derive Cargo.lock "$(printf '%s\n' "$LOCK" | sed 's/aaaa#aaaa/bbbb#bbbb/')")
 expect pallas_lock "$(start_of "$pallas_lock")" "exit=0 genesis reason=reads_old_blocks paths=Cargo.lock"
 expect pallas_lock_files "$(run r differing_files "$R" "$BASE" "$pallas_lock" | paste -sd, -)" "exit=0 Cargo.lock"
@@ -148,6 +150,10 @@ expect pallas_toml "$(start_of "$(derive Cargo.toml "$(printf '%s\n' "$TOML" | s
   "exit=0 genesis reason=reads_old_blocks paths=Cargo.toml"
 expect cardano "$(start_of "$(derive crates/cardano/src/lib.rs 2)")" \
   "exit=0 genesis reason=reads_old_blocks paths=crates/cardano/src/lib.rs"
+expect core "$(start_of "$(derive crates/core/src/lib.rs 2)")" \
+  "exit=0 genesis reason=reads_old_blocks paths=crates/core/src/lib.rs"
+expect fjall "$(start_of "$(derive crates/fjall/src/lib.rs 2)")" \
+  "exit=0 genesis reason=reads_old_blocks paths=crates/fjall/src/lib.rs"
 expect unknown_commit "$(start_of "$BASE" "$SHA")" "exit=0 genesis reason=unknown_commit commit=$SHA"
 
 # Must not fire: a meta file naming a commit and a slot.
