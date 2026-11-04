@@ -18,12 +18,14 @@ STORE="$ROOT/candidate/$(date -u +%Y%m%dT%H%M%SZ)"
 . "$HERE/snapshot.sh"
 
 MODE=$(live_from)
+mkdir -p "$DIR/config"
+write_config "$DIR/config"
 if [ "$MODE" = snapshot ]; then
   if ! meta=$(snapshot_meta "$SNAPSHOT"); then
     echo "LIVE-CANDIDATE SNAPSHOT-UNUSABLE reason=missing snapshot=$SNAPSHOT"
     exit 1
   fi
-  rule=$(snapshot_start "$ROOT/dolos.git" "${meta% *}" "$COMMIT")
+  rule=$(snapshot_start "$ROOT/dolos.git" "${meta% *}" "$COMMIT" "$SNAPSHOT" "$DIR/config")
   case $rule in
     snapshot\ *) echo "LIVE-CANDIDATE snapshot_usable ${rule#snapshot } snapshot_commit=${meta% *} commit=$COMMIT" ;;
     *)
@@ -62,13 +64,7 @@ cleanup() {
 trap cleanup EXIT
 
 start_store "$MODE" "$STORE"
-mkdir -p "$DIR"
-for genesis in byron shelley alonzo conway dijkstra; do
-  cat "$SERVE_CONFIG/$genesis-genesis.json" >"$STORE/$genesis-genesis.json"
-done
-# The serving configuration without its listeners, then the candidate's own.
-awk '/^\[/ { skip = ($0 ~ /^\[serve/) } !skip' "$SERVE_CONFIG/dolos.toml" >"$STORE/dolos.toml"
-printf '[serve.grpc]\nlisten_address = "%s"\n' "$CANDIDATE_GRPC" >>"$STORE/dolos.toml"
+cp "$DIR/config/"* "$STORE/"
 
 case $CANDIDATE in
   /*)

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks the start a live leg names, which commits may start from a snapshot, when its sync loop waits, finishes or refuses a snapshot, and when a candidate store is held, kept or dropped, on stores of one file.
+# Checks the start a live leg names, the config a candidate gets, which commits and configs may start from a snapshot, when its sync loop waits, finishes or refuses a snapshot, and when a candidate store is held, kept or dropped.
 # Usage: snapshot_test.sh <empty work dir>
 set -eu
 W=$(cd "$1" && pwd)
@@ -129,22 +129,66 @@ derive() {
   printf '%s\n' "$2" >"$R/$1"
   fixture_commit
 }
-# The start a candidate at commit $1 takes from a snapshot written by the commit $2, the base when none is given.
+# Writes a store's six config files into the dir $1, its dolos.toml ending in the line $2.
+config_dir() {
+  rm -rf "$1"
+  mkdir -p "$1/data"
+  printf '[storage]\npath = "data"\n%s\n' "$2" >"$1/dolos.toml"
+  for genesis in byron shelley alonzo conway dijkstra; do
+    echo "{\"$genesis\": 1}" >"$1/$genesis-genesis.json"
+  done
+}
+LISTEN='listen_address = "127.0.0.1:50061"'
+config_dir "$W/config" "$LISTEN"
+config_dir "$W/store" "$LISTEN"
+SAME=dolos.toml,byron-genesis.json,shelley-genesis.json,alonzo-genesis.json,conway-genesis.json,dijkstra-genesis.json
+# The start a candidate at commit $1 with the config in $W/config takes from the store $3, written by the commit $2, the base and $W/store when none is given.
 start_of() {
-  run r snapshot_start "$R" "${2:-$BASE}" "$1"
+  run r snapshot_start "$R" "${2:-$BASE}" "$1" "${3:-$W/store}" "$W/config"
 }
 
 # Must not fire: a change to the oracle's scripts, a document, the docs or adrs dirs, the judge crate, its corpus or its test module only, starts from the snapshot.
-expect oracle_only "$(start_of "$(derive oracle/box/run.sh 2)")" "exit=0 snapshot unbuilt_paths=oracle/box/run.sh"
-expect md_only "$(start_of "$(derive crates/core/README.md 2)")" "exit=0 snapshot unbuilt_paths=crates/core/README.md"
-expect docs_only "$(start_of "$(derive docs/f 2)")" "exit=0 snapshot unbuilt_paths=docs/f"
-expect adrs_only "$(start_of "$(derive adrs/f 2)")" "exit=0 snapshot unbuilt_paths=adrs/f"
+ORACLE=$(derive oracle/box/run.sh 2)
+expect oracle_only "$(start_of "$ORACLE")" "exit=0 snapshot unbuilt_paths=oracle/box/run.sh same_config=$SAME"
+expect md_only "$(start_of "$(derive crates/core/README.md 2)")" \
+  "exit=0 snapshot unbuilt_paths=crates/core/README.md same_config=$SAME"
+expect docs_only "$(start_of "$(derive docs/f 2)")" "exit=0 snapshot unbuilt_paths=docs/f same_config=$SAME"
+expect adrs_only "$(start_of "$(derive adrs/f 2)")" "exit=0 snapshot unbuilt_paths=adrs/f same_config=$SAME"
 expect judge_crate "$(start_of "$(derive crates/ledger-oracle-judge/src/f 2)")" \
-  "exit=0 snapshot unbuilt_paths=crates/ledger-oracle-judge/src/f"
+  "exit=0 snapshot unbuilt_paths=crates/ledger-oracle-judge/src/f same_config=$SAME"
 expect judge_corpus "$(start_of "$(derive test_data/ledger-oracle/f 2)")" \
-  "exit=0 snapshot unbuilt_paths=test_data/ledger-oracle/f"
+  "exit=0 snapshot unbuilt_paths=test_data/ledger-oracle/f same_config=$SAME"
 expect judge_tests "$(start_of "$(derive src/serve/grpc/v1/ledger_oracle_tests/f 2)")" \
-  "exit=0 snapshot unbuilt_paths=src/serve/grpc/v1/ledger_oracle_tests/f"
+  "exit=0 snapshot unbuilt_paths=src/serve/grpc/v1/ledger_oracle_tests/f same_config=$SAME"
+# Must not fire: the store's commit with the config it was written under starts from the snapshot.
+expect config_same "$(start_of "$BASE")" "exit=0 snapshot unbuilt_paths= same_config=$SAME"
+# Must fire: an oracle only change whose config differs from the store's in a dolos.toml line or a genesis file, or that the store lacks.
+config_dir "$W/store_toml" 'listen_address = "127.0.0.1:50062"'
+expect config_toml "$(start_of "$ORACLE" "$BASE" "$W/store_toml")" "exit=0 genesis reason=config_differs files=dolos.toml"
+config_dir "$W/store_genesis" "$LISTEN"
+echo '{"shelley": 2}' >"$W/store_genesis/shelley-genesis.json"
+expect config_genesis "$(start_of "$ORACLE" "$BASE" "$W/store_genesis")" \
+  "exit=0 genesis reason=config_differs files=shelley-genesis.json"
+mkdir -p "$W/store_bare/data"
+expect config_missing "$(start_of "$ORACLE" "$BASE" "$W/store_bare")" "exit=0 genesis reason=config_unknown files=$SAME"
+config_dir "$W/store_short" "$LISTEN"
+rm "$W/store_short/dijkstra-genesis.json"
+expect config_one_missing "$(start_of "$ORACLE" "$BASE" "$W/store_short")" \
+  "exit=0 genesis reason=config_unknown files=dijkstra-genesis.json"
+
+# Must not fire: the written config keeps every serving section but serve and every genesis file as served.
+mkdir -p "$W/serve" "$W/written"
+printf '[upstream]\npeer_address = "a"\n[serve.grpc]\nlisten_address = "b"\n[serve.minibf]\nlisten_address = "c"\n[logging]\nmax_level = "INFO"\n' \
+  >"$W/serve/dolos.toml"
+for genesis in byron shelley alonzo conway dijkstra; do
+  echo "{\"served\": \"$genesis\"}" >"$W/serve/$genesis-genesis.json"
+done
+expect config_written "$(SERVE_CONFIG=$W/serve CANDIDATE_GRPC=127.0.0.1:50061 run r write_config "$W/written")" "exit=0 "
+expect config_written_toml "$(paste -sd'|' "$W/written/dolos.toml")" \
+  '[upstream]|peer_address = "a"|[logging]|max_level = "INFO"|[serve.grpc]|listen_address = "127.0.0.1:50061"'
+expect config_written_genesis "$(for genesis in byron shelley alonzo conway dijkstra; do
+  cmp -s "$W/serve/$genesis-genesis.json" "$W/written/$genesis-genesis.json" && echo "$genesis"
+done | paste -sd, -)" byron,shelley,alonzo,conway,dijkstra
 git -C "$R" checkout -q --detach "$BASE"
 printf '%s\n' "$TOML" | sed 's/^serde = "1.0.0"$/serde = "1.0.1"/' >"$R/Cargo.toml"
 printf '%s\n' "$LOCK" | sed '8s/1.0.0/1.0.1/' >"$R/Cargo.lock"

@@ -15,7 +15,48 @@ unbuilt_path() {
   esac
 }
 
-# The start a candidate at commit $3 takes from a snapshot written by the commit $2 of the repository $1, snapshot only when the diff between them ran and every path it lists is unbuilt.
+# The names of a candidate's config files in its store.
+CONFIG_FILES="dolos.toml byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json dijkstra-genesis.json"
+
+# Writes the candidate's config into the dir $1: the serving genesis files, and the serving dolos.toml without its serve sections followed by the candidate's grpc listener.
+write_config() {
+  for file in $CONFIG_FILES; do
+    case $file in
+      dolos.toml)
+        awk '/^\[/ { skip = ($0 ~ /^\[serve/) } !skip' "$SERVE_CONFIG/dolos.toml" >"$1/dolos.toml"
+        printf '[serve.grpc]\nlisten_address = "%s"\n' "$CANDIDATE_GRPC" >>"$1/dolos.toml"
+        ;;
+      *) cat "$SERVE_CONFIG/$file" >"$1/$file" ;;
+    esac
+  done
+}
+
+# The start the config in the dir $2 allows from the store $1, snapshot only when the store holds every config file and each equals the new one.
+config_start() {
+  all=
+  same=
+  differ=
+  unknown=
+  for file in $CONFIG_FILES; do
+    all="$all,$file"
+    status=0
+    cmp -s "$1/$file" "$2/$file" || status=$?
+    case $status in
+      0) same="$same,$file" ;;
+      1) differ="$differ,$file" ;;
+      *) unknown="$unknown,$file" ;;
+    esac
+  done
+  if [ -n "$same" ] && [ "$same" = "$all" ]; then
+    echo "snapshot same_config=${same#,}"
+  elif [ -n "$unknown" ]; then
+    echo "genesis reason=config_unknown files=${unknown#,}"
+  else
+    echo "genesis reason=config_differs files=${differ#,}"
+  fi
+}
+
+# The start a candidate at commit $3 with the config in the dir $5 takes from the store $4 written by the commit $2 of the repository $1, snapshot only when the diff between the commits ran, every path it lists is unbuilt, and config_start allows it.
 snapshot_start() {
   for known in "$2" "$3"; do
     if ! git -C "$1" cat-file -e "$known^{commit}" 2>/dev/null; then
@@ -32,16 +73,20 @@ snapshot_start() {
       echo "$path"
     fi
   done)
-  if [ "$unbuilt" = "$paths" ]; then
-    echo "snapshot unbuilt_paths=$(echo "$paths" | paste -sd, -)"
+  if [ "$unbuilt" != "$paths" ]; then
+    built=$(echo "$paths" | while read -r path; do
+      if ! unbuilt_path "$path"; then
+        echo "$path"
+      fi
+    done)
+    echo "genesis reason=built_paths_differ paths=$(echo "$built" | paste -sd, -)"
     return
   fi
-  built=$(echo "$paths" | while read -r path; do
-    if ! unbuilt_path "$path"; then
-      echo "$path"
-    fi
-  done)
-  echo "genesis reason=built_paths_differ paths=$(echo "$built" | paste -sd, -)"
+  config=$(config_start "$4" "$5")
+  case $config in
+    snapshot\ *) echo "snapshot unbuilt_paths=$(echo "$paths" | paste -sd, -) ${config#snapshot }" ;;
+    *) echo "$config" ;;
+  esac
 }
 
 # The whole gibibytes free on the filesystem holding $1, rounded down.
