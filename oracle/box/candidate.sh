@@ -1,7 +1,7 @@
 #!/bin/sh
 # Syncs a candidate Dolos from the node beside the serving one, reads both and the node, prints each field the two serve differently, and removes the candidate.
 # Usage: CANDIDATE=<binary path or image reference> COMMIT=sha candidate.sh <dir>
-# Reads ROOT, NODE, NODE_DB, ENDPOINT, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_NEED_G, CANDIDATE_FSYNC, the IO_ limits, SAMPLE_MINUTES and GRPCURL from the environment.
+# Reads ROOT, RUN_LOCK, NODE, NODE_DB, ENDPOINT, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_NEED_G, CANDIDATE_FSYNC, the IO_ limits, SAMPLE_MINUTES and GRPCURL from the environment.
 set -eu
 DIR=$1
 : "${CANDIDATE:?}" "${COMMIT:?}" "${ROOT:?}" "${NODE:?}" "${ENDPOINT:?}" "${SERVE_CONFIG:?}"
@@ -15,6 +15,7 @@ SAMPLE_MINUTES=${SAMPLE_MINUTES:-5}
 FIXED_SLOTS="205422 368793 783572"
 STORE="$ROOT/candidate/$(date -u +%Y%m%dT%H%M%SZ)"
 . "$HERE/lib.sh"
+take_lock
 
 FSYNC=$(candidate_fsync) || exit 2
 mkdir -p "$DIR/config"
@@ -29,6 +30,7 @@ cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   rm -rf "$STORE"
   echo "LIVE-CANDIDATE removed name=$NAME store=$STORE"
+  release_lock
 }
 trap cleanup EXIT
 

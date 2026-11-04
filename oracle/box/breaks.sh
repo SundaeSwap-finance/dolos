@@ -1,10 +1,10 @@
 #!/bin/sh
 # Judges the oracle branch head on both corpora, the control (the head on every arm's records) and each arm on the records plants/<arm>.records names, one oracle run each.
-# Usage: [REV=ref] [ARMS="head control colret coin ..."] breaks.sh
+# Usage: ROOT=dir [REV=ref] [ARMS="head control colret coin ..."] breaks.sh
 # The branch is read from the bare repository $ROOT/dolos.git.
 # An arm whose switch overlay/ adds runs on one build of the overlay with ORACLE_PLANT naming it, and any other arm builds its plants/<arm>.diff.
 set -eu
-ROOT=${ROOT:-/opt/build/ledger-oracle-1027}
+: "${ROOT:?}"
 export ROOT
 REV=${REV:-feat/ledger-oracle}
 MIN_FREE_G=${MIN_FREE_G:-6}
@@ -15,6 +15,7 @@ TEST=serve::grpc::v1::ledger_oracle_tests::ledger_oracle
 OUT=${OUT:-"$ROOT/runs/$(date -u +%Y%m%dT%H%M%SZ)"}
 mkdir -p "$OUT"
 . "$HERE/lib.sh"
+take_lock
 ARMS=${ARMS:-head control $PLANTED_ARMS}
 unset ORACLE_PLANT
 require_free

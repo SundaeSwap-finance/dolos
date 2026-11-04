@@ -1,4 +1,4 @@
-# Functions the oracle box scripts share, reading ROOT, SCRATCH, REV, MIN_FREE_G, HERE, TARGET, IN_IMAGE, LOCK_POLL_SECONDS, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_FSYNC, NODE, ENDPOINT, GRPCURL and the IO_ limits.
+# Functions the oracle box scripts share, reading ROOT, SCRATCH, REV, MIN_FREE_G, HERE, TARGET, IN_IMAGE, LOCK_POLL_SECONDS, RUN_LOCK, LAST_DONE, LAST_SHIP, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_FSYNC, NODE, ENDPOINT, GRPCURL and the IO_ limits.
 
 PALLAS=${PALLAS:-scratch/pallas}
 IN_IMAGE=${IN_IMAGE:-$HERE/in-image.sh}
@@ -87,6 +87,32 @@ same_log() {
   cmp -s "$1.untimed" "$2.untimed"
 }
 
+# Whether a verdict list holds a passing head and no failed arm or leg.
+passed() {
+  case " $1 " in
+    *" head=PASS "*) ;;
+    *) return 1 ;;
+  esac
+  case "$1" in
+    *MISSED* | *FAIL* | *FIRED* | *SKIPPED*) return 1 ;;
+  esac
+}
+
+# Records the commit $2 of a run of the tier $1 whose verdicts $3 pass, in LAST_DONE for the done and ship tiers and in LAST_SHIP with the verdicts and the UTC time for the ship tier and the live leg.
+record_pass() {
+  case $1 in
+    done | ship) passed "$3" ;;
+    live) [ "$3" = "live=PASS live-shift=CAUGHT" ] ;;
+    *) false ;;
+  esac || return 1
+  case $1 in
+    done | ship) echo "$2" >"$LAST_DONE" ;;
+  esac
+  case $1 in
+    ship | live) echo "commit=$2 tier=$1 verdicts=\"$3\" time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$LAST_SHIP" ;;
+  esac
+}
+
 # The whole gibibytes free on the filesystem holding $1, rounded down.
 free_g() {
   echo $(($(df -B1 --output=avail "$1" | tail -1 | tr -dc 0-9) / 1073741824))
@@ -102,33 +128,48 @@ require_free() {
 }
 
 LOCK_POLL_SECONDS=${LOCK_POLL_SECONDS:-30}
+# The file of the box's one oracle run lock, since the candidate's name, its port and the build disk are the box's.
+RUN_LOCK=${RUN_LOCK:-/run/lock/dolos-oracle.lock}
 
-# Takes the lock of the tiers on ROOT, a link run.lock naming this process, waiting while a running process holds it and refusing when the process it names has exited.
+# Takes the box lock, a flock on RUN_LOCK through fd 9 that the kernel drops once no process holds fd 9 open, kept across exec, waiting while another process holds it, and recording this process's pid in the file after reporting the pid a holder that exited left there.
 take_lock() {
-  lock=$ROOT/run.lock
-  waited=
-  until ln -sn "$$" "$lock" 2>/dev/null; do
-    holder=$(readlink "$lock" 2>/dev/null) || continue
-    if ! kill -0 "$holder" 2>/dev/null; then
-      echo "REFUSED lock=$lock lock_pid=$holder stale"
-      exit 2
+  if ! [ "/proc/$$/fd/9" -ef "$RUN_LOCK" ]; then
+    exec 9>>"$RUN_LOCK"
+    waited=
+    while :; do
+      status=0
+      flock -n -E 75 9 || status=$?
+      case $status in
+        0) break ;;
+        75) ;;
+        *)
+          echo "REFUSED lock=$RUN_LOCK flock_exit=$status"
+          exit 2
+          ;;
+      esac
+      holder=$(cat "$RUN_LOCK")
+      if [ "$holder" != "$waited" ]; then
+        echo "WAITING lock_pid=$holder"
+        waited=$holder
+      fi
+      sleep "$LOCK_POLL_SECONDS"
+    done
+    holder=$(cat "$RUN_LOCK")
+    if [ -n "$holder" ]; then
+      echo "LOCK stale pid=$holder removed"
     fi
-    if [ "$holder" != "$waited" ]; then
-      echo "WAITING lock_pid=$holder"
-      waited=$holder
-    fi
-    sleep "$LOCK_POLL_SECONDS"
-  done
+    echo "$$" >"$RUN_LOCK"
+  fi
   trap release_lock EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
 }
 
-# Removes the lock of the tiers when it names this process.
+# Empties the box lock's record when it names this process, keeping the file that waiting runs hold open.
 release_lock() {
-  if [ "$(readlink "$ROOT/run.lock" 2>/dev/null)" = "$$" ]; then
-    rm -f "$ROOT/run.lock"
+  if [ "$(cat "$RUN_LOCK" 2>/dev/null)" = "$$" ]; then
+    : >"$RUN_LOCK"
   fi
 }
 

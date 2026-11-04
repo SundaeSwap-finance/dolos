@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, which arms an overlay switches, when two test logs differ, the free space floor, the candidate's fsync state, the IO guard's breach rule and the lock of the tiers.
+# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, which arms an overlay switches, when two test logs differ, the free space floor, the candidate's fsync state, the IO guard's breach rule, the records a passing tier writes and the box lock.
 # Usage: lib_test.sh <empty work dir>
 set -eu
 W=$(cd "$1" && pwd)
@@ -249,70 +249,185 @@ expect io_recovers "$(guard_of "$over" "$over" "$under")" "clear streak=0"
 # Must fire: three samples over in a row.
 expect io_breach "$(guard_of "$under" "$over" "$over" "$over")" "breach sample=4"
 
-# Runs run.sh's done tier on the build root $1 with a floor no disk meets, so a run past the lock refuses at once, its output and exit in $1/run.out, and with a df that writes to $1/df.seen whether a running process held the lock when the run read free space.
+# The exit of record_pass for a run of the tier $1 of commit c with the verdicts $2, and what it leaves in last-done and in last-ship but for the time.
+records_of() {
+  (
+    HERE=$H
+    . "$LIB"
+    R=$W/records
+    rm -rf "$R"
+    mkdir -p "$R"
+    LAST_DONE=$R/last-done LAST_SHIP=$R/last-ship
+    status=0
+    record_pass "$1" c "$2" || status=$?
+    last_done=absent
+    last_ship=absent
+    if [ -f "$LAST_DONE" ]; then last_done=$(cat "$LAST_DONE"); fi
+    if [ -f "$LAST_SHIP" ]; then last_ship=$(sed 's/ time=[0-9TZ:-]*$//' "$LAST_SHIP"); fi
+    echo "exit=$status last-done=$last_done last-ship=$last_ship"
+  )
+}
+arms_pass='head=PASS control=CLEAN colret=CAUGHT'
+# Must not fire: a done run that passes writes last-done alone, and a ship or live run whose live leg fails writes neither.
+expect ship_by_done "$(records_of done "$arms_pass")" "exit=0 last-done=c last-ship=absent"
+expect ship_live_failed "$(records_of ship "$arms_pass live-shift=CAUGHT live=FAIL")" "exit=1 last-done=absent last-ship=absent"
+expect ship_shift_missed "$(records_of ship "$arms_pass live-shift=MISSED live=PASS")" "exit=1 last-done=absent last-ship=absent"
+expect live_failed "$(records_of live 'live=FAIL live-shift=CAUGHT')" "exit=1 last-done=absent last-ship=absent"
+expect live_shift_missed "$(records_of live 'live=PASS live-shift=MISSED')" "exit=1 last-done=absent last-ship=absent"
+# Must fire: a ship run that passes writes both, and a live run that passes writes last-ship alone.
+expect ship_passed "$(records_of ship "$arms_pass live-shift=CAUGHT live=PASS")" \
+  "exit=0 last-done=c last-ship=commit=c tier=ship verdicts=\"$arms_pass live-shift=CAUGHT live=PASS\""
+expect live_passed "$(records_of live 'live=PASS live-shift=CAUGHT')" \
+  "exit=0 last-done=absent last-ship=commit=c tier=live verdicts=\"live=PASS live-shift=CAUGHT\""
+
+# Prints lock=free, lock=held when flock reports the lock taken, or the exit of any other flock failure, for the lock RUN_LOCK.
+LOCK_PROBE='status=0; flock -n -E 75 "$RUN_LOCK" true || status=$?; case $status in 0) state=free ;; 75) state=held ;; *) state=flock_exit_$status ;; esac'
+
+# Runs the script run.sh, or $3, with the argument done, or $4, on the build root $1 and the lock $1/run.lock, JUDGED set unless $2 is entry, a floor no disk meets so a run past the lock refuses at once, its output and exit in $1/run.out, and a df that writes to $1/df.seen whether a process held the lock when the run read free space.
 tier() {
   mkdir -p "$1/bin"
-  printf '%s\n' '#!/bin/sh' \
-    'pid=$(readlink "$ROOT/run.lock" 2>/dev/null) || pid=' \
-    'if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo lock=running; else echo lock=none; fi >>"$ROOT/df.seen"' \
+  printf '%s\n' '#!/bin/sh' "$LOCK_PROBE" 'echo "lock=$state" >>"$ROOT/df.seen"' \
     "exec $(command -v df) \"\$@\"" >"$1/bin/df"
   chmod +x "$1/bin/df"
   (
-    ROOT=$1 OUT=$1/runs/t JUDGED=t MIN_FREE_G=999999 LOCK_POLL_SECONDS=1 PATH=$1/bin:$PATH
-    export ROOT OUT JUDGED MIN_FREE_G LOCK_POLL_SECONDS PATH
+    ROOT=$1 OUT=$1/runs/t MIN_FREE_G=999999 LOCK_POLL_SECONDS=1 RUN_LOCK=$1/run.lock PATH=$1/bin:$PATH
+    export ROOT OUT MIN_FREE_G LOCK_POLL_SECONDS RUN_LOCK PATH
+    unset JUDGED
+    if [ "${2:-}" != entry ]; then
+      JUDGED=t
+      export JUDGED
+    fi
     status=0
-    sh "$HERE/run.sh" done >"$1/run.out" 2>&1 || status=$?
+    timeout 15 sh "$HERE/${3:-run.sh}" "${4:-done}" >"$1/run.out" 2>&1 || status=$?
     echo "exit=$status" >>"$1/run.out"
   )
 }
 
-# Whether the build root $1 still holds a lock.
-lock_left() {
-  if [ -L "$1/run.lock" ] || [ -e "$1/run.lock" ]; then echo left; else echo released; fi
+# The output of a tier run on the build root $1 on one line, its free space refusal shortened.
+run_out() {
+  sed 's/^REFUSED free=[0-9]*G below 999999G at .*/REFUSED free/' "$1/run.out" | paste -sd ' ' -
 }
 
-# Must not fire: with no lock the run goes on to the floor holding a lock of its own, and releases it.
-K=$W/lock-free
-rm -rf "$K"
-mkdir -p "$K"
-tier "$K"
-expect lock_free "$(sed 's/^REFUSED free=[0-9]*G below 999999G at .*/REFUSED free/' "$K/run.out" | paste -sd ' ' -)" "REFUSED free exit=2"
-expect lock_free_held "$(paste -sd ' ' - <"$K/df.seen")" lock=running
-expect lock_free_released "$(lock_left "$K")" released
+# Whether the lock file of the build root $1 still records a pid, is empty, or is gone.
+record_left() {
+  if [ -s "$1/run.lock" ]; then
+    echo left
+  elif [ -e "$1/run.lock" ]; then
+    echo released
+  else
+    echo removed
+  fi
+}
 
-# Must fire: a lock a running process holds makes the run wait, and the run goes on once the lock is released.
-K=$W/lock-held
-rm -rf "$K"
-mkdir -p "$K"
-sleep 120 &
-holder=$!
-ln -sn "$holder" "$K/run.lock"
+# A fresh build root for a lock case.
+lock_root() {
+  K=$W/$1
+  rm -rf "$K"
+  mkdir -p "$K"
+}
+
+# Holds the lock $1 in the background, recording its pid there, until $1.go exists, then empties the record and exits.
+hold_lock() {
+  sh -c 'exec 9>>"$1"; flock -n 9 || exit 1; echo $$ >"$1"; until [ -e "$1.go" ]; do sleep 0.2; done; : >"$1"' sh "$1" &
+  holder=$!
+  until [ -s "$1" ] || ! kill -0 "$holder" 2>/dev/null; do sleep 0.1; done
+}
+
+# Waits up to 10 s for the tier run on the build root $1 to print WAITING or exit.
+await_waiting() {
+  i=0
+  until grep -q '^WAITING' "$1/run.out" 2>/dev/null || ! kill -0 "$runner" 2>/dev/null || [ "$i" -ge 10 ]; do
+    sleep 1
+    i=$((i + 1))
+  done
+}
+
+# Must not fire: with no lock the run goes on to the floor holding the lock, and empties its record.
+lock_root lock-free
+tier "$K"
+expect lock_free "$(run_out "$K")" "REFUSED free exit=2"
+expect lock_free_held "$(paste -sd ' ' - <"$K/df.seen")" lock=held
+expect lock_free_released "$(record_left "$K")" released
+
+# Must fire: a lock a running process holds makes the run wait, and the run goes on once the holder releases it.
+lock_root lock-held
+hold_lock "$K/run.lock"
 tier "$K" &
 runner=$!
-i=0
-until grep -q '^WAITING' "$K/run.out" 2>/dev/null || ! kill -0 "$runner" 2>/dev/null || [ "$i" -ge 20 ]; do
-  sleep 1
-  i=$((i + 1))
-done
+await_waiting "$K"
 expect lock_waits "$(paste -sd ' ' - <"$K/run.out")" "WAITING lock_pid=$holder"
-rm -f "$K/run.lock"
-kill "$holder" 2>/dev/null || true
+touch "$K/run.lock.go"
+wait "$holder" || true
 wait "$runner" || true
-expect lock_goes_on "$(sed 's/^REFUSED free=[0-9]*G below 999999G at .*/REFUSED free/' "$K/run.out" | paste -sd ' ' -)" "WAITING lock_pid=$holder REFUSED free exit=2"
-expect lock_taken "$(paste -sd ' ' - <"$K/df.seen")" lock=running
-expect lock_held_released "$(lock_left "$K")" released
+expect lock_goes_on "$(run_out "$K")" "WAITING lock_pid=$holder REFUSED free exit=2"
+expect lock_taken "$(paste -sd ' ' - <"$K/df.seen")" lock=held
+expect lock_held_released "$(record_left "$K")" released
 
-# Must fire: a lock whose process has exited is reported and the run stops before the floor.
-K=$W/lock-stale
-rm -rf "$K"
-mkdir -p "$K"
+# Must fire: a holder killed while the run waits leaves its record, and the run reports it and goes on.
+lock_root lock-killed
+hold_lock "$K/run.lock"
+tier "$K" &
+runner=$!
+await_waiting "$K"
+kill -9 "$holder"
+wait "$holder" 2>/dev/null || true
+wait "$runner" || true
+expect lock_holder_killed "$(run_out "$K")" "WAITING lock_pid=$holder LOCK stale pid=$holder removed REFUSED free exit=2"
+expect lock_killed_held "$(paste -sd ' ' - <"$K/df.seen")" lock=held
+
+# Must fire: a record of a process that has exited is reported, and the run takes the lock without waiting.
+lock_root lock-stale
 sh -c 'exit 0' &
 dead=$!
 wait "$dead"
-ln -sn "$dead" "$K/run.lock"
+echo "$dead" >"$K/run.lock"
 tier "$K"
-expect lock_stale "$(paste -sd ' ' - <"$K/run.out")" "REFUSED lock=$K/run.lock lock_pid=$dead stale exit=2"
-expect lock_stale_kept "$(lock_left "$K")" left
+expect lock_stale "$(run_out "$K")" "LOCK stale pid=$dead removed REFUSED free exit=2"
+expect lock_stale_held "$(paste -sd ' ' - <"$K/df.seen")" lock=held
+expect lock_stale_released "$(record_left "$K")" released
+
+# Must fire: a record naming a running process that holds no lock, as a pid reused after a reboot does, is reported, and the run takes the lock without waiting.
+lock_root lock-reused
+sleep 60 &
+reused=$!
+echo "$reused" >"$K/run.lock"
+tier "$K"
+kill "$reused"
+expect lock_reused "$(run_out "$K")" "LOCK stale pid=$reused removed REFUSED free exit=2"
+expect lock_reused_held "$(paste -sd ' ' - <"$K/df.seen")" lock=held
+
+# Must fire: the entry run.sh holds the lock while the run.sh of a judged commit older than the lock runs, which here records whether the lock is held and its own pid.
+lock_root lock-old
+mkdir -p "$K/old/oracle/box"
+printf '%s\n' '#!/bin/sh' "$LOCK_PROBE" 'echo "lock=$state pid=$$" >"$ROOT/old.seen"' >"$K/old/oracle/box/run.sh"
+git -C "$K/old" init -q
+git -C "$K/old" add -A
+git -C "$K/old" -c user.name=t -c user.email=t@t commit -q -m old
+git clone -q --bare "$K/old" "$K/dolos.git"
+(
+  REV=$(git -C "$K/dolos.git" rev-parse HEAD)
+  export REV
+  tier "$K" entry
+)
+expect lock_old "$(cat "$K/old.seen")" "lock=held pid=$(cat "$K/run.lock")"
+
+# Must fire: breaks.sh and candidate.sh, each run alone, hold the lock when they read free space, candidate.sh with a config to copy.
+lock_root lock-breaks
+tier "$K" judged breaks.sh
+expect lock_breaks "$(run_out "$K")" "REFUSED free exit=2"
+expect lock_breaks_held "$(paste -sd ' ' - <"$K/df.seen")" lock=held
+lock_root lock-candidate
+mkdir -p "$K/config" "$K/dir"
+for file in dolos.toml byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json dijkstra-genesis.json; do
+  : >"$K/config/$file"
+done
+(
+  CANDIDATE=c COMMIT=c NODE=n ENDPOINT=e SERVE_CONFIG=$K/config CANDIDATE_GRPC=g CANDIDATE_NEED_G=999999
+  export CANDIDATE COMMIT NODE ENDPOINT SERVE_CONFIG CANDIDATE_GRPC CANDIDATE_NEED_G
+  tier "$K" judged candidate.sh "$K/dir"
+)
+expect lock_candidate_held "$(sed -n 1p "$K/df.seen")" lock=held
+expect lock_candidate_released "$(record_left "$K")" released
 
 if [ "$failed" -eq 0 ]; then
   echo "LIB-TEST RESULT PASS"
