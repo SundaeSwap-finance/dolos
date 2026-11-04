@@ -67,7 +67,7 @@ run_crate_test() {
     echo "BUILD_REFUSED $built" >"$2"
     return
   fi
-  RUST_BACKTRACE=0 sh "$IMAGE" "$SCRATCH" "$(executable "$2.build")" --nocapture >"$2" 2>&1 || true
+  RUST_BACKTRACE=0 sh "$IMAGE" "$SCRATCH" "$(executable "$2.build")" $(crate_test_filter "$1") --nocapture >"$2" 2>&1 || true
 }
 
 # Checks pallas out at a commit into the scratch pallas tree and points the scratch tree's pallas crates at it.
@@ -137,7 +137,7 @@ build_overlay() {
 run_overlay() {
   bin="/w/${OUT#"$ROOT"/}/bin"
   if crate_test "$1" >/dev/null; then
-    ORACLE_PLANT=$2 RUST_BACKTRACE=0 sh "$IMAGE" "$SCRATCH" "$bin/overlay-$1" --nocapture >"$3" 2>&1 || true
+    ORACLE_PLANT=$2 RUST_BACKTRACE=0 sh "$IMAGE" "$SCRATCH" "$bin/overlay-$1" $(crate_test_filter "$1") --nocapture >"$3" 2>&1 || true
   else
     ORACLE_PLANT=$2 ORACLE_RECORDS=$4 RUST_BACKTRACE=0 sh "$IMAGE" "$SCRATCH" "$bin/overlay-judge" "${TEST}_records" \
       --exact --ignored --nocapture >"$3" 2>&1 || true
@@ -154,7 +154,14 @@ caught() {
     inflight) pattern='^DISAGREE [a-z]+#[0-9]+ held=' ;;
     rodrigo-reverted) pattern='^DIFF as_output [a-z]+#[0-9]+ ' ;;
     rob-reverted) pattern='^(UNSUPPORTED_UNEXPECTED|DISAGREE|REASON_MISMATCH|STALE_MANIFEST) [a-z]+#[0-9]+ ' ;;
-    cost) pattern='^DIFF units supp#[0-9]+ purpose=[0-9]+#[0-9]+ ledger=\(ran ' ;;
+    cost) pattern='^EVAL-DIFF pallas supp#[0-9]+ top [A-Za-z]+#[0-9]+ ledger=\(ran ' ;;
+    eval-purpose) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ top Vote#[0-9]+ ledger=\(none\) dolos=\((ran|failed)' ;;
+    eval-index) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ top Spend#[1-9][0-9]* ledger=\(none\) dolos=\((ran|failed)' ;;
+    eval-mem) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ top [A-Za-z]+#[0-9]+ ledger=\(ran mem=[0-9]+ steps=([0-9]+)\) dolos=\(ran mem=[0-9]+ steps=\1\)$' ;;
+    eval-steps) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ top [A-Za-z]+#[0-9]+ ledger=\(ran mem=([0-9]+) steps=[0-9]+\) dolos=\(ran mem=\1 steps=[0-9]+\)$' ;;
+    eval-ran) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ top [A-Za-z]+#[0-9]+ ledger=\(ran mem=[0-9]+ steps=[0-9]+\) dolos=\(failed\)$' ;;
+    eval-level) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ sub[0-9]+ [A-Za-z]+#[0-9]+ ledger=\((ran|failed)[^)]*\) dolos=\(none\) listed=\(subtransaction redeemers\)$' ;;
+    v1-guarding) pattern="^thread 'serve::grpc::v1::submit::mapping_tests::guarding_result_keeps_identity_and_budget' \([0-9]+\) panicked at src/serve/grpc/v1/submit.rs:284:" ;;
     revalidate) pattern='^DIFF revalidate [a-z]+#[0-9]+ kept_after_rollback_to=' ;;
     revalidate-drops) pattern='^DIFF revalidate [a-z]+#[0-9]+ dropped_after_rollback_to=' ;;
     subouts) pattern='^DIFF (undo|as_output) [a-z]+#[0-9]+ ' ;;
@@ -314,7 +321,7 @@ for arm in $ARMS; do
   started=$(date +%s)
   if crate_test "$arm" >/dev/null; then
     run_crate_test "$arm" "$OUT/$arm.log"
-    echo "ARM $arm test=$(crate_test "$arm" | sed 's/.* //') seconds=$(($(date +%s) - started))"
+    echo "ARM $arm test=$(crate_test "$arm" | sed 's/.* //')$(crate_test_filter "$arm" | sed 's/^/:/; s/ .*//') seconds=$(($(date +%s) - started))"
     if caught "$arm" "$OUT/$arm.log" "$OUT/$arm"; then
       echo "$arm=CAUGHT"
       verdicts="$verdicts $arm=CAUGHT"
@@ -357,7 +364,7 @@ for arm in $ARMS; do
     echo "control=$control"
     verdicts="$verdicts control=$control"
   elif [ "$arm" = head ]; then
-    grep -E '^(CORPUS|VALIDATION|DEPENDENT|KNOWN|STATE|COST|REVALIDATE|BUILTIN|BUILTIN_UNCOVERED|ROLL_FAIL|RESULT|DISAGREE|REASON_MISMATCH|CASCADE|UNSUPPORTED_UNEXPECTED|STALE_MANIFEST|KNOWN_STALE|UNKNOWN_REFUSAL) ' "$OUT/$arm.log" |
+    grep -E '^(CORPUS|VALIDATION|DEPENDENT|KNOWN|STATE|COST|EVAL-ORACLE|EVAL-DIFF|EVAL-TOTAL|EVAL-UNNAMED|EVAL-FEE|REVALIDATE|BUILTIN|BUILTIN_UNCOVERED|ROLL_FAIL|RESULT|DISAGREE|REASON_MISMATCH|CASCADE|UNSUPPORTED_UNEXPECTED|STALE_MANIFEST|KNOWN_STALE|UNKNOWN_REFUSAL) ' "$OUT/$arm.log" |
       cut -c1-400 || true
     if grep -q '^RESULT PASS' "$OUT/$arm.log" && ! grep -q '^RESULT FAIL' "$OUT/$arm.log"; then
       head_result=PASS

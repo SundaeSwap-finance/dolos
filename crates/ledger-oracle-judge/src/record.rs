@@ -109,6 +109,8 @@ impl fmt::Display for Evaluation {
 pub struct LedgerRedeemer {
     pub purpose: Purpose,
     pub evaluation: Evaluation,
+    /// The trace lines the script wrote.
+    pub logs: Vec<String>,
 }
 
 /// A list with at least one element.

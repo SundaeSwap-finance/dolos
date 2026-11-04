@@ -1,6 +1,7 @@
 //! Judges what Dolos validates and serves against ledger corpora.
 
 mod construct;
+mod eval;
 mod ledger_state;
 mod live;
 mod output;
@@ -22,8 +23,8 @@ use dolos_cardano::{
     FixedNamespace as _,
 };
 use dolos_core::{
-    AsyncQueryFacade, BlockHash, ChainError, ChainPoint, Domain as _, EraCbor, MempoolStore as _,
-    MempoolTx, RawBlock, StateStore as _, SubmitExt as _, SyncExt as _, TxHash, TxoRef,
+    AsyncQueryFacade, BlockHash, ChainPoint, Domain as _, EraCbor, MempoolStore as _, MempoolTx,
+    RawBlock, StateStore as _, SubmitExt as _, SyncExt as _, TxHash, TxoRef,
 };
 use itertools::Itertools as _;
 use ledger_oracle_judge::{
@@ -31,13 +32,11 @@ use ledger_oracle_judge::{
     cbor::{tx_inputs, Purpose, TxIn},
     compare::{ByteVerdict, RollFail, StateTallies, Tally},
     corpus::{self, Corpus},
-    cost::{self, CostSkip, CostTallies, NodeCosts},
+    cost::CostTallies,
+    eval::{EvalKnown, EvalTally},
     manifest::{self, Candidates, Declared, Feature, Known, KnownList, Locus},
     parallel::in_parallel,
-    record::{
-        CorpusKind, Evaluation, LedgerOutcome, LedgerRedeemer, PParams, Phase2, Record, RecordId,
-        Units, UtxoEntry,
-    },
+    record::{CorpusKind, LedgerOutcome, PParams, Phase2, Record, RecordId, UtxoEntry},
     row::Row,
     run::{InputOrigin, KeptRun},
     verdict::{
@@ -218,13 +217,15 @@ async fn read_params(domain: &DomainAdapter) -> cardano::PParams {
     }
 }
 
-/// The validation outcomes, state comparisons, cost comparisons, builtin and
-/// construct coverage, refusal inventory and manifest candidates of one corpus.
+/// The validation outcomes, state comparisons, fee and redeemer evaluation
+/// comparisons, builtin and construct coverage, refusal inventory and manifest
+/// candidates of one corpus.
 #[derive(Debug, Default)]
 struct Judged {
     validation: ValidationTally,
     state: StateTallies,
     cost: CostTallies,
+    eval: EvalTally,
     coverage: Coverage,
     constructs: construct::Coverage,
     inventory: Inventory,
@@ -334,7 +335,7 @@ fn builtin_bar(audited: &[Builtin], added: &[Builtin], coverage: &Coverage) -> (
 
 impl Judged {
     fn pass(&self) -> bool {
-        self.validation.pass() && self.state.pass()
+        self.validation.pass() && self.state.pass() && self.eval.pass()
     }
 
     /// Adds the judgement of another part of the corpus after this one's.
@@ -343,6 +344,7 @@ impl Judged {
             validation,
             state,
             cost,
+            eval,
             coverage,
             constructs,
             inventory,
@@ -352,6 +354,7 @@ impl Judged {
         self.validation.merge(validation);
         self.state.merge(state);
         self.cost.merge(cost);
+        self.eval.merge(eval);
         self.coverage.extend(coverage);
         self.constructs.extend(constructs);
         self.inventory.extend(inventory);
@@ -402,84 +405,22 @@ fn guarding_result_uses_ledger_tag_and_original_index() {
     assert_eq!(purpose(&result), Purpose { tag: 6, index: 9 });
 }
 
-/// The evaluations Dolos estimates for one transaction, each in the ledger's terms.
-fn node_costs(estimate: &Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError>) -> NodeCosts {
-    let results = match estimate {
-        Ok(results) => results,
-        Err(e) => return NodeCosts::Unevaluated(e.to_string()),
-    };
-    let evaluated = results.iter().map(|(r, _)| LedgerRedeemer {
-        purpose: purpose(r),
-        evaluation: match r.success {
-            true => Evaluation::Ran(Units {
-                mem: r.units.mem,
-                steps: r.units.steps,
-            }),
-            false => Evaluation::Failed(r.failure_message.clone().unwrap_or_default()),
-        },
-    });
-    NodeCosts::Evaluated(evaluated.collect())
-}
-
-/// Counts the minimum fee and the redeemer evaluations Dolos computes for one
-/// record against the ledger's.
-fn compare_cost(
-    group: &validate::Group,
-    id: RecordId,
-    record: &Record,
-    declared: Option<&Feature>,
-    cascade: bool,
-    cost: &mut CostTallies,
-    coverage: &mut Coverage,
-) {
-    if cascade {
-        cost.skip(CostSkip::Cascade);
-        return;
-    }
+/// Counts the minimum fee Dolos computes for one record against the ledger's.
+fn compare_fee(group: &validate::Group, id: RecordId, record: &Record, cost: &mut CostTallies) {
     let fee = match group.min_fee(&record.tx.0) {
         Ok(Some(fee)) => Ok(fee),
         Ok(None) => Err("outside Dijkstra".to_string()),
         Err(e) => Err(e.to_string()),
     };
     cost.add_fee(id, record.min_fee, fee, &record.outcome);
-    let skip = match (record.submitted(), declared) {
-        (LedgerOutcome::Refused { .. }, _) => Some(CostSkip::Refused),
-        (LedgerOutcome::Accepted { .. }, Some(_)) => Some(CostSkip::Declared),
-        (LedgerOutcome::Accepted { .. }, None) => None,
-    };
-    if let Some(why) = skip {
-        cost.skip(why);
-        return;
-    }
-    let sub_units = record.sub_ex_units.iter().any(|sub| !sub.is_empty());
-    if record.ex_units.is_empty() && !sub_units {
-        return;
-    }
-    let estimate = group.estimate(&record.tx.0);
-    let costs = cost::pair(&record.ex_units, &node_costs(&estimate));
-    cost.add_units(id, &costs);
-    if let (Ok(results), Phase2::Valid) = (&estimate, record.flag()) {
-        for alike in costs.iter().filter(|c| c.ran_alike().is_some()) {
-            let calls = results.iter().filter(|(r, _)| purpose(r) == alike.purpose);
-            for (_, calls) in calls {
-                coverage.add(id, calls);
-            }
-        }
-    }
-    let unestimated = NodeCosts::Unevaluated(match &estimate {
-        Ok(_) => "sub transaction redeemers are not estimated".to_string(),
-        Err(e) => e.to_string(),
-    });
-    for (k, sub) in record.sub_ex_units.iter().enumerate() {
-        cost.add_units(format!("{id} sub#{k}"), &cost::pair(sub, &unestimated));
-    }
 }
 
-/// The declared support and the known list a judgement reads.
+/// The declared support and the known lists a judgement reads.
 #[derive(Debug, Clone)]
 struct Manifests {
     declared: Declared,
     known: KnownList,
+    eval: EvalKnown,
 }
 
 impl Manifests {
@@ -487,6 +428,7 @@ impl Manifests {
         Manifests {
             declared: manifest::declared().unwrap_or_else(|e| panic!("{e}")),
             known: manifest::known().unwrap_or_else(|e| panic!("{e}")).records,
+            eval: ledger_oracle_judge::eval::eval_known().unwrap_or_else(|e| panic!("{e}")),
         }
     }
 
@@ -497,9 +439,11 @@ impl Manifests {
             .known
             .iter()
             .filter(|((_, id), _)| records.contains(id));
+        let eval = self.eval.iter().filter(|(id, _)| records.contains(id));
         Manifests {
             declared: declared.map(|(id, f)| (*id, f.clone())).collect(),
             known: known.map(|(entry, row)| (*entry, *row)).collect(),
+            eval: eval.map(|(id, rows)| (*id, rows.clone())).collect(),
         }
     }
 
@@ -666,11 +610,13 @@ async fn validate_run<'r>(
         validation: tally,
         state,
         cost,
+        eval: evaluations,
         coverage,
         constructs,
         inventory,
         candidates,
     } = tallies;
+    let unlisted = BTreeMap::new();
     let id_of = |record: &Record| RecordId {
         corpus: kind,
         n: record.n,
@@ -695,8 +641,18 @@ async fn validate_run<'r>(
                 tally.dependent.push((id, missing.seeded_by));
             }
             let declared = manifests.declared.get(&id);
-            let cascade = !missing.failed_by.is_empty();
-            compare_cost(&group, id, record, declared, cascade, cost, coverage);
+            if missing.failed_by.is_empty() {
+                compare_fee(&group, id, record, cost);
+                let listed = manifests.eval.get(&id).unwrap_or(&unlisted);
+                let calls = eval::judge_record(&group, id, record, listed, evaluations).await;
+                let covering = (record.submitted(), record.flag(), declared);
+                if let (LedgerOutcome::Accepted { .. }, Phase2::Valid, None) = covering {
+                    coverage.add(id, &calls);
+                }
+            } else {
+                cost.skipped_cascade += 1;
+                evaluations.skipped_cascade += 1;
+            }
             let submit = |group: &validate::Group| match record.flag() {
                 Phase2::Valid => group.receive(&record.tx.0),
                 // A submitted transaction carries no flag, so one the ledger
@@ -1730,6 +1686,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
         }
     }
     manifests.unjudged(corpus.kind, &judged_ids, &mut judged.validation);
+    judged.eval.unjudged(&manifests.eval, corpus.kind);
     judged
         .state
         .settle_as_output(corpus.kind, as_output, &manifests.known);
@@ -1807,7 +1764,8 @@ async fn ledger_oracle() {
     let mut pass = true;
     let manifests = Manifests::committed();
     let mut candidates = Candidates::default();
-    let mut costs = Vec::new();
+    let mut cost_pass = true;
+    let mut evaluations = EvalTally::default();
     let mut coverage = Coverage::default();
     let mut constructs = construct::Coverage::default();
     let mut inventory = Inventory::default();
@@ -1822,15 +1780,16 @@ async fn ledger_oracle() {
         candidates.declared.extend(tallies.candidates.declared);
         let known = tallies.candidates.known.records;
         candidates.known.records.extend(known);
-        costs.push(tallies.cost);
+        cost_pass &= tallies.cost.pass();
+        evaluations.merge(tallies.eval);
         coverage.extend(tallies.coverage);
         constructs.extend(tallies.constructs);
         inventory.extend(tallies.inventory);
     }
-    let ran_alike: usize = costs.iter().map(|c| c.ran).sum();
-    let cost_pass = cost::pass_all(&costs);
-    println!("COST all ran_alike={ran_alike} pass={cost_pass}");
+    println!("COST all pass={cost_pass}");
     pass &= cost_pass;
+    println!("{evaluations}");
+    pass &= evaluations.every_layer_agrees();
     println!(
         "REVALIDATE all compared={revalidated} pass={}",
         revalidated > 0
@@ -1846,7 +1805,11 @@ async fn ledger_oracle() {
         println!("{line}");
     }
     pass &= construct_pass;
-    for line in candidates.lines() {
+    for line in candidates
+        .lines()
+        .into_iter()
+        .chain(evaluations.candidates())
+    {
         println!("{line}");
     }
     let result = if pass { "PASS" } else { "FAIL" };
@@ -1872,6 +1835,7 @@ async fn ledger_oracle_records() {
     let committed = Manifests::committed();
     let mut pass = true;
     let mut candidates = Candidates::default();
+    let mut evaluations = EvalTally::default();
     for kind in [CorpusKind::Ic, CorpusKind::Supp] {
         let corpus = load(kind).select(&named).unwrap_or_else(|e| panic!("{e}"));
         let held = corpus.kept().flat_map(|run| {
@@ -1889,8 +1853,14 @@ async fn ledger_oracle_records() {
         candidates.declared.extend(tallies.candidates.declared);
         let known = tallies.candidates.known.records;
         candidates.known.records.extend(known);
+        evaluations.merge(tallies.eval);
     }
-    for line in candidates.lines() {
+    println!("{evaluations}");
+    for line in candidates
+        .lines()
+        .into_iter()
+        .chain(evaluations.candidates())
+    {
         println!("{line}");
     }
     let result = if pass { "PASS" } else { "FAIL" };

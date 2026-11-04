@@ -5,6 +5,7 @@ pub mod cbor;
 pub mod compare;
 pub mod corpus;
 pub mod cost;
+pub mod eval;
 pub mod live;
 pub mod manifest;
 pub mod parallel;

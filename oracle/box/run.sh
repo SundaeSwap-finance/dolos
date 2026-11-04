@@ -245,16 +245,16 @@ regen_run() {
   fi
   mkdir -p "$REGEN_DIR"
   committed=test_data/ledger-oracle
-  for file in expected-unsupported.txt known.txt; do
+  manifests="expected-unsupported.txt known.txt eval-known.txt"
+  for file in $manifests; do
     cat "$OUT/head.log" "$OUT/live.log" | sed -n "s/^CANDIDATE $file //p" >"$REGEN_DIR/$file"
   done
-  changed=$(git -C "$ROOT/$SCRATCH" status --porcelain -- \
-    "$committed/expected-unsupported.txt" "$committed/known.txt")
+  changed=$(cd "$ROOT/$SCRATCH/$committed" && git status --porcelain -- $manifests)
   if [ -n "$changed" ]; then
     echo "REGEN FAIL the run changed a committed manifest: $changed"
     exit 1
   fi
-  for file in expected-unsupported.txt known.txt; do
+  for file in $manifests; do
     lines=$(wc -l <"$REGEN_DIR/$file" | tr -dc 0-9)
     if git diff --no-index -- "$ROOT/$SCRATCH/$committed/$file" "$REGEN_DIR/$file"; then
       echo "REGEN $file lines=$lines same"

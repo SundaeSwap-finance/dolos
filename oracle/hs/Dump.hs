@@ -10,13 +10,13 @@
 module Dump (E, decodeTx, dumpTo, editedBytes, failurePath) where
 
 import Cardano.Ledger.Alonzo.PParams (ppCostModelsL, ppMaxTxExUnitsL)
-import Cardano.Ledger.Alonzo.Plutus.Context (LedgerLevelTxInfo (..), LedgerTxInfo (..), SupportedPlutusRunnable (..), toScriptHashByPurpose)
-import Cardano.Ledger.Alonzo.Plutus.Evaluate (evalTxExUnits)
+import Cardano.Ledger.Alonzo.Plutus.Context (EraPlutusContext (..), LedgerLevelTxInfo (..), LedgerTxInfo (..), toScriptHashByPurpose)
+import Cardano.Ledger.Alonzo.Plutus.Evaluate (RedeemerReportWithLogs, TransactionScriptFailure (..))
 import Cardano.Ledger.Alonzo.Plutus.TxInfo (mkPlutusWithContext)
-import Cardano.Ledger.Alonzo.Scripts (AsIx, PlutusPurpose, hoistPlutusPurpose, toAsIx)
+import Cardano.Ledger.Alonzo.Scripts (AsIx, PlutusPurpose, hoistPlutusPurpose, lookupPlutusScript, plutusScriptLanguage, toAsItem, toAsIx)
 import Cardano.Ledger.Alonzo.Tx (IsPhase2Valid (..), isPhase2ValidTxL)
 import Cardano.Ledger.Alonzo.TxWits (rdmrsTxWitsL, unRedeemersL)
-import Cardano.Ledger.Alonzo.UTxO (resolveNeededPlutusScriptsWithPurpose)
+import Cardano.Ledger.Alonzo.UTxO (AlonzoScriptsNeeded (..), resolveNeededPlutusScriptsWithPurpose)
 import Cardano.Ledger.BaseTypes (Globals (..), TxIx (..), activeSlotVal, epochInfoPure, pvMajor, unNonZero, unboundRational)
 import Cardano.Ledger.Binary (DecCBOR (decCBOR), DecoderError, Version, decodeFullAnnotator, serialize')
 import Cardano.Ledger.Coin (Coin (..))
@@ -27,16 +27,17 @@ import Cardano.Ledger.Plutus.CostModels (costModelsValid)
 import Cardano.Ledger.Plutus.Evaluate (evaluatePlutusWithContext)
 import Cardano.Ledger.Plutus.ExUnits (ExUnits (..))
 import Cardano.Ledger.Plutus.TxInfo (exBudgetToExUnits)
-import Cardano.Ledger.Plutus.Language (plutusLanguage)
 import Cardano.Ledger.Conway.Governance (GovRelation (..), PRoot (..), cgsCommitteeL, cgsConstitutionL, cgsProposalsL, pRootsL)
 import Cardano.Ledger.Shelley.LedgerState (lsCertStateL, lsUTxOStateL, utxosGovStateL)
 import Cardano.Ledger.Shelley.Rules (LedgerEnv (..))
 import qualified Data.Aeson.KeyMap as KM
-import Cardano.Ledger.State (ChainAccountState (..), UTxO (..), accountsL, certDStateL, getMinFeeTxUtxo, utxoL)
+import Cardano.Ledger.State (ChainAccountState (..), EraUTxO (..), ScriptsProvided (..), UTxO (..), accountsL, certDStateL, getMinFeeTxUtxo, utxoL)
 import Cardano.Slotting.EpochInfo (epochInfoEpoch, epochInfoSize, epochInfoSlotLength, epochInfoSlotToRelativeTime)
 import Cardano.Slotting.Slot (EpochNo (..), EpochSize (..), SlotNo (..))
 import Cardano.Slotting.Time (SystemStart (..), slotLengthToMillisec)
+import Data.Bifunctor (first)
 import Data.Either (isRight)
+import Data.MapExtras (fromElems)
 import Data.Ratio (denominator, numerator)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Control.Monad.IO.Class (liftIO)
@@ -217,11 +218,12 @@ dumpTo out g (TRC (env, st, stAnn)) res = liftIO $ do
           , "gov_pre" A..= govJson st
           , "treasury" A..= unCoin (casTreasury (ledgerAccount env))
           , "outcome" A..= outcome
-          , "ex_units" A..= map evaluationJson (Map.toList (evalTxExUnits (ledgerPp env) tx pre (epochInfo g) (systemStart g)))
-          , "sub_ex_units" A..= map (map evaluationJson . Map.toList) (subTxExUnits (ledgerPp env) g pre stAnn)
+          , "ex_units" A..= map evaluationJson (Map.toList topReport)
+          , "sub_ex_units" A..= map (map evaluationJson . Map.toList) subReports
           , "min_fee" A..= either (const Nothing) (\t -> Just (unCoin (getMinFeeTxUtxo (ledgerPp env) t pre))) decoded
           , "time" A..= timeJson g (ledgerSlotNo env)
           ]
+      (topReport, subReports) = levelReports (ledgerPp env) g pre stAnn
       -- The ledger's outcome for the same transaction under a true flag, the form a node receives it in.
       submitted =
         let flagged = tx & isPhase2ValidTxL .~ Phase2Valid
@@ -249,43 +251,58 @@ dumpTo out g (TRC (env, st, stAnn)) res = liftIO $ do
             , "committee" A..= (gov ^. cgsCommitteeL)
             , "constitution" A..= (gov ^. cgsConstitutionL)
             ]
-    evaluationJson :: Show e => (PlutusPurpose AsIx E, Either e ExUnits) -> A.Value
     evaluationJson (purpose, result) =
       A.object
         [ "purpose" A..= hex (serialize' (eraProtVerHigh @E) purpose)
         , "evaluation" A..= case result of
-            Right (ExUnits mem steps) -> A.object ["ran" A..= [mem, steps]]
+            Right (_, ExUnits mem steps) -> A.object ["ran" A..= [mem, steps]]
             Left failure -> A.object ["failed" A..= take 300 (show failure)]
+        , "logs" A..= case result of
+            Right (logs, _) -> logs
+            Left (ValidationFailure _ _ logs _) -> logs
+            Left _ -> []
         ]
 
--- | The units each sub transaction's redeemers run in at the maximum budget, one map per sub transaction in order, evaluated in that sub transaction's own context.
-subTxExUnits :: PParams E -> Globals -> UTxO E -> DijkstraStAnnTx TopTx E -> [Map.Map (PlutusPurpose AsIx E) (Either String ExUnits)]
-subTxExUnits pp g utxo DijkstraStAnnTopTx {dsattSubTransactions} = zipWith one [0 ..] dsattSubTransactions
+-- | The redeemer reports of a transaction at the maximum budget, its top level given the results of its sub transactions, then each sub transaction in order.
+levelReports :: PParams E -> Globals -> UTxO E -> DijkstraStAnnTx TopTx E -> (RedeemerReportWithLogs E, [RedeemerReportWithLogs E])
+levelReports pp g utxo DijkstraStAnnTopTx {dsattTx, dsattSubTransactions} =
+  (levelReport pp g utxo provided (LedgerTopTxInfo subResults) dsattTx, zipWith sub [0 ..] dsattSubTransactions)
+  where
+    provided = getScriptsProvided utxo dsattTx
+    subResults = Map.fromList [(txIdTx dsastTx, dsastTxInfoResult) | DijkstraStAnnSubTx {dsastTx, dsastTxInfoResult} <- dsattSubTransactions]
+    sub :: Int -> DijkstraStAnnTx SubTx E -> RedeemerReportWithLogs E
+    sub ix DijkstraStAnnSubTx {dsastTx} = levelReport pp g utxo provided (LedgerSubTxInfo (TxIx (fromIntegral ix))) dsastTx
+
+-- | The redeemer report of one level of a transaction at the maximum budget, in the context its level information gives.
+levelReport :: PParams E -> Globals -> UTxO E -> ScriptsProvided E -> LedgerLevelTxInfo l E -> Tx l E -> RedeemerReportWithLogs E
+levelReport pp g utxo provided@(ScriptsProvided scripts) level tx = Map.mapWithKey run (tx ^. witsTxL . rdmrsTxWitsL . unRedeemersL)
   where
     protVer = pp ^. ppProtocolVersionL
     costModels = costModelsValid (pp ^. ppCostModelsL)
-    one :: Int -> DijkstraStAnnTx SubTx E -> Map.Map (PlutusPurpose AsIx E) (Either String ExUnits)
-    one ix DijkstraStAnnSubTx {dsastTx, dsastScriptsNeeded, dsastScriptsProvided, dsastTxInfoResult} =
-      Map.mapWithKey run (dsastTx ^. witsTxL . rdmrsTxWitsL . unRedeemersL)
-      where
-        (_, used) = resolveNeededPlutusScriptsWithPurpose protVer dsastScriptsProvided dsastScriptsNeeded mempty
-        byPointer = Map.fromList [(hoistPlutusPurpose toAsIx purpose, (purpose, runnable)) | (purpose, runnable) <- used]
-        lti =
-          LedgerTxInfo
-            { ltiProtVer = protVer
-            , ltiEpochInfo = epochInfo g
-            , ltiSystemStart = systemStart g
-            , ltiUTxO = utxo
-            , ltiTx = dsastTx
-            , ltiScriptsUsed = used
-            , ltiScriptHashesUsed = toScriptHashByPurpose used
-            , ltiLevelTxInfo = LedgerSubTxInfo (TxIx (fromIntegral ix))
-            }
-        run pointer (redeemerData, _) = do
-          (purpose, runnable) <- maybe (Left ("no script for " <> show pointer)) Right (Map.lookup pointer byPointer)
-          let lang = case runnable of SupportedPlutusRunnable r -> plutusLanguage r
-          costModel <- maybe (Left ("no cost model for " <> show lang)) Right (Map.lookup lang costModels)
-          pwc <- either (Left . show) Right $ mkPlutusWithContext runnable purpose lti dsastTxInfoResult redeemerData (pp ^. ppMaxTxExUnitsL) costModel
-          case evaluatePlutusWithContext P.Verbose pwc of
-            (_, Left failure) -> Left (show failure)
-            (_, Right budget) -> maybe (Left ("incompatible budget " <> show budget)) Right (exBudgetToExUnits budget)
+    needed@(AlonzoScriptsNeeded scriptsNeeded) = getScriptsNeeded utxo (tx ^. bodyTxL)
+    byPointer = fromElems (\(purpose, _) -> hoistPlutusPurpose toAsIx purpose) scriptsNeeded
+    (_, used) = resolveNeededPlutusScriptsWithPurpose protVer provided needed mempty
+    lti =
+      LedgerTxInfo
+        { ltiProtVer = protVer
+        , ltiEpochInfo = epochInfo g
+        , ltiSystemStart = systemStart g
+        , ltiUTxO = utxo
+        , ltiTx = tx
+        , ltiScriptsUsed = used
+        , ltiScriptHashesUsed = toScriptHashByPurpose used
+        , ltiLevelTxInfo = level
+        }
+    infoResult = mkTxInfoResult lti
+    unresolved = Map.map (\(purpose, hash) -> (hoistPlutusPurpose toAsItem purpose, lookupPlutusScript hash scripts, hash)) byPointer
+    run pointer (redeemerData, exUnits) = do
+      (purpose, hash) <- maybe (Left (RedeemerPointsToUnknownScriptHash pointer)) Right (Map.lookup pointer byPointer)
+      script <- maybe (Left (MissingScript pointer unresolved)) Right (lookupPlutusScript hash scripts)
+      let lang = plutusScriptLanguage script
+      costModel <- maybe (Left (NoCostModelInLedgerState lang)) Right (Map.lookup lang costModels)
+      pwc <-
+        first ContextError $
+          mkPlutusWithContext (mkSupportedPlutusRunnable (pvMajor protVer) script) purpose lti infoResult redeemerData (pp ^. ppMaxTxExUnitsL) costModel
+      case evaluatePlutusWithContext P.Verbose pwc of
+        (logs, Left err) -> Left (ValidationFailure exUnits err logs pwc)
+        (logs, Right budget) -> maybe (Left (IncompatibleBudget budget)) (Right . (,) logs) (exBudgetToExUnits budget)

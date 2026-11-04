@@ -292,7 +292,7 @@ index 67fb1a3d..5ed5e907 100644
          Certificate::StakeDelegation(c, pool) => {
              registered(state, c)?;
 diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
-index 11e515c8..49db22f6 100644
+index 44cf5f1f..4e7aad2a 100644
 --- a/pallas-validate/src/phase2/dijkstra.rs
 +++ b/pallas-validate/src/phase2/dijkstra.rs
 @@ -57,14 +57,15 @@ impl LegacyContextData for ContextOutput {
@@ -371,7 +371,30 @@ index 11e515c8..49db22f6 100644
      Ok(ContextOutput {
          address,
          value: output.value().into_conway(),
-@@ -562,7 +597,9 @@ pub(super) fn eval_tx_with_mode(
+@@ -369,6 +404,22 @@ pub(super) fn eval_tx_with_mode(
+             .as_ref()
+             .is_some_and(|x| !x.is_empty())
+     }) {
++        if pallas_crypto::oracle_plant("eval-level") {
++            let subs = tx.sub_transactions();
++            let redeemers = subs.iter().flat_map(|sub| sub.redeemers());
++            let results = redeemers.map(|r| {
++                let result = TxEvalResult {
++                    tag: r.multi_era_tag(),
++                    index: r.index(),
++                    units: r.ex_units(),
++                    success: true,
++                    logs: vec![],
++                    failure_message: None,
++                };
++                (result, vec![])
++            });
++            return Ok(results.collect());
++        }
+         return unsupported("subtransaction redeemers");
+     }
+     let id = Hasher::<256>::hash_cbor(b);
+@@ -562,7 +613,9 @@ pub(super) fn eval_tx_with_mode(
                  })
                  .collect(),
          };
@@ -382,6 +405,29 @@ index 11e515c8..49db22f6 100644
          keys.dedup();
          keys
      };
+@@ -695,11 +748,18 @@ pub(super) fn eval_tx_with_mode(
+                     r.ex_units
+                 },
+             )?;
++            let mut units = result.units;
++            units.mem += u64::from(pallas_crypto::oracle_plant("eval-mem"));
++            units.steps += u64::from(pallas_crypto::oracle_plant("eval-steps"));
+             let result = TxEvalResult {
+-                tag: r.tag.into(),
+-                index: r.index,
+-                units: result.units,
+-                success: result.success,
++                tag: if pallas_crypto::oracle_plant("eval-purpose") {
++                    n::RedeemerTag::Vote.into()
++                } else {
++                    r.tag.into()
++                },
++                index: r.index + u32::from(pallas_crypto::oracle_plant("eval-index")),
++                units,
++                success: result.success != pallas_crypto::oracle_plant("eval-ran"),
+                 logs: result.logs,
+                 failure_message: result.failure.map(|f| f.message),
+             };
 diff --git a/pallas-validate/src/phase2/native_evaluator.rs b/pallas-validate/src/phase2/native_evaluator.rs
 index 75898ce6..1f8fae9c 100644
 --- a/pallas-validate/src/phase2/native_evaluator.rs
