@@ -1,3 +1,0 @@
-ic#890 reference script language (requires V3)
-ic#1344 guard datum
-ic#9820 witness fields

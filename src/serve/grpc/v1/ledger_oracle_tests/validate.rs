@@ -412,7 +412,7 @@ fn validation_class(v: &ValidationError) -> DolosClass {
         V::DijkstraReferenceScriptsTooLarge => C::FeeAndSize,
         V::DijkstraBootstrapAttributesTooLarge => C::Value,
         V::DijkstraMalformedScript => C::Script,
-        V::DijkstraGuardWithoutDatum => C::Datum,
+        V::DijkstraMalformedGuardDatum => C::Datum,
         V::DijkstraMalformed(_) | V::DijkstraInvalidMetadata => C::Decoding,
         V::DijkstraInvalidWithdrawal(_) | V::DijkstraInvalidAccount(_) => C::AccountAndWithdrawal,
         V::DijkstraInvalidCertificate(_)

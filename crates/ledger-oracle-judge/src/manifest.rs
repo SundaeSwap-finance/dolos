@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn the_committed_manifests_parse() {
-        assert!(!declared().unwrap().is_empty());
+        declared().unwrap_or_else(|e| panic!("{e}"));
         assert!(!known().unwrap().records.is_empty());
     }
 
