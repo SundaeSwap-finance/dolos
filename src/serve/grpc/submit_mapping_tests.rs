@@ -8,6 +8,7 @@ use pallas::ledger::{
 
 fn entry(tag: RedeemerTag, index: u32, success: bool) -> TxEvalResult {
     TxEvalResult {
+        sub_transaction: None,
         tag,
         index,
         success,
@@ -78,6 +79,33 @@ fn estimation_mapping_failures_traces_and_partial_success() {
             steps: 3 * 4805428
         })
     );
+}
+
+#[test]
+fn sub_transaction_results_are_explicitly_rejected() {
+    for position in 0..3 {
+        let mut sub = entry(RedeemerTag::Spend, 4, true);
+        sub.sub_transaction = Some(1);
+        sub.logs = vec!["sub log".into()];
+        let mut entries = vec![
+            entry(RedeemerTag::Spend, 4, true),
+            entry(RedeemerTag::Cert, 2, false),
+        ];
+        entries.insert(position, sub);
+        let report = tx_eval_to_u5c(Ok(entries));
+        let [error] = &report.errors[..] else {
+            panic!("{:?}", report.errors)
+        };
+        let (version, rest) = error.msg.split_once(' ').unwrap();
+        assert_eq!(version, "RPC");
+        assert!(
+            rest.ends_with(" cannot represent redeemer Spend[4] of sub transaction 1"),
+            "{error:?}"
+        );
+        assert!(report.redeemers.is_empty());
+        assert!(report.traces.is_empty());
+        assert!(report.ex_units.is_none());
+    }
 }
 
 #[test]

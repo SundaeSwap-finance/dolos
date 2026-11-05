@@ -395,6 +395,7 @@ fn purpose(r: &TxEvalResult) -> Purpose {
 #[test]
 fn guarding_result_uses_ledger_tag_and_original_index() {
     let result = TxEvalResult {
+        sub_transaction: None,
         tag: RedeemerTag::Guarding,
         index: 9,
         units: pallas::ledger::primitives::ExUnits { mem: 11, steps: 23 },

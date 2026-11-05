@@ -91,6 +91,19 @@ fn tx_eval_to_u5c(
     for entry in report {
         use pallas::ledger::traverse::MultiEraRedeemerTag as RedeemerTag;
         use u5c::cardano::RedeemerPurpose;
+        let unrepresentable = |redeemer: String| u5c::cardano::TxEval {
+            errors: vec![u5c::cardano::EvalReport {
+                msg: format!("RPC v1beta cannot represent redeemer {redeemer}"),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        if let Some(sub) = entry.sub_transaction {
+            return unrepresentable(format!(
+                "{:?}[{}] of sub transaction {sub}",
+                entry.tag, entry.index
+            ));
+        }
         let purpose = match entry.tag {
             RedeemerTag::Spend => RedeemerPurpose::Spend,
             RedeemerTag::Mint => RedeemerPurpose::Mint,
@@ -98,18 +111,7 @@ fn tx_eval_to_u5c(
             RedeemerTag::Reward => RedeemerPurpose::Reward,
             RedeemerTag::Vote => RedeemerPurpose::Vote,
             RedeemerTag::Propose => RedeemerPurpose::Propose,
-            other => {
-                return u5c::cardano::TxEval {
-                    errors: vec![u5c::cardano::EvalReport {
-                        msg: format!(
-                            "RPC v1beta cannot represent redeemer {other:?}[{}]",
-                            entry.index
-                        ),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                };
-            }
+            other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
         };
         let named = |msg| u5c::cardano::EvalReport {
             msg,

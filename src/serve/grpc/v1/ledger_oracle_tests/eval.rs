@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 
 use dolos_core::{ChainError, DomainError};
 use ledger_oracle_judge::{
-    cbor::Purpose,
     eval::{
         self, named_in_message, wire_purpose, Answer, DolosAnswer, EvalTally, Layer, Level,
-        Malformed, Refusal, RowKey, RowVerdict, WireEval, WireFee, GUARDING,
+        Malformed, Refusal, RowKey, RowVerdict, WireEval, WireFee,
     },
     record::{Record, RecordId, Units},
 };
+use pallas::ledger::traverse::MultiEraRedeemerTag as RedeemerTag;
 use pallas::ledger::validate::phase2::{tx::TxEvalResult, Builtin};
 use tonic::Request;
 
@@ -19,11 +19,26 @@ use super::{purpose, validate::Group};
 /// The evaluator's answer for one transaction, with the builtins each redeemer called and what an EvalTx response says in its place.
 struct Evaluator {
     answer: Result<DolosAnswer, Malformed>,
-    calls: BTreeMap<Purpose, Vec<Builtin>>,
+    calls: BTreeMap<RowKey, Vec<Builtin>>,
     /// The refusal and the message an EvalTx response renders it to.
     refusal: Option<(String, Refusal)>,
-    /// The index of the first Guarding redeemer the evaluator answered.
-    guarding: Option<u32>,
+    /// The message each EvalTx version that cannot represent a result gives in place of its report.
+    unrepresentable: BTreeMap<Layer, String>,
+}
+
+/// The message the EvalTx version `layer` gives in place of a report of `results` when it cannot represent one of them, naming the first.
+fn unrepresentable(layer: Layer, results: &[(TxEvalResult, Vec<Builtin>)]) -> Option<String> {
+    results.iter().find_map(|(r, _)| {
+        let redeemer = format!("{:?}[{}]", r.tag, r.index);
+        let guarding = matches!(r.tag, RedeemerTag::Guarding);
+        let what = match (layer, r.sub_transaction) {
+            (Layer::Pallas, _) => None,
+            (_, Some(sub)) => Some(format!("{redeemer} of sub transaction {sub}")),
+            (Layer::V1beta | Layer::V1alpha, None) if guarding => Some(redeemer),
+            (Layer::V1 | Layer::V1beta | Layer::V1alpha, None) => None,
+        };
+        what.map(|what| format!("RPC {layer} cannot represent redeemer {what}"))
+    })
 }
 
 /// The evaluator's answer from its estimate of one transaction.
@@ -40,15 +55,16 @@ fn evaluator(estimate: Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError>) ->
                 answer: Ok(DolosAnswer::Refused(refusal.clone())),
                 calls: BTreeMap::new(),
                 refusal: Some((text, refusal)),
-                guarding: None,
+                unrepresentable: BTreeMap::new(),
             };
         }
     };
+    let key = |r: &TxEvalResult| RowKey {
+        level: r.sub_transaction.map_or(Level::Top, Level::Sub),
+        purpose: purpose(r),
+    };
     let rows = results.iter().map(|(r, _)| {
-        let key = RowKey {
-            level: Level::Top,
-            purpose: purpose(r),
-        };
+        let key = key(r);
         let answer = match r.success {
             true => Answer::Ran(Units {
                 mem: r.units.mem,
@@ -58,16 +74,19 @@ fn evaluator(estimate: Result<Vec<(TxEvalResult, Vec<Builtin>)>, ChainError>) ->
         };
         (key, answer)
     });
-    let guarding = results.iter().find(|(r, _)| purpose(r).tag == GUARDING);
-    let mut calls: BTreeMap<Purpose, Vec<Builtin>> = BTreeMap::new();
+    let mut calls: BTreeMap<RowKey, Vec<Builtin>> = BTreeMap::new();
     for (r, called) in &results {
-        calls.entry(purpose(r)).or_default().extend(called);
+        calls.entry(key(r)).or_default().extend(called);
     }
+    let unrepresentable = Layer::ALL
+        .into_iter()
+        .filter_map(|layer| Some((layer, unrepresentable(layer, &results)?)))
+        .collect();
     Evaluator {
         answer: eval::evaluated(rows).map(DolosAnswer::Evaluated),
         calls,
         refusal: None,
-        guarding: guarding.map(|(r, _)| r.index),
+        unrepresentable,
     }
 }
 
@@ -159,18 +178,13 @@ pub(super) async fn judge_record(
     for (layer, wire) in wire_evals(group, tx).await {
         tally.add_total(layer, id, &wire);
         tally.add_fee(layer, id, record.min_fee, &wire.fee);
-        let unrepresentable = match layer {
-            Layer::V1beta | Layer::V1alpha => evaluator
-                .guarding
-                .map(|i| format!("RPC {layer} cannot represent redeemer Guarding[{i}]")),
-            Layer::Pallas | Layer::V1 => None,
-        };
-        let answer = wire.answer(refusal, unrepresentable.as_deref());
+        let unrepresentable = evaluator.unrepresentable.get(&layer);
+        let answer = wire.answer(refusal, unrepresentable.map(String::as_str));
         tally.add_answer(layer, id, &ledger, listed, answer);
     }
     let verdicts = tally.add_answer(Layer::Pallas, id, &ledger, listed, evaluator.answer);
     let ran = verdicts.iter().filter_map(|(key, verdict)| match verdict {
-        RowVerdict::Agree(Answer::Ran(_)) => evaluator.calls.get(&key.purpose),
+        RowVerdict::Agree(Answer::Ran(_)) => evaluator.calls.get(key),
         _ => None,
     });
     ran.flatten().copied().collect()

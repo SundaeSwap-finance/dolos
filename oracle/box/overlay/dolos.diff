@@ -152,10 +152,10 @@ index 3db11ef0..034d25e5 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index 1f7b2fb7..072833d4 100644
+index 3f481156..1512a48c 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
-@@ -98,6 +98,9 @@ fn tx_eval_to_u5c(
+@@ -111,6 +111,9 @@ fn tx_eval_to_u5c(
              MultiEraRedeemerTag::Reward => RedeemerPurpose::Reward,
              MultiEraRedeemerTag::Vote => RedeemerPurpose::Vote,
              MultiEraRedeemerTag::Propose => RedeemerPurpose::Propose,
@@ -163,5 +163,5 @@ index 1f7b2fb7..072833d4 100644
 +                RedeemerPurpose::Unspecified
 +            }
              MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
-             other => {
-                 return u5c::cardano::TxEval {
+             other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
+         };

@@ -1,35 +1,28 @@
 ic#888 top Spend#1 couldn't evaluate phase-2 script: extraneous redeemer
 ic#888 top Cert#0 couldn't evaluate phase-2 script: extraneous redeemer
-ic#890 sub0 Spend#0 subtransaction redeemers
-ic#898 sub0 Spend#0 subtransaction redeemers
-ic#898 sub1 Spend#0 subtransaction redeemers
 ic#1260 top Spend#1 couldn't evaluate phase-2 script: resolved Input not found
-ic#1318 sub0 Spend#0 subtransaction redeemers
-ic#1321 sub0 Spend#99 subtransaction redeemers
-ic#1330 top Guarding#0 guarding redeemer with subtransactions
-ic#1338 sub0 Spend#0 subtransaction redeemers
-ic#1341 sub0 Spend#0 subtransaction redeemers
-ic#1344 top Guarding#0 guarding redeemer with subtransactions
-ic#1347 sub0 Spend#0 subtransaction redeemers
-ic#1350 sub0 Spend#0 subtransaction redeemers
-ic#1356 sub0 Spend#0 subtransaction redeemers
-ic#1356 sub0 Mint#2 subtransaction redeemers
-ic#1359 sub0 Spend#0 subtransaction redeemers
-ic#1362 sub0 Spend#0 subtransaction redeemers
-ic#1365 sub0 Spend#0 subtransaction redeemers
-ic#1371 sub0 Spend#0 subtransaction redeemers
-ic#1371 sub0 Mint#2 subtransaction redeemers
-ic#1374 sub0 Spend#0 subtransaction redeemers
-ic#1377 sub0 Spend#0 subtransaction redeemers
-ic#1380 sub0 Spend#0 subtransaction redeemers
-ic#1386 sub0 Spend#0 subtransaction redeemers
-ic#1386 sub0 Mint#2 subtransaction redeemers
-ic#1389 sub0 Spend#0 subtransaction redeemers
-ic#1392 sub0 Spend#0 subtransaction redeemers
-ic#1395 sub0 Spend#0 subtransaction redeemers
-ic#1401 sub0 Spend#0 subtransaction redeemers
-ic#1401 sub0 Mint#2 subtransaction redeemers
-ic#1404 sub0 Spend#0 subtransaction redeemers
+ic#1318 sub0 Spend#0 couldn't evaluate phase-2 script: extraneous redeemer
+ic#1321 sub0 Spend#99 couldn't evaluate phase-2 script: extraneous redeemer
+ic#1338 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1341 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1347 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1350 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1356 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1356 sub0 Mint#2 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1359 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1362 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1365 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1371 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1371 sub0 Mint#2 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1374 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1377 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1380 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1386 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1386 sub0 Mint#2 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1389 sub0 Spend#0 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: Plutus V1 to V3 script in a subtransaction
+ic#1392 sub0 Spend#0 couldn't evaluate phase-2 script: missing required datum Datum e88bd757ad5b9bedf372d8d3f0cf6c962a469db61a265f6418e1ffed86da29ec
+ic#1401 sub0 Spend#0 couldn't evaluate phase-2 script: extraneous redeemer
+ic#1401 sub0 Mint#2 couldn't evaluate phase-2 script: extraneous redeemer
 ic#1986 top Spend#0 couldn't evaluate phase-2 script: cost model not found for language Language PlutusV1
 ic#2025 top Spend#0 couldn't evaluate phase-2 script: cost model not found for language Language PlutusV2
 ic#2064 top Spend#1 couldn't evaluate phase-2 script: cost model not found for language Language PlutusV3
@@ -86,7 +79,6 @@ ic#9790 top Spend#1 couldn't evaluate phase-2 script: invalid native Dijkstra ev
 ic#9796 top Spend#1 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: certificate kind
 ic#9802 top Spend#1 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: certificate kind
 ic#9808 top Spend#1 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: certificate kind
-ic#9820 sub0 Spend#0 subtransaction redeemers
 supp#136 top Spend#0 couldn't evaluate phase-2 script: Dijkstra time translation: slot 5184000 is at or past the forecast horizon 5184000
 supp#179 top Spend#1 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: script guards
 supp#189 top Spend#1 couldn't evaluate phase-2 script: invalid native Dijkstra evaluation: required top-level guards
