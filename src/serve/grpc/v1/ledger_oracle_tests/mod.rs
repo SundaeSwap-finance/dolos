@@ -1873,7 +1873,13 @@ async fn ledger_oracle_records() {
 fn manifests_within_records_keep_only_their_entries() {
     let known = manifest::parse_known("known.txt", "V25 validation ic#1971\nS18 accounts ic#551")
         .unwrap_or_else(|e| panic!("{e}"));
+    let declared = manifest::parse_declared(
+        "expected-unsupported.txt",
+        "ic#890 witness fields\nic#1344 guard datum",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     let manifests = Manifests {
+        declared,
         known: known.records,
         ..Manifests::committed()
     };
