@@ -770,7 +770,8 @@ mod tests {
                             false,
                             Some(0),
                             Some(false),
-                        ),
+                        )
+                        .with_peras_support(false),
                     ),
                 );
             }
