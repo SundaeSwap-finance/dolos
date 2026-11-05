@@ -280,7 +280,7 @@ index 9d310323..926b446c 100644
          Certificate::StakeDelegation(c, pool) => {
              registered(state, c)?;
 diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
-index df6fc66a..086495a2 100644
+index df6fc66a..5e08bad0 100644
 --- a/pallas-validate/src/phase2/dijkstra.rs
 +++ b/pallas-validate/src/phase2/dijkstra.rs
 @@ -60,14 +60,15 @@ impl LegacyContextData for ContextOutput {
@@ -399,38 +399,7 @@ index df6fc66a..086495a2 100644
          signatories.dedup();
          Ok(Legacy {
              mint: MintValue {
-@@ -786,7 +834,29 @@ pub(super) fn runs(
-         if scope.expected.is_empty() && scope.redeemers.is_empty() {
-             continue;
-         }
--        let context = level_context(part, scope, &scope.languages, utxos, time)?;
-+        let mut context = level_context(part, scope, &scope.languages, utxos, time)?;
-+        if let Part::Sub(..) = part
-+            && pallas_crypto::oracle_plant("sub-top-info")
-+        {
-+            let top = level_context(
-+                Part::Top(native),
-+                &scopes[scopes.len() - 1],
-+                &scope.languages,
-+                utxos,
-+                time,
-+            )?;
-+            context.level = Level {
-+                sub: context.level.sub,
-+                ..top.level
-+            };
-+            context.inputs = top.inputs;
-+            context.reference_inputs = top.reference_inputs;
-+            context.outputs = top.outputs;
-+            context.valid_range = top.valid_range;
-+            context.datums = top.datums;
-+            context.certificates = top.certificates;
-+            context.proposals = top.proposals;
-+        }
-         if estimate
-             && (execution_limit.mem > i64::MAX as u64 || execution_limit.steps > i64::MAX as u64)
-         {
-@@ -854,7 +924,13 @@ pub(super) fn runs(
+@@ -854,7 +902,13 @@ pub(super) fn runs(
                          purpose.conway()?.1,
                      ))
                  }
@@ -445,7 +414,7 @@ index df6fc66a..086495a2 100644
                      let b = &tx.transaction_body;
                      let x = Legacy::new(b, &context)?;
                      let info = V3TxInfo {
-@@ -882,9 +958,6 @@ pub(super) fn runs(
+@@ -882,9 +936,6 @@ pub(super) fn runs(
                          12,
                      )]
                  }
