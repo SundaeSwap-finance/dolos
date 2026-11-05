@@ -58,7 +58,7 @@ use pallas::{
             ComputeHash as _, Era, MultiEraOutput, MultiEraRedeemerTag as RedeemerTag, MultiEraTx,
             OriginalHash as _,
         },
-        validate::phase2::{audited_builtins, tx::TxEvalResult, Builtin},
+        validate::phase2::{audited_builtins, tx::MultiEraTxEvalResult as TxEvalResult, Builtin},
     },
 };
 use seed::SeedPoint;
@@ -2595,6 +2595,17 @@ fn a_dolos_refusal_is_named_by_its_kind_and_classed_by_its_variant() {
         (
             C::Phase1ValidationRejected(V::PostAlonzo(P::InputNotInUTxO)),
             expected("InputNotInUTxO", inputs),
+        ),
+        (
+            C::Phase1ValidationRejected(V::PostAlonzo(P::CollateralNotInUTxO)),
+            expected("CollateralNotInUTxO", inputs),
+        ),
+        (
+            C::Phase1ValidationRejected(V::PostAlonzo(P::CollateralMissing)),
+            expected(
+                "CollateralMissing",
+                DolosClass::Rule(RefusalClass::Collateral),
+            ),
         ),
         (
             C::Phase1ValidationRejected(V::PostAlonzo(P::UnsupportedPlutusLanguage)),
