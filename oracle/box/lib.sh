@@ -301,8 +301,8 @@ pallas_pin() {
   sed -n 's/^pallas-validate = { git = "[^"]*", rev = "\([0-9a-f]*\)".*/\1/p' "$ROOT/$SCRATCH/Cargo.toml" | head -1
 }
 
-# Checks pallas out at a commit, from the cargo git database or else the repository pallas-validate is pinned to, into the scratch pallas tree and points the scratch tree's pallas crates at it.
-pallas_tree() {
+# Fetches a pallas commit and its history, from the cargo git database or else the repository pallas-validate is pinned to, into the scratch pallas repository.
+pallas_history() {
   if [ ! -d "$ROOT/$PALLAS/.git" ]; then
     git init -q "$ROOT/$PALLAS" || return
   fi
@@ -316,10 +316,85 @@ pallas_tree() {
     url=$(sed -n 's/^pallas-validate = { git = "\([^"]*\)".*/\1/p' "$ROOT/$SCRATCH/Cargo.toml" | head -1)
     git -C "$ROOT/$PALLAS" fetch -q "$url" "$1" || return
   fi
+}
+
+# Checks pallas out at a commit into the scratch pallas tree and points the scratch tree's pallas crates at it.
+pallas_tree() {
+  pallas_history "$1" || return
   git -C "$ROOT/$PALLAS" checkout -q -f --detach "$1" &&
     git -C "$ROOT/$PALLAS" clean -q -fdx &&
     sed -E -i 's#^(pallas[a-z-]*) = \{ git = "https://github.com/[^/]+/pallas", rev = "[0-9a-f]+"#\1 = { path = "/w/'"$PALLAS"'/\1"#' \
       "$ROOT/$SCRATCH/Cargo.toml"
+}
+
+# The manifest of fix commits, each with its arm or the reason it has none.
+ARMS_MANIFEST=${ARMS_MANIFEST:-$HERE/arms.toml}
+
+# The reasons arms.toml may give a fix commit no arm.
+FIX_EXCLUSIONS="oracle pin lint tooling relay follower network conway unarmed"
+
+# The rows of the section $1 of the arms manifest, a line base=<commit> and then one line per fix commit, its commit and arm=<arm> or exclude=<reason>.
+manifest_rows() {
+  awk -v section="[$1]" '
+    /^\[/ { inside = ($0 == section); next }
+    !inside { next }
+    /^base = / { gsub(/"/, "", $3); print "base=" $3 }
+    /^  \{ commit = / {
+      line = $0
+      gsub(/[{},"]/, "", line)
+      split(line, w, " ")
+      print w[3], w[4] "=" w[6]
+    }' "$ARMS_MANIFEST"
+}
+
+# Prints a FIX-ARM line for each fix subject commit of the repository $1 from the base of the manifest section $2 to the commit $3 that the section gives no arm of PLANTED_ARMS and no known exclusion, then a FIX-ARMS line of counts, and fails when it printed a FIX-ARM line.
+fix_arms() {
+  rows=$(manifest_rows "$2")
+  base=$(echo "$rows" | sed -n 's/^base=//p')
+  if [ -z "$base" ] || ! git -C "$1" rev-parse -q --verify "$base^{commit}" >/dev/null; then
+    echo "FIX-ARM repo=$2 base=${base:-none} not-found"
+    echo "FIX-ARMS repo=$2 fixes=0 armed=0 excluded=0 unarmed=0 failing=1"
+    return 1
+  fi
+  fixes=0 armed=0 excluded=0 unarmed=0 failing=0
+  while read -r sha subject; do
+    case $subject in fix*) ;; *) continue ;; esac
+    fixes=$((fixes + 1))
+    row=$(echo "$rows" | awk -v sha="$sha" 'index(sha, $1) == 1 && length($1) >= 7 { print $2; exit }')
+    case $row in
+      arm=*)
+        if echo " $PLANTED_ARMS " | grep -q -F " ${row#arm=} "; then
+          armed=$((armed + 1))
+          continue
+        fi
+        ;;
+      exclude=*)
+        if echo " $FIX_EXCLUSIONS " | grep -q -F " ${row#exclude=} "; then
+          excluded=$((excluded + 1))
+          [ "$row" = exclude=unarmed ] && unarmed=$((unarmed + 1))
+          continue
+        fi
+        ;;
+    esac
+    failing=$((failing + 1))
+    echo "FIX-ARM repo=$2 commit=$(echo "$sha" | cut -c1-10) row=${row:-none} subject=\"$subject\""
+  done <<EOF
+$(git -C "$1" log --no-merges --format='%H %s' "$base..$3")
+EOF
+  echo "FIX-ARMS repo=$2 fixes=$fixes armed=$armed excluded=$excluded unarmed=$unarmed failing=$failing"
+  [ "$failing" -eq 0 ]
+}
+
+# Prints the fix arm lines of the scratch tree and of the pallas commit it pins, and fails when either names a commit.
+fix_arms_both() {
+  pin=$(pallas_pin)
+  dolos=0
+  fix_arms "$ROOT/$SCRATCH" dolos HEAD || dolos=1
+  if ! pallas_history "$pin"; then
+    echo "FIX-ARM repo=pallas pin=${pin:-none} not-fetched"
+    return 1
+  fi
+  fix_arms "$ROOT/$PALLAS" pallas "$pin" && [ "$dolos" -eq 0 ]
 }
 
 # Puts the scratch tree at REV of the bare repository $ROOT/dolos.git with no planted change.

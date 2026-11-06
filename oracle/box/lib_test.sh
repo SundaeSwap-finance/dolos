@@ -654,6 +654,56 @@ expect control_none "$(control_of none '' '' 'out')" fired
 expect control_differs "$(control_of differs v 'out' 'other')" fired
 expect control_reached "$(control_of reached v 'ORACLE_PLANT reached x' 'ORACLE_PLANT reached x')" fired
 
+# A repository with a base commit, a feature commit and the fix commits named in $1, a manifest arms.toml whose dolos rows are the remaining arguments, and the exit and lines of fix_arms over it.
+fixes_of() {
+  F=$W/fixes
+  rm -rf "$F"
+  git init -q "$F"
+  git -C "$F" -c user.name=t -c user.email=t@t commit -q --allow-empty -m base
+  base=$(git -C "$F" rev-parse HEAD)
+  git -C "$F" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "feat: a feature"
+  for subject in $1; do
+    git -C "$F" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "fix: $subject"
+  done
+  shift
+  {
+    echo '[dolos]'
+    echo "base = \"$base\""
+    echo 'fixes = ['
+    for row in "$@"; do
+      sha=$(git -C "$F" log -1 --format=%h --abbrev=9 --grep="^fix: ${row%% *}\$")
+      echo "  { commit = \"$sha\", ${row#* } },"
+    done
+    echo ']'
+  } >"$F/arms.toml"
+  (
+    ROOT=$W HERE=$HERE ARMS_MANIFEST=$F/arms.toml
+    . "$LIB"
+    PLANTED_ARMS="colret coin"
+    out=$(fix_arms "$F" dolos HEAD) && code=0 || code=$?
+    echo "exit=$code $(echo "$out" | sed 's/commit=[0-9a-f]* //' | paste -sd '|' -)"
+  )
+}
+# Must not fire on a feature commit with no row, an armed fix and an excluded one, and must fire on a fix with no row, an arm outside PLANTED_ARMS, an unknown reason and a base the repository lacks.
+expect fixes_none "$(fixes_of '')" "exit=0 FIX-ARMS repo=dolos fixes=0 armed=0 excluded=0 unarmed=0 failing=0"
+expect fixes_rowed "$(fixes_of 'a b c' 'a arm = "colret"' 'b exclude = "conway"' 'c exclude = "unarmed"')" \
+  "exit=0 FIX-ARMS repo=dolos fixes=3 armed=1 excluded=2 unarmed=1 failing=0"
+expect fixes_missing "$(fixes_of 'a b' 'a arm = "colret"')" \
+  'exit=1 FIX-ARM repo=dolos row=none subject="fix: b"|FIX-ARMS repo=dolos fixes=2 armed=1 excluded=0 unarmed=0 failing=1'
+expect fixes_unknown_arm "$(fixes_of 'a' 'a arm = "nothing"')" \
+  'exit=1 FIX-ARM repo=dolos row=arm=nothing subject="fix: a"|FIX-ARMS repo=dolos fixes=1 armed=0 excluded=0 unarmed=0 failing=1'
+expect fixes_unknown_reason "$(fixes_of 'a' 'a exclude = "later"')" \
+  'exit=1 FIX-ARM repo=dolos row=exclude=later subject="fix: a"|FIX-ARMS repo=dolos fixes=1 armed=0 excluded=0 unarmed=0 failing=1'
+expect fixes_base_absent "$(
+  F=$W/fixes
+  sed -i.bak 's/^base = .*/base = "0000000000000000000000000000000000000001"/' "$F/arms.toml"
+  (
+    ROOT=$W HERE=$HERE ARMS_MANIFEST=$F/arms.toml
+    . "$LIB"
+    fix_arms "$F" dolos HEAD | paste -sd '|' -
+  )
+)" "FIX-ARM repo=dolos base=0000000000000000000000000000000000000001 not-found|FIX-ARMS repo=dolos fixes=0 armed=0 excluded=0 unarmed=0 failing=1"
+
 # Must keep a value switch's name and prefix an overlay switch's.
 expect value_key "$(
   ROOT=$W HERE=$HERE

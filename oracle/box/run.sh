@@ -2,7 +2,7 @@
 # Runs the oracle on the build box, its quick, done or ship tier, its live leg alone or the regeneration of its committed manifests.
 # Usage: ROOT=dir [REV=ref] [BASE=ref] run.sh quick|done|ship|live|regen|value
 # The value tier runs the value leg of value.sh alone. The quick tier runs it too when the pallas pin or a value leg file differs from BASE, and the done and ship tiers when its inputs differ from those of the last passing value leg.
-# The quick tier judges the head on both corpora, the control and each arm whose plant changes a file that differs between BASE and REV, a pallas arm when the pallas entries of Cargo.toml or Cargo.lock differ. BASE defaults to the commit of the last done or ship run that passed, and when there is none every arm runs. The done tier, run per change, judges the head, the control and every arm. The ship tier, run before a rollout of the dolos-serve image, is the done tier while the live leg syncs a candidate from genesis. Only the ship tier and the live leg read the live node. The done and ship tiers record their commit in runs/last-done when they pass, and the ship tier and the live leg record theirs in runs/last-ship when the live leg passes.
+# The quick tier judges the head on both corpora, the control and each arm whose plant changes a file that differs between BASE and REV, a pallas arm when the pallas entries of Cargo.toml or Cargo.lock differ. BASE defaults to the commit of the last done or ship run that passed, and when there is none every arm runs. The done tier, run per change, judges the head, the control and every arm, and fails on a fix commit that arms.toml gives neither an arm nor an exclusion. The ship tier, run before a rollout of the dolos-serve image, is the done tier while the live leg syncs a candidate from genesis. Only the ship tier and the live leg read the live node. The done and ship tiers record their commit in runs/last-done when they pass, and the ship tier and the live leg record theirs in runs/last-ship when the live leg passes.
 # The live leg reads ENDPOINT, NODE, NODE_DB, GRPCURL, SERVE_CONFIG and CANDIDATE_GRPC from $LIVE_ENV.
 set -eu
 : "${ROOT:?}"
@@ -240,9 +240,12 @@ done_run() {
   require_lib_test
   reset_scratch
   commit=$(git -C "$ROOT/$SCRATCH" rev-parse HEAD)
+  fix_arms=fix-arms=PASS
+  fix_arms_both >"$OUT/fix-arms.out" 2>&1 || fix_arms=fix-arms=FAIL
+  cat "$OUT/fix-arms.out"
   sh "$HERE/breaks.sh" | tee "$OUT/breaks.out"
   verdicts=$(sed -n 's/^ARMS \(.*\) logs=.*/\1/p' "$OUT/breaks.out")
-  verdicts="$verdicts $(due_value_verdicts)"
+  verdicts="$verdicts $fix_arms $(due_value_verdicts)"
   echo "DONE tier=done $verdicts commit=$commit logs=$OUT"
   record_pass done "$commit" "$verdicts"
 }
