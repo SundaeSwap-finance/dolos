@@ -2,6 +2,7 @@
 
 mod construct;
 mod eval;
+mod guarding;
 mod ledger_state;
 mod live;
 mod output;

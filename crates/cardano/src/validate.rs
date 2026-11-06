@@ -322,17 +322,28 @@ fn evaluation_error(error: pallas_validate::phase2::error::Error) -> ChainError 
     }
 }
 
-/// Whether phase two has anything to run: a redeemer at the top level or in a
-/// sub-transaction. Pallas's Dijkstra evaluator refuses every batch, so a
-/// key-only batch must not reach it.
+/// Whether supplied redeemers or script guard credentials require phase-two discovery.
+/// Pallas resolves script guards, filters native scripts and checks missing redeemers.
 fn requests_scripts(tx: &MultiEraTx<'_>) -> bool {
+    use pallas::ledger::primitives::dijkstra::{Guards, StakeCredential};
+
+    let script_guard = |guards: Option<&Guards>| {
+        matches!(guards, Some(Guards::Credentials(credentials)) if credentials
+            .iter()
+            .any(|credential| matches!(credential, StakeCredential::ScriptHash(_))))
+    };
     !tx.redeemers().is_empty()
         || tx.as_dijkstra().is_some_and(|tx| {
-            tx.transaction_body
-                .sub_transactions
-                .iter()
-                .flat_map(|subs| subs.iter())
-                .any(|sub| sub.transaction_witness_set.redeemer.is_some())
+            script_guard(tx.transaction_body.guards.as_ref())
+                || tx
+                    .transaction_body
+                    .sub_transactions
+                    .iter()
+                    .flat_map(|subs| subs.iter())
+                    .any(|sub| {
+                        sub.transaction_witness_set.redeemer.is_some()
+                            || script_guard(sub.sub_transaction_body.guards.as_ref())
+                    })
         })
 }
 
