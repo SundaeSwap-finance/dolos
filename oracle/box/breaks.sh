@@ -149,7 +149,7 @@ caught() {
     v1-guarding) pattern='^EVAL-DIFF v1 [a-z]+#[0-9]+ [a-z0-9]+ Guarding#[0-9]+ ' ;;
     v1beta-eval-mapped) pattern='^EVAL-DIFF v1beta [a-z]+#[0-9]+ ' ;;
     v1alpha-eval-mapped) pattern='^EVAL-DIFF v1alpha [a-z]+#[0-9]+ ' ;;
-    requests-scripts-reverted) pattern='^EVAL-TX-DIFF [a-z0-9]+ [a-z]+#[0-9]+ demand=refuse' ;;
+    requests-scripts-reverted | missing-script-refusal-reverted) pattern='^EVAL-TX-DIFF [a-z0-9]+ [a-z]+#[0-9]+ demand=refuse' ;;
     estimate-needs-vkeys) pattern='^EVAL-DRAFT-DIFF [a-z0-9]+ [a-z]+#[0-9]+ ' ;;
     requires-sub-inputs-dropped | withdrawal-accounts-absent | era-trial-decoded) pattern='^DISAGREE [a-z]+#[0-9]+ ' ;;
     v3-reg-deposit-omitted) pattern='^CONTEXT-DIFF [a-z]+#[0-9]+ [a-z0-9]+ [A-Za-z]+#[0-9]+ V3 ' ;;

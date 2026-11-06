@@ -51,6 +51,7 @@ fixes = [
   { commit = "ffef3d1c9", exclude = "follower" },
   { commit = "b5b22f586", exclude = "follower" },
   { commit = "7524eae73", exclude = "follower" },
+  { commit = "0f4bf4574", arm = "missing-script-refusal-reverted" },
 ]
 
 [pallas]
