@@ -158,10 +158,7 @@ fn entry(cells: &[&str]) -> Result<Entry, String> {
                 .strip_prefix("leaves ")
                 .ok_or(format!("expected leaves, found {leaves}"))?;
             let leaves: BTreeSet<String> = leaves.split(',').map(str::to_string).collect();
-            if let Some(leaf) = leaves
-                .iter()
-                .find(|l| LedgerLeaf::of_name(l).is_none())
-            {
+            if let Some(leaf) = leaves.iter().find(|l| LedgerLeaf::of_name(l).is_none()) {
                 return Err(format!("leaf {leaf} has no refusal class"));
             }
             let reads = match reads.strip_prefix("reads ") {

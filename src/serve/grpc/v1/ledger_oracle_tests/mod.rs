@@ -36,7 +36,7 @@ use ledger_oracle_judge::{
     context::{ContextKnown, ContextTally},
     corpus::{self, Corpus},
     cost::CostTallies,
-    eval::{EvalKnown, EvalTally},
+    eval::{EvalKnown, EvalTally, TxKnown},
     manifest::{self, Candidates, Declared, Feature, Known, KnownList, Locus},
     parallel::in_parallel,
     record::{CorpusKind, LedgerOutcome, PParams, Phase2, Record, RecordId, UtxoEntry},
@@ -468,6 +468,7 @@ struct Manifests {
     declared: Declared,
     known: KnownList,
     eval: EvalKnown,
+    tx: TxKnown,
     rules: Rules,
     context: ContextKnown,
 }
@@ -478,6 +479,7 @@ impl Manifests {
             declared: manifest::declared().unwrap_or_else(|e| panic!("{e}")),
             known: manifest::known().unwrap_or_else(|e| panic!("{e}")).records,
             eval: ledger_oracle_judge::eval::eval_known().unwrap_or_else(|e| panic!("{e}")),
+            tx: ledger_oracle_judge::eval::tx_known().unwrap_or_else(|e| panic!("{e}")),
             rules: rules::committed().unwrap_or_else(|e| panic!("{e}")),
             context: ledger_oracle_judge::context::context_known()
                 .unwrap_or_else(|e| panic!("{e}")),
@@ -492,11 +494,13 @@ impl Manifests {
             .iter()
             .filter(|((_, id), _)| records.contains(id));
         let eval = self.eval.iter().filter(|(id, _)| records.contains(id));
+        let tx = self.tx.iter().filter(|(id, _)| records.contains(id));
         let context = self.context.iter().filter(|(id, _)| records.contains(id));
         Manifests {
             declared: declared.map(|(id, f)| (*id, f.clone())).collect(),
             known: known.map(|(entry, row)| (*entry, *row)).collect(),
             eval: eval.map(|(id, rows)| (*id, rows.clone())).collect(),
+            tx: tx.map(|(id, answer)| (*id, answer.clone())).collect(),
             rules: self.rules.within(records),
             context: context.map(|(id, rows)| (*id, rows.clone())).collect(),
         }
@@ -702,7 +706,9 @@ async fn validate_run<'r>(
             if missing.failed_by.is_empty() {
                 compare_fee(&group, id, record, cost);
                 let listed = manifests.eval.get(&id).unwrap_or(&unlisted);
-                let calls = eval::judge_record(&group, id, record, listed, evaluations).await;
+                let tx_listed = manifests.tx.get(&id).map(String::as_str);
+                let calls =
+                    eval::judge_record(&group, id, record, listed, tx_listed, evaluations).await;
                 let listed = manifests.context.get(&id).unwrap_or(&context_unlisted);
                 eval::judge_context(&group, id, record, listed, context);
                 let covering = (record.submitted(), record.flag(), declared);
@@ -1755,6 +1761,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
     }
     manifests.unjudged(corpus.kind, &judged_ids, &mut judged.validation);
     judged.eval.unjudged(&manifests.eval, corpus.kind);
+    judged.eval.tx.unjudged(&manifests.tx, corpus.kind);
     judged.context.unjudged(&manifests.context, corpus.kind);
     judged
         .state

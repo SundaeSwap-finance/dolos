@@ -233,12 +233,13 @@ async fn judge_draft(
         .add(Layer::Pallas, draft.signed, ledger, listed, pallas);
 }
 
-/// Judges the evaluator's and each EvalTx version's answer for one record against the ledger's rows, the rows the known list gives it and, when the ledger evaluated none, its outcome's demand, and returns the builtins called by each redeemer the evaluator ran in the ledger's units.
+/// Judges the evaluator's and each EvalTx version's answer for one record against the ledger's rows, the rows the known list gives it and, when the ledger evaluated none, its outcome's demand and the answer the transaction known list gives it, and returns the builtins called by each redeemer the evaluator ran in the ledger's units.
 pub(super) async fn judge_record(
     group: &Group,
     id: RecordId,
     record: &Record,
     listed: &BTreeMap<RowKey, Refusal>,
+    tx_listed: Option<&str>,
     tally: &mut EvalTally,
 ) -> Vec<Builtin> {
     let tx = &record.tx.0;
@@ -257,7 +258,8 @@ pub(super) async fn judge_record(
     let demand = ledger.is_empty().then(|| TxDemand::of(&record.outcome));
     let mut judge_tx = |layer: Layer, answer: &Result<DolosAnswer, Malformed>| {
         if let Some(demand) = demand {
-            tally.tx.add(layer, id, &eval::tx_verdict(demand, answer));
+            let verdict = eval::tx_verdict(demand, answer, tx_listed);
+            tally.tx.add(layer, id, &verdict);
         }
     };
     let answers = wire_answers(&wires, &evaluator);
@@ -357,7 +359,10 @@ fn a_draft_keeps_the_signed_body_and_drops_its_key_witnesses_and_budgets() {
     assert_eq!(draft.transaction_witness_set.vkeywitness, None);
     let budgets = |tx: &MempoolTransaction| -> Vec<(u64, u64)> {
         let redeemers = tx.transaction_witness_set.redeemer.as_ref().unwrap();
-        redeemers.values().map(|v| (v.ex_units.mem, v.ex_units.steps)).collect()
+        redeemers
+            .values()
+            .map(|v| (v.ex_units.mem, v.ex_units.steps))
+            .collect()
     };
     assert!(budgets(&signed).iter().any(|b| *b != (0, 0)));
     assert!(budgets(&draft).iter().all(|b| *b == (0, 0)));

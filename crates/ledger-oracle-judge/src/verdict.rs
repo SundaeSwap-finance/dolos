@@ -49,7 +49,8 @@ fn refusal_outcome(
     kind: &str,
     class: Option<RefusalClass>,
 ) -> Outcome {
-    let ledger_classes: BTreeSet<RefusalClass> = failure_names.iter().map(FailurePath::class).collect();
+    let ledger_classes: BTreeSet<RefusalClass> =
+        failure_names.iter().map(FailurePath::class).collect();
     match class {
         Some(class) if ledger_classes.contains(&class) => Outcome::Pass(Pass::Agree),
         Some(_) | None => {
