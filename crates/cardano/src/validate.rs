@@ -9,9 +9,7 @@ use pallas::ledger::{
     primitives::{NetworkId, TransactionInput},
     traverse::{Era, MultiEraInput, MultiEraOutput, MultiEraTx},
 };
-use pallas_validate::phase1::dijkstra::{
-    dijkstra_ledger_effects, validate_dijkstra_tx, validate_dijkstra_tx_with_time,
-};
+use pallas_validate::phase1::dijkstra::{dijkstra_ledger_effects, validate_dijkstra_tx_with_time};
 use pallas_validate::phase2::{
     script_context::SlotConfig, tx::MultiEraTxEvalResult, Builtin, MultiEraEvalReport,
 };
@@ -63,16 +61,10 @@ pub fn validate_tx<D: Domain>(
     let utxos_matches = required_utxos(&tx, utxos)?;
     let pallas_utxos = phase_one_utxos(&utxos_matches)?;
 
-    let time = if era == Era::Dijkstra && requests_scripts(&tx) {
-        Some(
-            crate::eras::load_era_summary::<D>(utxos.state())?
-                .to_pallas_time_context(env.block_slot, crate::utils::stability_window(genesis))?,
-        )
-    } else {
-        None
-    };
-    match (&tx, &env.prot_params) {
+    let time = match (&tx, &env.prot_params) {
         (MultiEraTx::Dijkstra(native), MultiEraProtocolParameters::Dijkstra(pp)) => {
+            let time = crate::eras::load_era_summary::<D>(utxos.state())?
+                .to_pallas_time_context(env.block_slot, crate::utils::stability_window(genesis))?;
             let stored = ledger::StoredLedger::<D>::new(utxos.state())?;
             let unconfirmed = unconfirmed_txs(utxos);
             let unconfirmed = unconfirmed
@@ -80,31 +72,23 @@ pub fn validate_tx<D: Domain>(
                 .map(|entry| MultiEraTx::try_from(entry.payload()))
                 .collect::<Result<Vec<_>, _>>()?;
             let state = with_unconfirmed(&stored, &unconfirmed, pp, env.network_id);
-            match &time {
-                Some(time) => validate_dijkstra_tx_with_time(
-                    native,
-                    &pallas_utxos,
-                    pp,
-                    &env.block_slot,
-                    &env.network_id,
-                    &state,
-                    time,
-                ),
-                None => validate_dijkstra_tx(
-                    native,
-                    &pallas_utxos,
-                    pp,
-                    &env.block_slot,
-                    &env.network_id,
-                    &state,
-                ),
-            }?;
+            validate_dijkstra_tx_with_time(
+                native,
+                &pallas_utxos,
+                pp,
+                &env.block_slot,
+                &env.network_id,
+                &state,
+                &time,
+            )?;
+            Some(time)
         }
         _ => {
             let mut cert_state = CertState::default();
             pallas_validate::phase1::validate_tx(&tx, 0, &env, &pallas_utxos, &mut cert_state)?;
+            None
         }
-    }
+    };
 
     let report =
         evaluate_decoded::<D>(&tx, utxos, genesis, &env.prot_params, false, time.as_ref())?;
@@ -207,9 +191,6 @@ pub fn redeemer_arguments<D: Domain>(
     let active = crate::load_effective_pparams::<D>(utxos.state())?;
     let tx = decode_submission(submission_era(active.ensure_protocol_version()?)?, cbor)?;
     let pparams = validation_parameters(&active)?;
-    if !requests_scripts(&tx) {
-        return Ok(vec![]);
-    }
     let (utxos, _, time) = evaluation_inputs::<D>(&tx, utxos, genesis, None)?;
     let time = time.ok_or(evaluation_error(
         pallas_validate::phase2::error::Error::WrongEra(),
@@ -251,9 +232,6 @@ fn evaluate_decoded<D: Domain>(
         let estimates = estimate_decoded::<D>(tx, utxos, genesis, pparams, admission_time)?;
         return Ok(estimates.into_iter().map(|(result, _)| result).collect());
     }
-    if !requests_scripts(tx) {
-        return Ok(vec![]);
-    }
     let (utxos, slot_config, time) = evaluation_inputs::<D>(tx, utxos, genesis, admission_time)?;
     if let Some(time) = time {
         pallas_validate::phase2::evaluate_tx_with_time(tx, pparams, &utxos, &time)
@@ -270,9 +248,6 @@ fn estimate_decoded<D: Domain>(
     pparams: &MultiEraProtocolParameters,
     admission_time: Option<&pallas_validate::utils::DijkstraTimeContext>,
 ) -> Result<Vec<(MultiEraTxEvalResult, Vec<Builtin>)>, ChainError> {
-    if !requests_scripts(tx) {
-        return Ok(vec![]);
-    }
     let (utxos, slot_config, time) = evaluation_inputs::<D>(tx, utxos, genesis, admission_time)?;
     if let Some(time) = time {
         pallas_validate::phase2::estimate_tx_calls_with_time(tx, pparams, &utxos, &time)
@@ -342,31 +317,6 @@ fn evaluation_error(error: pallas_validate::phase2::error::Error) -> ChainError 
         }
         error => ChainError::Phase2EvaluationError(error.to_string()),
     }
-}
-
-/// Whether supplied redeemers or script guard credentials require phase-two discovery.
-/// Pallas resolves script guards, filters native scripts and checks missing redeemers.
-fn requests_scripts(tx: &MultiEraTx<'_>) -> bool {
-    use pallas::ledger::primitives::dijkstra::{Guards, StakeCredential};
-
-    let script_guard = |guards: Option<&Guards>| {
-        matches!(guards, Some(Guards::Credentials(credentials)) if credentials
-            .iter()
-            .any(|credential| matches!(credential, StakeCredential::ScriptHash(_))))
-    };
-    !tx.redeemers().is_empty()
-        || tx.as_dijkstra().is_some_and(|tx| {
-            script_guard(tx.transaction_body.guards.as_ref())
-                || tx
-                    .transaction_body
-                    .sub_transactions
-                    .iter()
-                    .flat_map(|subs| subs.iter())
-                    .any(|sub| {
-                        sub.transaction_witness_set.redeemer.is_some()
-                            || script_guard(sub.sub_transaction_body.guards.as_ref())
-                    })
-        })
 }
 
 /// Submission has no era tag in its signed envelope. Only known protocol
@@ -645,25 +595,6 @@ fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError
             pallas::codec::minicbor::decode(cbor)?;
     }
     Ok(MultiEraTx::decode_for_era(era, cbor)?)
-}
-
-#[cfg(test)]
-mod batch_tests {
-    use super::*;
-
-    /// A key-only batch carrying one sub-transaction, in the mempool form it was
-    /// submitted in. Musashi included it as tx
-    /// 9582ee5f1c8f9bb023d687bf36ba22d694c435c01f87ef8958b8f6c81d02c942.
-    const KEY_ONLY_BATCH: &str = "83a500d9010281825820c88a71fd0cfaa30e320c737ac064b0fe30de68e9e6d25d922d64488806b80e4401018182581d60a776e47e31d0da1fc98f734cbc036cf9c216aae1b191f35754369f371b0000000252d82085021a0002a9e517d901028183a200d9010281825820c88a71fd0cfaa30e320c737ac064b0fe30de68e9e6d25d922d64488806b80e4400018182581d6021f213394ce9e6ddec232aa9821f6ae9c144d0fdac2853219450a3cd1a003d0900a100d90102818258200f89ac07c0ead276c043938fa4941579cee1ac298d69bdd99c2fbe7e36426375584094c1f7af30f7bb4a233d23e06f8d97cddea6f49bd0462928a10a3b1756623976a5144438ae01f8b34c7d754e6712b22efa3891e9ad3ef211c1fc45be48f7630af612d9010281825820c88a71fd0cfaa30e320c737ac064b0fe30de68e9e6d25d922d64488806b80e4400a100d90102818258206a37d23da740e3246ccdc1ba100e13c5d24d0f7d773effff507c7cb0d647f01f58405c8ba9c49e97b93624183a6a10f909888f25a7764f50044bf78c1ed872febba4e39a526471f0f263fe88167ddaea9e9600d9f349bd3917367a5ff8df272c7206f6";
-
-    #[test]
-    fn a_key_only_batch_requests_no_scripts() {
-        let cbor = hex::decode(KEY_ONLY_BATCH).unwrap();
-        let tx = decode_submission(Era::Dijkstra, &cbor).unwrap();
-        let native = tx.as_dijkstra().unwrap();
-        assert!(native.transaction_body.sub_transactions.is_some());
-        assert!(!requests_scripts(&tx));
-    }
 }
 
 #[cfg(test)]
