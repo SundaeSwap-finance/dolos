@@ -1,6 +1,7 @@
 //! Judges what Dolos validates and serves against ledger corpora.
 
 mod construct;
+mod endorser;
 mod eval;
 mod guarding;
 mod ledger_state;
