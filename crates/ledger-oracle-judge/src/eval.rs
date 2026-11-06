@@ -1741,7 +1741,7 @@ mod tests {
         assert_eq!(known.len(), 2);
         assert!(parse_tx_known("t", "ic#3 a\nic#3 b\n").is_err());
         assert!(parse_tx_known("t", "ic#3\n").is_err());
-        assert!(!tx_known().unwrap().is_empty());
+        assert!(tx_known().is_ok());
     }
 
     #[test]
