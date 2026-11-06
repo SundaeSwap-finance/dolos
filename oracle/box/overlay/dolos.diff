@@ -21,7 +21,7 @@ index e416611e..a57fe446 100644
 @@ -571,10 +571,13 @@ pub fn inline_endorser_transactions(
  ) -> Result<Vec<u8>, minicbor::decode::Error> {
      let (era, mut block): (u16, dijkstra::Block) = minicbor::decode(block_cbor)?;
-
+ 
 -    let replacement = txs
 +    let mut replacement: Vec<_> = txs
          .iter()
@@ -30,9 +30,9 @@ index e416611e..a57fe446 100644
 +    if pallas::crypto::oracle_plant("endorser-tx-dropped") && !replacement.is_empty() {
 +        replacement.remove(replacement.len() / 2);
 +    }
-
+ 
      block.block_body.transactions = MaybeIndefArray::Def(replacement);
-
+ 
 diff --git a/crates/cardano/src/utxoset.rs b/crates/cardano/src/utxoset.rs
 index c91bdb20..d9adb395 100644
 --- a/crates/cardano/src/utxoset.rs
@@ -66,10 +66,54 @@ index c91bdb20..d9adb395 100644
                  delta
                      .produced_utxo
 diff --git a/crates/cardano/src/validate.rs b/crates/cardano/src/validate.rs
-index 79705fd3..584bae3e 100644
+index 211146c9..9ac3b77a 100644
 --- a/crates/cardano/src/validate.rs
 +++ b/crates/cardano/src/validate.rs
-@@ -579,7 +579,11 @@ fn with_unconfirmed<'a, S: DijkstraLedgerState + ?Sized>(
+@@ -135,6 +135,10 @@ pub fn required_utxos<D: Domain>(
+     tx: &MultiEraTx<'_>,
+     utxos: &MempoolAwareUtxoStore<D>,
+ ) -> Result<UtxoMap, ChainError> {
++    if pallas::crypto::oracle_plant("requires-sub-inputs-dropped") {
++        let top = [tx.inputs(), tx.reference_inputs(), tx.collateral()].concat();
++        return Ok(utxos.get_utxos(top.iter().map(From::from).collect())?);
++    }
+     Ok(utxos.get_utxos(tx.requires().iter().map(From::from).collect())?)
+ }
+ 
+@@ -270,6 +274,15 @@ fn estimate_decoded<D: Domain>(
+     pparams: &MultiEraProtocolParameters,
+     admission_time: Option<&pallas_validate::utils::DijkstraTimeContext>,
+ ) -> Result<Vec<(MultiEraTxEvalResult, Vec<Builtin>)>, ChainError> {
++    if pallas::crypto::oracle_plant("estimate-needs-vkeys")
++        && tx
++            .as_dijkstra()
++            .is_some_and(|tx| tx.transaction_witness_set.vkeywitness.is_none())
++    {
++        return Err(ChainError::Phase2EvaluationError(
++            "missing key witnesses".into(),
++        ));
++    }
+     if !requests_scripts(tx) {
+         return Ok(vec![]);
+     }
+@@ -354,6 +367,16 @@ fn requests_scripts(tx: &MultiEraTx<'_>) -> bool {
+             .iter()
+             .any(|credential| matches!(credential, StakeCredential::ScriptHash(_))))
+     };
++    if pallas::crypto::oracle_plant("requests-scripts-reverted") {
++        return !tx.redeemers().is_empty()
++            || tx.as_dijkstra().is_some_and(|tx| {
++                tx.transaction_body
++                    .sub_transactions
++                    .iter()
++                    .flat_map(|subs| subs.iter())
++                    .any(|sub| sub.transaction_witness_set.redeemer.is_some())
++            });
++    }
+     !tx.redeemers().is_empty()
+         || tx.as_dijkstra().is_some_and(|tx| {
+             script_guard(tx.transaction_body.guards.as_ref())
+@@ -612,7 +635,11 @@ fn with_unconfirmed<'a, S: DijkstraLedgerState + ?Sized>(
  /// The mempool transactions, inflight before pending, each once.
  fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx> {
      let pending = utxos.pending();
@@ -82,11 +126,31 @@ index 79705fd3..584bae3e 100644
      // Relay can move a transaction between these two reads. Count it once.
      let mut seen = std::collections::HashSet::new();
      inflight
+@@ -631,6 +658,9 @@ fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx
+ }
+ 
+ fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError> {
++    if pallas::crypto::oracle_plant("era-trial-decoded") {
++        return Ok(MultiEraTx::decode(cbor)?);
++    }
+     let mut decoder = pallas::codec::minicbor::Decoder::new(cbor);
+     decoder.skip()?;
+     if decoder.position() != cbor.len() {
 diff --git a/crates/cardano/src/validate/ledger.rs b/crates/cardano/src/validate/ledger.rs
-index 42a31b71..b794b524 100644
+index 42a31b71..467085df 100644
 --- a/crates/cardano/src/validate/ledger.rs
 +++ b/crates/cardano/src/validate/ledger.rs
-@@ -201,7 +201,13 @@ impl<D: Domain> DijkstraLedgerState for StoredLedger<'_, D> {
+@@ -157,6 +157,9 @@ impl<D: Domain> DijkstraLedgerState for StoredLedger<'_, D> {
+         &self,
+         credential: &StakeCredential,
+     ) -> Result<Option<DijkstraAccount>, ValidationError> {
++        if pallas::crypto::oracle_plant("withdrawal-accounts-absent") {
++            return Err(unavailable("accounts"));
++        }
+         let key = EntityKey::from(minicbor::to_vec(credential).map_err(unavailable)?);
+         let account = self
+             .state
+@@ -201,7 +204,13 @@ impl<D: Domain> DijkstraLedgerState for StoredLedger<'_, D> {
              .map_err(unavailable)?;
          Ok(drep
              .filter(|x| x.registered_at.is_some() && !x.is_unregistered())
@@ -102,7 +166,7 @@ index 42a31b71..b794b524 100644
  
      fn committee(&self) -> Result<Option<BTreeMap<StakeCredential, Epoch>>, ValidationError> {
 diff --git a/crates/core/src/submit.rs b/crates/core/src/submit.rs
-index 3e75980e..a11b237c 100644
+index 0ebbab30..2f4c00cd 100644
 --- a/crates/core/src/submit.rs
 +++ b/crates/core/src/submit.rs
 @@ -113,6 +113,9 @@ pub trait SubmitExt: Domain {
@@ -171,7 +235,7 @@ index 3db11ef0..034d25e5 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index 3f481156..1512a48c 100644
+index 8f5c4338..4192983b 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
 @@ -111,6 +111,9 @@ fn tx_eval_to_u5c(
@@ -184,3 +248,51 @@ index 3f481156..1512a48c 100644
              MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
              other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
          };
+diff --git a/src/serve/grpc/v1alpha/submit.rs b/src/serve/grpc/v1alpha/submit.rs
+index 3b7094a4..bef35ded 100644
+--- a/src/serve/grpc/v1alpha/submit.rs
++++ b/src/serve/grpc/v1alpha/submit.rs
+@@ -132,9 +132,16 @@ fn tx_eval_to_u5c(
+         result.redeemers.push(u5c::cardano::Redeemer {
+             purpose: purpose as i32,
+             index: entry.index,
+-            ex_units: Some(ExUnits {
+-                steps: entry.units.steps,
+-                memory: entry.units.mem,
++            ex_units: Some(if pallas::crypto::oracle_plant("v1alpha-eval-mapped") {
++                ExUnits {
++                    steps: entry.units.mem,
++                    memory: entry.units.steps,
++                }
++            } else {
++                ExUnits {
++                    steps: entry.units.steps,
++                    memory: entry.units.mem,
++                }
+             }),
+             ..Default::default()
+         });
+diff --git a/src/serve/grpc/v1beta/submit.rs b/src/serve/grpc/v1beta/submit.rs
+index c45b80f9..da307577 100644
+--- a/src/serve/grpc/v1beta/submit.rs
++++ b/src/serve/grpc/v1beta/submit.rs
+@@ -133,9 +133,16 @@ fn tx_eval_to_u5c(
+         result.redeemers.push(u5c::cardano::Redeemer {
+             purpose: purpose as i32,
+             index: entry.index,
+-            ex_units: Some(ExUnits {
+-                steps: entry.units.steps,
+-                memory: entry.units.mem,
++            ex_units: Some(if pallas::crypto::oracle_plant("v1beta-eval-mapped") {
++                ExUnits {
++                    steps: entry.units.mem,
++                    memory: entry.units.steps,
++                }
++            } else {
++                ExUnits {
++                    steps: entry.units.steps,
++                    memory: entry.units.mem,
++                }
+             }),
+             ..Default::default()
+         });

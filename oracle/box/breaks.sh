@@ -146,7 +146,13 @@ caught() {
     v4-v3-context) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ top [A-Za-z]+#[0-9]+ ledger=\(ran mem=[0-9]+ steps=[0-9]+\) dolos=\((ran mem=[0-9]+ steps=[0-9]+|failed)\)$' ;;
     guarding-purpose) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ top Guarding#[0-9]+ ledger=\(ran mem=[0-9]+ steps=[0-9]+\) dolos=\((ran mem=[0-9]+ steps=[0-9]+|failed)\)$' ;;
     eval-level) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ sub[0-9]+ [A-Za-z]+#[0-9]+ ledger=\((ran|failed)[^)]*\) dolos=\(none\)$' ;;
-    v1-guarding) pattern="^thread 'serve::grpc::v1::submit::mapping_tests::guarding_result_keeps_identity_and_budget' \([0-9]+\) panicked at src/serve/grpc/v1/submit.rs:286:" ;;
+    v1-guarding) pattern='^EVAL-DIFF v1 [a-z]+#[0-9]+ [a-z0-9]+ Guarding#[0-9]+ ' ;;
+    v1beta-eval-mapped) pattern='^EVAL-DIFF v1beta [a-z]+#[0-9]+ ' ;;
+    v1alpha-eval-mapped) pattern='^EVAL-DIFF v1alpha [a-z]+#[0-9]+ ' ;;
+    requests-scripts-reverted) pattern='^EVAL-TX-DIFF [a-z0-9]+ [a-z]+#[0-9]+ demand=refuse' ;;
+    estimate-needs-vkeys) pattern='^EVAL-DRAFT-DIFF [a-z0-9]+ [a-z]+#[0-9]+ ' ;;
+    requires-sub-inputs-dropped | withdrawal-accounts-absent | era-trial-decoded) pattern='^DISAGREE [a-z]+#[0-9]+ ' ;;
+    v3-reg-deposit-omitted) pattern='^CONTEXT-DIFF [a-z]+#[0-9]+ [a-z0-9]+ [A-Za-z]+#[0-9]+ V3 ' ;;
     revalidate) pattern='^DIFF revalidate [a-z]+#[0-9]+ kept_after_rollback_to=' ;;
     revalidate-drops) pattern='^DIFF revalidate [a-z]+#[0-9]+ dropped_after_rollback_to=' ;;
     subouts) pattern='^DIFF (undo|as_output) [a-z]+#[0-9]+ ' ;;
