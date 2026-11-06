@@ -86,8 +86,8 @@ ledger_leaves! {
     InvalidWitnessesUTXOW: Witness, Evaluate;
     SubInvalidWitnessesUTXOW: Witness, Evaluate;
     MissingRequiredGuards: Witness, Undecided;
-    ScriptWitnessNotValidatingUTXOW: Script, Refuse;
-    SubScriptWitnessNotValidatingUTXOW: Script, Refuse;
+    ScriptWitnessNotValidatingUTXOW: Script, Evaluate;
+    SubScriptWitnessNotValidatingUTXOW: Script, Evaluate;
     MissingScriptWitnessesUTXOW: Script, Refuse;
     ExtraneousScriptWitnessesUTXOW: Script, Undecided;
     ValidationTagMismatch: Script, Undecided;

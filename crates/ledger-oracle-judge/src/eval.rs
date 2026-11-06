@@ -1636,6 +1636,28 @@ mod tests {
     }
 
     #[test]
+    fn a_failing_native_script_demands_an_empty_evaluation() {
+        use LedgerLeaf as L;
+        for leaf in [
+            L::ScriptWitnessNotValidatingUTXOW,
+            L::SubScriptWitnessNotValidatingUTXOW,
+        ] {
+            let demand = TxDemand::of(&refused_by(&[leaf]));
+            assert_eq!(demand, TxDemand::EvaluateNone, "{leaf}");
+            let verdict = tx_verdict(demand, &none_evaluated(), None);
+            assert_eq!(verdict, TxVerdict::EvaluatedNone, "{leaf}");
+        }
+        let beside_a_missing_script = TxDemand::of(&refused_by(&[
+            L::ScriptWitnessNotValidatingUTXOW,
+            L::MissingScriptWitnessesUTXOW,
+        ]));
+        assert_eq!(
+            beside_a_missing_script,
+            TxDemand::Refuse(L::MissingScriptWitnessesUTXOW)
+        );
+    }
+
+    #[test]
     fn the_transaction_line_counts_by_layer_and_fails_the_tally_on_a_disagreement() {
         let mut t = EvalTally::default();
         let demand = TxDemand::Refuse(LedgerLeaf::MissingRedeemers);
