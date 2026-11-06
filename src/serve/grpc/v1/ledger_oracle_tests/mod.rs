@@ -40,6 +40,7 @@ use ledger_oracle_judge::{
     parallel::in_parallel,
     record::{CorpusKind, LedgerOutcome, PParams, Phase2, Record, RecordId, UtxoEntry},
     row::Row,
+    rules::{self, RuleTally, Rules},
     run::{InputOrigin, KeptRun},
     verdict::{
         declares, maker, one_answer, outcome, with_failing_makers, with_known, DolosVerdict, Fail,
@@ -219,12 +220,13 @@ async fn read_params(domain: &DomainAdapter) -> cardano::PParams {
     }
 }
 
-/// The validation outcomes, state comparisons, fee and redeemer evaluation
-/// comparisons, builtin and construct coverage, refusal inventory and manifest
-/// candidates of one corpus.
+/// The validation outcomes, phase one rules, state comparisons, fee and redeemer
+/// evaluation comparisons, builtin and construct coverage, refusal inventory and
+/// manifest candidates of one corpus.
 #[derive(Debug, Default)]
 struct Judged {
     validation: ValidationTally,
+    rules: RuleTally,
     state: StateTallies,
     cost: CostTallies,
     eval: EvalTally,
@@ -344,6 +346,7 @@ impl Judged {
     fn merge(&mut self, other: Judged) {
         let Judged {
             validation,
+            rules,
             state,
             cost,
             eval,
@@ -354,6 +357,7 @@ impl Judged {
         } = other;
         let Known { records, live } = known;
         self.validation.merge(validation);
+        self.rules.merge(rules);
         self.state.merge(state);
         self.cost.merge(cost);
         self.eval.merge(eval);
@@ -424,6 +428,7 @@ struct Manifests {
     declared: Declared,
     known: KnownList,
     eval: EvalKnown,
+    rules: Rules,
 }
 
 impl Manifests {
@@ -432,6 +437,7 @@ impl Manifests {
             declared: manifest::declared().unwrap_or_else(|e| panic!("{e}")),
             known: manifest::known().unwrap_or_else(|e| panic!("{e}")).records,
             eval: ledger_oracle_judge::eval::eval_known().unwrap_or_else(|e| panic!("{e}")),
+            rules: rules::committed().unwrap_or_else(|e| panic!("{e}")),
         }
     }
 
@@ -447,6 +453,7 @@ impl Manifests {
             declared: declared.map(|(id, f)| (*id, f.clone())).collect(),
             known: known.map(|(entry, row)| (*entry, *row)).collect(),
             eval: eval.map(|(id, rows)| (*id, rows.clone())).collect(),
+            rules: self.rules.within(records),
         }
     }
 
@@ -611,6 +618,7 @@ async fn validate_run<'r>(
 ) -> (Vec<GroupBlock<'r>>, BTreeMap<RecordId, Tally>) {
     let Judged {
         validation: tally,
+        rules,
         state,
         cost,
         eval: evaluations,
@@ -671,7 +679,15 @@ async fn validate_run<'r>(
                 candidates.declared.insert(id, feature);
             }
             let judgement = match one_answer(&dolos, &inflight) {
-                Ok(dolos) => outcome(record.submitted(), dolos, declared),
+                Ok(dolos) => {
+                    if missing.failed_by.is_empty() {
+                        let ledger = record.submitted();
+                        let tx = &record.tx.0;
+                        let read = manifests.rules.judge(id, ledger, dolos, tx, rules);
+                        read.unwrap_or_else(|e| panic!("TX {id} {e}"));
+                    }
+                    outcome(record.submitted(), dolos, declared)
+                }
                 Err(fail) => Outcome::Fail(fail),
             };
             let judgement = with_failing_makers(judgement, &dolos, missing.failed_by);
@@ -1772,13 +1788,15 @@ async fn ledger_oracle() {
     let mut coverage = Coverage::default();
     let mut constructs = construct::Coverage::default();
     let mut inventory = Inventory::default();
+    let mut rule_tally = RuleTally::default();
     let mut revalidated = 0;
-    for kind in [CorpusKind::Ic, CorpusKind::Supp] {
+    for kind in CorpusKind::ALL {
         let corpus = load(kind);
         println!("{corpus}");
         let tallies = judge(&corpus, &manifests, &Edits::default()).await;
         println!("{tallies}");
         pass &= tallies.pass();
+        rule_tally.merge(tallies.rules);
         revalidated += tallies.state.revalidate.compared;
         candidates.declared.extend(tallies.candidates.declared);
         let known = tallies.candidates.known.records;
@@ -1791,6 +1809,11 @@ async fn ledger_oracle() {
     }
     println!("COST all pass={cost_pass}");
     pass &= cost_pass;
+    let (lines, rules_pass) = manifests.rules.bar(&rule_tally, true);
+    for line in lines {
+        println!("{line}");
+    }
+    pass &= rules_pass;
     println!("{evaluations}");
     pass &= evaluations.every_layer_agrees();
     println!(
@@ -1845,7 +1868,8 @@ async fn ledger_oracle_records() {
     let mut pass = true;
     let mut candidates = Candidates::default();
     let mut evaluations = EvalTally::default();
-    for kind in [CorpusKind::Ic, CorpusKind::Supp] {
+    let mut rule_tally = RuleTally::default();
+    for kind in CorpusKind::ALL {
         let corpus = load(kind).select(&named).unwrap_or_else(|e| panic!("{e}"));
         let held = corpus.kept().flat_map(|run| {
             let records = run.records().iter();
@@ -1863,7 +1887,13 @@ async fn ledger_oracle_records() {
         let known = tallies.candidates.known.records;
         candidates.known.records.extend(known);
         evaluations.merge(tallies.eval);
+        rule_tally.merge(tallies.rules);
     }
+    let (lines, rules_pass) = committed.rules.bar(&rule_tally, false);
+    for line in lines {
+        println!("{line}");
+    }
+    pass &= rules_pass;
     println!("{evaluations}");
     for line in candidates
         .lines()
