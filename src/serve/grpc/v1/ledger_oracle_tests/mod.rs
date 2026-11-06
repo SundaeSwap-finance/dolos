@@ -33,6 +33,7 @@ use ledger_oracle_judge::{
     accounts::{self, Account, Credential, LedgerAccounts},
     cbor::{tx_inputs, Purpose, TxIn},
     compare::{ByteVerdict, RollFail, StateTallies, Tally},
+    context::{ContextKnown, ContextTally},
     corpus::{self, Corpus},
     cost::CostTallies,
     eval::{EvalKnown, EvalTally},
@@ -220,9 +221,9 @@ async fn read_params(domain: &DomainAdapter) -> cardano::PParams {
     }
 }
 
-/// The validation outcomes, phase one rules, state comparisons, fee and redeemer
-/// evaluation comparisons, builtin and construct coverage, refusal inventory and
-/// manifest candidates of one corpus.
+/// The validation outcomes, phase one rules, state comparisons, fee, redeemer
+/// evaluation and script context comparisons, builtin and construct coverage,
+/// refusal inventory and manifest candidates of one corpus.
 #[derive(Debug, Default)]
 struct Judged {
     validation: ValidationTally,
@@ -230,6 +231,7 @@ struct Judged {
     state: StateTallies,
     cost: CostTallies,
     eval: EvalTally,
+    context: ContextTally,
     coverage: Coverage,
     constructs: construct::Coverage,
     inventory: Inventory,
@@ -339,7 +341,7 @@ fn builtin_bar(audited: &[Builtin], added: &[Builtin], coverage: &Coverage) -> (
 
 impl Judged {
     fn pass(&self) -> bool {
-        self.validation.pass() && self.state.pass() && self.eval.pass()
+        self.validation.pass() && self.state.pass() && self.eval.pass() && self.context.pass()
     }
 
     /// Adds the judgement of another part of the corpus after this one's.
@@ -350,6 +352,7 @@ impl Judged {
             state,
             cost,
             eval,
+            context,
             coverage,
             constructs,
             inventory,
@@ -361,6 +364,7 @@ impl Judged {
         self.state.merge(state);
         self.cost.merge(cost);
         self.eval.merge(eval);
+        self.context.merge(context);
         self.coverage.extend(coverage);
         self.constructs.extend(constructs);
         self.inventory.extend(inventory);
@@ -465,6 +469,7 @@ struct Manifests {
     known: KnownList,
     eval: EvalKnown,
     rules: Rules,
+    context: ContextKnown,
 }
 
 impl Manifests {
@@ -474,6 +479,8 @@ impl Manifests {
             known: manifest::known().unwrap_or_else(|e| panic!("{e}")).records,
             eval: ledger_oracle_judge::eval::eval_known().unwrap_or_else(|e| panic!("{e}")),
             rules: rules::committed().unwrap_or_else(|e| panic!("{e}")),
+            context: ledger_oracle_judge::context::context_known()
+                .unwrap_or_else(|e| panic!("{e}")),
         }
     }
 
@@ -485,11 +492,13 @@ impl Manifests {
             .iter()
             .filter(|((_, id), _)| records.contains(id));
         let eval = self.eval.iter().filter(|(id, _)| records.contains(id));
+        let context = self.context.iter().filter(|(id, _)| records.contains(id));
         Manifests {
             declared: declared.map(|(id, f)| (*id, f.clone())).collect(),
             known: known.map(|(entry, row)| (*entry, *row)).collect(),
             eval: eval.map(|(id, rows)| (*id, rows.clone())).collect(),
             rules: self.rules.within(records),
+            context: context.map(|(id, rows)| (*id, rows.clone())).collect(),
         }
     }
 
@@ -658,12 +667,14 @@ async fn validate_run<'r>(
         state,
         cost,
         eval: evaluations,
+        context,
         coverage,
         constructs,
         inventory,
         candidates,
     } = tallies;
     let unlisted = BTreeMap::new();
+    let context_unlisted = BTreeMap::new();
     let id_of = |record: &Record| RecordId {
         corpus: kind,
         n: record.n,
@@ -692,6 +703,8 @@ async fn validate_run<'r>(
                 compare_fee(&group, id, record, cost);
                 let listed = manifests.eval.get(&id).unwrap_or(&unlisted);
                 let calls = eval::judge_record(&group, id, record, listed, evaluations).await;
+                let listed = manifests.context.get(&id).unwrap_or(&context_unlisted);
+                eval::judge_context(&group, id, record, listed, context);
                 let covering = (record.submitted(), record.flag(), declared);
                 if let (LedgerOutcome::Accepted { .. }, Phase2::Valid, None) = covering {
                     coverage.add(id, &calls);
@@ -1742,6 +1755,7 @@ async fn judge(corpus: &Corpus, manifests: &Manifests, edits: &Edits<'_>) -> Jud
     }
     manifests.unjudged(corpus.kind, &judged_ids, &mut judged.validation);
     judged.eval.unjudged(&manifests.eval, corpus.kind);
+    judged.context.unjudged(&manifests.context, corpus.kind);
     judged
         .state
         .settle_as_output(corpus.kind, as_output, &manifests.known);
@@ -1821,6 +1835,7 @@ async fn ledger_oracle() {
     let mut candidates = Candidates::default();
     let mut cost_pass = true;
     let mut evaluations = EvalTally::default();
+    let mut contexts = ContextTally::default();
     let mut coverage = Coverage::default();
     let mut constructs = construct::Coverage::default();
     let mut inventory = Inventory::default();
@@ -1839,6 +1854,7 @@ async fn ledger_oracle() {
         candidates.known.records.extend(known);
         cost_pass &= tallies.cost.pass();
         evaluations.merge(tallies.eval);
+        contexts.merge(tallies.context);
         coverage.extend(tallies.coverage);
         constructs.extend(tallies.constructs);
         inventory.extend(tallies.inventory);
@@ -1852,6 +1868,7 @@ async fn ledger_oracle() {
     pass &= rules_pass;
     println!("{evaluations}");
     pass &= evaluations.every_layer_agrees();
+    println!("{contexts}");
     println!(
         "REVALIDATE all compared={revalidated} pass={}",
         revalidated > 0
@@ -1923,6 +1940,7 @@ async fn ledger_oracle_records() {
     }
     let pass = selection.pass() && rules_pass;
     println!("{}", selection.eval);
+    println!("{}", selection.context);
     for line in selection
         .candidates
         .lines()
