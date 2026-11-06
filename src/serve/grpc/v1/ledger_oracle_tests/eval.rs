@@ -10,10 +10,11 @@ use ledger_oracle_judge::{
         self, named_in_message, wire_purpose, Answer, DolosAnswer, EvalTally, Layer, Level,
         Malformed, Refusal, RowKey, RowVerdict, TxDemand, WireEval, WireFee,
     },
-    record::{LedgerRedeemers, Record, RecordId, Units},
+    record::{LedgerOutcome, LedgerRedeemers, Phase2, Record, RecordId, Units},
 };
 use pallas::codec::minicbor;
-use pallas::ledger::primitives::dijkstra::Language;
+use pallas::ledger::primitives::dijkstra::{Language, MempoolTransaction};
+use pallas::ledger::primitives::ExUnits;
 use pallas::ledger::traverse::MultiEraRedeemerTag as RedeemerTag;
 use pallas::ledger::validate::phase2::{
     tx::{MultiEraTxEvalResult, RedeemerArguments},
@@ -191,6 +192,47 @@ fn wire_answers(
     answers.collect()
 }
 
+/// The transaction a builder evaluates before signing, derived from one signed record with its top level key witnesses removed and its top level redeemer budgets zero.
+struct Draft {
+    signed: RecordId,
+    bytes: Vec<u8>,
+}
+
+impl Draft {
+    /// The draft of a signed Dijkstra transaction, or why its bytes derive none.
+    fn of(signed: RecordId, tx: &[u8]) -> Result<Self, String> {
+        let mut draft: MempoolTransaction = minicbor::decode(tx).map_err(|e| e.to_string())?;
+        let witnesses = &mut draft.transaction_witness_set;
+        witnesses.vkeywitness = None;
+        if let Some(redeemers) = witnesses.redeemer.as_mut() {
+            for value in redeemers.0.values_mut() {
+                value.ex_units = ExUnits { mem: 0, steps: 0 };
+            }
+        }
+        let bytes = minicbor::to_vec(&draft).map_err(|e| e.to_string())?;
+        Ok(Draft { signed, bytes })
+    }
+}
+
+/// Judges the evaluator's and each EvalTx version's answer for a draft against the signed record's ledger rows.
+async fn judge_draft(
+    group: &Group,
+    draft: &Draft,
+    ledger: &BTreeMap<RowKey, Answer>,
+    listed: &BTreeMap<RowKey, Refusal>,
+    tally: &mut EvalTally,
+) {
+    let wires = wire_evals(group, &draft.bytes).await;
+    let evaluator = evaluator(group.estimate(&draft.bytes));
+    for (layer, answer) in wire_answers(&wires, &evaluator) {
+        tally.draft.add(layer, draft.signed, ledger, listed, answer);
+    }
+    let pallas = evaluator.answer;
+    tally
+        .draft
+        .add(Layer::Pallas, draft.signed, ledger, listed, pallas);
+}
+
 /// Judges the evaluator's and each EvalTx version's answer for one record against the ledger's rows, the rows the known list gives it and, when the ledger evaluated none, its outcome's demand, and returns the builtins called by each redeemer the evaluator ran in the ledger's units.
 pub(super) async fn judge_record(
     group: &Group,
@@ -225,6 +267,14 @@ pub(super) async fn judge_record(
     judge_tx(Layer::Pallas, &evaluator.answer);
     for (layer, answer) in answers {
         tally.add_answer(layer, id, &ledger, listed, answer);
+    }
+    if let (LedgerOutcome::Accepted { .. }, Phase2::Valid, false) =
+        (&record.outcome, record.flag(), ledger.is_empty())
+    {
+        match Draft::of(id, tx) {
+            Ok(draft) => judge_draft(group, &draft, &ledger, listed, tally).await,
+            Err(why) => tally.draft.underived.push(format!("{id} {why}")),
+        }
     }
     let verdicts = tally.add_answer(Layer::Pallas, id, &ledger, listed, evaluator.answer);
     let ran = verdicts.iter().filter_map(|(key, verdict)| match verdict {
@@ -274,4 +324,43 @@ pub(super) fn judge_context(
     let ledger = context::ledger_contexts(record);
     let pallas = pallas_contexts(group.arguments(&record.tx.0));
     tally.add(id, &context::judge_tx(&ledger, &pallas, listed));
+}
+
+#[test]
+fn a_draft_keeps_the_signed_body_and_drops_its_key_witnesses_and_budgets() {
+    use ledger_oracle_judge::record::CorpusKind;
+
+    let corpus = super::load(CorpusKind::Ic);
+    let records = corpus.kept().flat_map(|run| run.records());
+    fn decode(tx: &[u8]) -> MempoolTransaction<'_> {
+        minicbor::decode(tx).unwrap()
+    }
+    let signed = records
+        .filter(|r| matches!(r.outcome, LedgerOutcome::Accepted { .. }))
+        .find(|r| {
+            let tx = decode(&r.tx.0);
+            let witnesses = &tx.transaction_witness_set;
+            witnesses.vkeywitness.is_some() && witnesses.redeemer.is_some()
+        })
+        .expect("an accepted record signs and carries redeemers");
+    let id = RecordId {
+        corpus: CorpusKind::Ic,
+        n: signed.n,
+    };
+    let draft = Draft::of(id, &signed.tx.0).unwrap();
+    assert_eq!(draft.signed, id);
+    let (signed, draft) = (decode(&signed.tx.0), decode(&draft.bytes));
+    assert_eq!(
+        signed.transaction_body.raw_cbor(),
+        draft.transaction_body.raw_cbor()
+    );
+    assert_eq!(draft.transaction_witness_set.vkeywitness, None);
+    let budgets = |tx: &MempoolTransaction| -> Vec<(u64, u64)> {
+        let redeemers = tx.transaction_witness_set.redeemer.as_ref().unwrap();
+        redeemers.values().map(|v| (v.ex_units.mem, v.ex_units.steps)).collect()
+    };
+    assert!(budgets(&signed).iter().any(|b| *b != (0, 0)));
+    assert!(budgets(&draft).iter().all(|b| *b == (0, 0)));
+    assert_eq!(budgets(&signed).len(), budgets(&draft).len());
+    assert!(Draft::of(id, &[0x80]).is_err());
 }

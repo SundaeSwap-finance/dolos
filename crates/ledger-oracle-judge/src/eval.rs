@@ -725,6 +725,91 @@ impl fmt::Display for TxTally {
     }
 }
 
+/// The row verdicts of the unsigned drafts with zero budgets the accepted records with redeemers derive, against each signed record's ledger rows.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct DraftTally {
+    pub layers: BTreeMap<Layer, Counts>,
+    pub disagree: Vec<String>,
+    /// Each record whose bytes derive no draft, with why.
+    pub underived: Vec<String>,
+}
+
+impl DraftTally {
+    /// Judges one layer's answer for the draft of one record against the signed record's ledger rows.
+    pub fn add(
+        &mut self,
+        layer: Layer,
+        signed: RecordId,
+        ledger: &BTreeMap<RowKey, Answer>,
+        listed: &BTreeMap<RowKey, Refusal>,
+        answer: Result<DolosAnswer, Malformed>,
+    ) {
+        let counts = self.layers.entry(layer).or_default();
+        let verdicts = match answer {
+            Ok(answer) => judge_tx(ledger, &answer, listed),
+            Err(malformed) => {
+                counts.disagree += 1;
+                self.disagree.push(format!("{layer} {signed} {malformed}"));
+                return;
+            }
+        };
+        for (key, verdict) in verdicts {
+            counts.add(&verdict);
+            if let RowVerdict::Disagree(d) = verdict {
+                self.disagree.push(format!("{layer} {signed} {key} {d}"));
+            }
+        }
+    }
+
+    /// Adds the counts and lines of another part after this one's.
+    pub fn merge(&mut self, other: DraftTally) {
+        for (layer, counts) in other.layers {
+            self.layers.entry(layer).or_default().merge(counts);
+        }
+        self.disagree.extend(other.disagree);
+        self.underived.extend(other.underived);
+    }
+
+    /// Whether some draft row of every layer agrees with the signed record's ledger row.
+    pub fn every_layer_agrees(&self) -> bool {
+        let agreed = |layer: &Layer| self.layers.get(layer).is_some_and(|c| c.agree > 0);
+        Layer::ALL.iter().all(agreed)
+    }
+}
+
+impl fmt::Display for DraftTally {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut all = Counts::default();
+        for counts in self.layers.values() {
+            all.merge(*counts);
+        }
+        let layers: Vec<String> = self
+            .layers
+            .iter()
+            .map(|(l, c)| format!("{l}:{c}"))
+            .collect();
+        write!(
+            f,
+            "EVAL-DRAFT compared={} agree={} known={} unrepresentable={} disagree={} underived={} by_layer={} every_layer_agrees={}",
+            all.compared(),
+            all.agree,
+            all.known,
+            all.unrepresentable,
+            all.disagree,
+            self.underived.len(),
+            layers.join(","),
+            self.every_layer_agrees()
+        )?;
+        for line in &self.disagree {
+            write!(f, "\nEVAL-DRAFT-DIFF {line}")?;
+        }
+        for line in &self.underived {
+            write!(f, "\nEVAL-DRAFT-UNDERIVED {line}")?;
+        }
+        Ok(())
+    }
+}
+
 /// The row verdicts, response totals and fees of the evaluation judgement of one or more corpora.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EvalTally {
@@ -746,6 +831,7 @@ pub struct EvalTally {
     pub refused: EvalKnown,
     pub judged: BTreeSet<RecordId>,
     pub tx: TxTally,
+    pub draft: DraftTally,
 }
 
 impl EvalTally {
@@ -867,6 +953,7 @@ impl EvalTally {
             refused,
             judged,
             tx,
+            draft,
         } = other;
         for (layer, counts) in layers {
             self.layers.entry(layer).or_default().merge(counts);
@@ -892,12 +979,15 @@ impl EvalTally {
         }
         self.judged.extend(judged);
         self.tx.merge(tx);
+        self.draft.merge(draft);
     }
 
-    /// Whether no row, transaction, total, error or set fee disagrees.
+    /// Whether no row, transaction, draft, total, error or set fee disagrees and every draft derives.
     pub fn pass(&self) -> bool {
         self.disagree.is_empty()
             && self.tx.disagree.is_empty()
+            && self.draft.disagree.is_empty()
+            && self.draft.underived.is_empty()
             && self.totals.disagree.is_empty()
             && self.unnamed.is_empty()
             && self.fee_differ.is_empty()
@@ -975,7 +1065,7 @@ impl fmt::Display for EvalTally {
                 write!(f, "\n{prefix} {line}")?;
             }
         }
-        write!(f, "\n{}", self.tx)
+        write!(f, "\n{}\n{}", self.tx, self.draft)
     }
 }
 
@@ -1497,6 +1587,35 @@ mod tests {
         let mut one_layer = TxTally::default();
         one_layer.add(Layer::Pallas, ic(1), &TxVerdict::EvaluatedNone);
         assert!(!one_layer.every_layer_judged());
+    }
+
+    #[test]
+    fn a_draft_agrees_only_where_its_rows_equal_the_signed_records_ledger_rows() {
+        let ledger = BTreeMap::from([(key(Level::Top, 0, 0), ran(5, 7))]);
+        let unlisted = BTreeMap::new();
+        let mut t = EvalTally::default();
+        for layer in Layer::ALL {
+            let same = Ok(DolosAnswer::Evaluated(ledger.clone()));
+            t.draft.add(layer, ic(1), &ledger, &unlisted, same);
+        }
+        assert!(t.pass());
+        assert!(t.draft.every_layer_agrees());
+        let failed = BTreeMap::from([(key(Level::Top, 0, 0), Answer::Failed)]);
+        let budget = Ok(DolosAnswer::Evaluated(failed));
+        t.draft.add(Layer::V1, ic(2), &ledger, &unlisted, budget);
+        let witnesses = refused_for("missing key witnesses");
+        t.draft.add(Layer::Pallas, ic(2), &ledger, &unlisted, witnesses);
+        assert!(!t.pass());
+        let mut merged = EvalTally::default();
+        merged.merge(t.clone());
+        assert_eq!(merged, t);
+        assert_eq!(
+            t.draft.to_string(),
+            "EVAL-DRAFT compared=6 agree=4 known=0 unrepresentable=0 disagree=2 underived=0 by_layer=pallas:1/0/0/1,v1:1/0/0/1,v1beta:1/0/0/0,v1alpha:1/0/0/0 every_layer_agrees=true\nEVAL-DRAFT-DIFF v1 ic#2 top Spend#0 ledger=(ran mem=5 steps=7) dolos=(failed)\nEVAL-DRAFT-DIFF pallas ic#2 top Spend#0 ledger=(ran mem=5 steps=7) dolos=(refused missing key witnesses)"
+        );
+        let mut underived = EvalTally::default();
+        underived.draft.underived.push("ic#3 unexpected type".to_string());
+        assert!(!underived.pass());
     }
 
     #[test]
