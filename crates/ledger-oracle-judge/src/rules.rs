@@ -8,8 +8,8 @@ use std::{
 use crate::{
     cbor::{tx_fields, CborError, Field},
     manifest::ManifestError,
-    record::{FailurePath, LedgerOutcome, RecordId},
-    refusal::RefusalClass,
+    record::{LedgerOutcome, RecordId},
+    refusal::LedgerLeaf,
     verdict::DolosVerdict,
 };
 
@@ -111,7 +111,7 @@ pub fn ledger_answer(outcome: &LedgerOutcome) -> String {
     match outcome {
         LedgerOutcome::Accepted { .. } => "accepted".to_string(),
         LedgerOutcome::Refused { failure_names, .. } => {
-            let leaves: BTreeSet<&str> = failure_names.iter().map(FailurePath::leaf).collect();
+            let leaves: BTreeSet<&str> = failure_names.iter().map(|p| p.leaf.name()).collect();
             format!(
                 "refused[{}]",
                 leaves.into_iter().collect::<Vec<_>>().join(",")
@@ -160,7 +160,7 @@ fn entry(cells: &[&str]) -> Result<Entry, String> {
             let leaves: BTreeSet<String> = leaves.split(',').map(str::to_string).collect();
             if let Some(leaf) = leaves
                 .iter()
-                .find(|l| RefusalClass::of_ledger_leaf(l).is_none())
+                .find(|l| LedgerLeaf::of_name(l).is_none())
             {
                 return Err(format!("leaf {leaf} has no refusal class"));
             }
@@ -328,7 +328,7 @@ impl Rules {
                     }
                     Some(Entry::Ruled { leaves, .. }) => match ledger {
                         LedgerOutcome::Refused { failure_names, .. }
-                            if failure_names.iter().any(|p| leaves.contains(p.leaf())) =>
+                            if failure_names.iter().any(|p| leaves.contains(p.leaf.name())) =>
                         {
                             *tally.refused.entry(answer.clone()).or_default() += 1;
                             Shown::Agrees
@@ -441,7 +441,7 @@ mod tests {
     use super::*;
     use crate::{
         accounts::LedgerAccounts,
-        record::{CorpusKind, NonEmpty},
+        record::{CorpusKind, FailurePath, NonEmpty},
         refusal::{DolosClass, RefusalClass},
     };
 
@@ -466,8 +466,7 @@ unsupported[witness fields] | unrepresentable because the native validator does 
 
     fn refused(leaves: &[&str]) -> LedgerOutcome {
         let paths = leaves.iter().map(|leaf| FailurePath {
-            names: NonEmpty::of(["ConwayUtxowFailure".to_string(), leaf.to_string()]).unwrap(),
-            class: RefusalClass::CertificateAndGovernance,
+            leaf: LedgerLeaf::of_name(leaf).unwrap(),
         });
         LedgerOutcome::Refused {
             failures: String::new(),

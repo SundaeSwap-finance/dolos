@@ -246,7 +246,7 @@ struct Inventory(BTreeMap<String, usize>);
 impl Inventory {
     fn add(&mut self, record: &Record) {
         if let LedgerOutcome::Refused { failure_names, .. } = &record.outcome {
-            let leaves: BTreeSet<&str> = failure_names.iter().map(|f| f.leaf()).collect();
+            let leaves: BTreeSet<&str> = failure_names.iter().map(|f| f.leaf.name()).collect();
             for leaf in leaves {
                 *self.0.entry(leaf.to_string()).or_default() += 1;
             }
@@ -1867,7 +1867,7 @@ async fn ledger_oracle() {
     }
     pass &= rules_pass;
     println!("{evaluations}");
-    pass &= evaluations.every_layer_agrees();
+    pass &= evaluations.every_layer_agrees() && evaluations.tx.every_layer_judged();
     println!("{contexts}");
     println!(
         "REVALIDATE all compared={revalidated} pass={}",

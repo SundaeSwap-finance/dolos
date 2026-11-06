@@ -10,7 +10,8 @@ use crate::{
     cbor::Purpose,
     compare::Tally,
     manifest::ManifestError,
-    record::{Evaluation, LedgerRedeemers, Record, RecordId, Units},
+    record::{Evaluation, LedgerOutcome, LedgerRedeemers, Record, RecordId, Units},
+    refusal::LedgerLeaf,
 };
 
 const EVAL_KNOWN: &str = include_str!("../../../test_data/ledger-oracle/eval-known.txt");
@@ -285,6 +286,99 @@ pub fn judge_tx(
         .collect()
 }
 
+/// What an evaluation of a transaction the ledger refused under one failure leaf answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeafEval {
+    /// A refusal naming a missing script or redeemer.
+    Refuse,
+    /// The redeemers, judged as for a transaction the ledger accepted.
+    Evaluate,
+    /// No answer the judgement holds Dolos to.
+    Undecided,
+}
+
+/// What every layer must answer for a transaction whose redeemers the ledger evaluated none of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxDemand {
+    /// A refusal, for the script or redeemer leaf named.
+    Refuse(LedgerLeaf),
+    /// An evaluation of no redeemer.
+    EvaluateNone,
+    /// Nothing, the ledger's leaves naming no rule the judgement holds Dolos to.
+    Undecided,
+}
+
+impl TxDemand {
+    /// The demand of the ledger's outcome, a refusal when any leaf demands one and an evaluation when the ledger accepted or every leaf demands one.
+    pub fn of(outcome: &LedgerOutcome) -> Self {
+        let LedgerOutcome::Refused { failure_names, .. } = outcome else {
+            return TxDemand::EvaluateNone;
+        };
+        let leaves = || failure_names.iter().map(|p| p.leaf);
+        if let Some(leaf) = leaves().find(|l| l.eval() == LeafEval::Refuse) {
+            return TxDemand::Refuse(leaf);
+        }
+        match leaves().all(|l| l.eval() == LeafEval::Evaluate) {
+            true => TxDemand::EvaluateNone,
+            false => TxDemand::Undecided,
+        }
+    }
+}
+
+impl fmt::Display for TxDemand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TxDemand::Refuse(leaf) => write!(f, "refuse[{leaf}]"),
+            TxDemand::EvaluateNone => f.write_str("evaluate-none"),
+            TxDemand::Undecided => f.write_str("undecided"),
+        }
+    }
+}
+
+/// The verdict of one layer's answer for a transaction whose redeemers the ledger evaluated none of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TxVerdict {
+    /// The layer refused for the leaf, naming a script or redeemer.
+    Refused { leaf: LedgerLeaf, refusal: Refusal },
+    /// The layer evaluated no redeemer, as the ledger did.
+    EvaluatedNone,
+    /// The ledger's leaves hold the layer to no answer.
+    Undecided,
+    /// The layer's answer, which the demand refuses.
+    Disagree { demand: TxDemand, dolos: String },
+}
+
+/// Whether a refusal's words name a script or a redeemer.
+fn names_script_or_redeemer(refusal: &Refusal) -> bool {
+    let words = refusal.0.to_lowercase();
+    words.contains("script") || words.contains("redeemer")
+}
+
+/// The verdict of one layer's answer against the demand of a transaction whose redeemers the ledger evaluated none of.
+pub fn tx_verdict(demand: TxDemand, answer: &Result<DolosAnswer, Malformed>) -> TxVerdict {
+    let dolos = match answer {
+        Ok(DolosAnswer::Evaluated(rows)) => format!("evaluated[{} rows]", rows.len()),
+        Ok(DolosAnswer::Refused(refusal)) => format!("refused[{refusal}]"),
+        Ok(DolosAnswer::Unrepresentable(why)) => format!("unrepresentable[{why}]"),
+        Err(malformed) => format!("malformed[{malformed}]"),
+    };
+    match (demand, answer) {
+        (TxDemand::Undecided, _) => TxVerdict::Undecided,
+        (TxDemand::Refuse(leaf), Ok(DolosAnswer::Refused(refusal)))
+            if names_script_or_redeemer(refusal) =>
+        {
+            TxVerdict::Refused {
+                leaf,
+                refusal: refusal.clone(),
+            }
+        }
+        (TxDemand::EvaluateNone, Ok(DolosAnswer::Evaluated(rows))) if rows.is_empty() => {
+            TxVerdict::EvaluatedNone
+        }
+        (TxDemand::Refuse(_) | TxDemand::EvaluateNone, _) => TxVerdict::Disagree { demand, dolos },
+    }
+}
+
 /// The ledger's answer for each redeemer of a record, at its top level and in each sub transaction, none for a record whose bytes the ledger's decoder refused.
 pub fn ledger_rows(record: &Record) -> BTreeMap<RowKey, Answer> {
     let LedgerRedeemers::Read(redeemers) = &record.redeemers else {
@@ -535,6 +629,102 @@ impl fmt::Display for Counts {
     }
 }
 
+/// The number of one layer's answers that drew each transaction verdict.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct TxCounts {
+    pub refused: usize,
+    pub evaluated_none: usize,
+    pub undecided: usize,
+    pub disagree: usize,
+}
+
+impl TxCounts {
+    fn merge(&mut self, other: TxCounts) {
+        self.refused += other.refused;
+        self.evaluated_none += other.evaluated_none;
+        self.undecided += other.undecided;
+        self.disagree += other.disagree;
+    }
+}
+
+/// The transaction verdicts of the records whose redeemers the ledger evaluated none of, by layer.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TxTally {
+    pub layers: BTreeMap<Layer, TxCounts>,
+    pub disagree: Vec<String>,
+}
+
+impl TxTally {
+    /// Counts one layer's verdict for one record, keeping a line when it disagrees.
+    pub fn add(&mut self, layer: Layer, id: RecordId, verdict: &TxVerdict) {
+        let counts = self.layers.entry(layer).or_default();
+        match verdict {
+            TxVerdict::Refused { .. } => counts.refused += 1,
+            TxVerdict::EvaluatedNone => counts.evaluated_none += 1,
+            TxVerdict::Undecided => counts.undecided += 1,
+            TxVerdict::Disagree { demand, dolos } => {
+                counts.disagree += 1;
+                let dolos: String = dolos.chars().take(160).collect();
+                self.disagree
+                    .push(format!("{layer} {id} demand={demand} dolos={dolos}"));
+            }
+        }
+    }
+
+    /// Adds the counts and lines of another part after this one's.
+    pub fn merge(&mut self, other: TxTally) {
+        for (layer, counts) in other.layers {
+            self.layers.entry(layer).or_default().merge(counts);
+        }
+        self.disagree.extend(other.disagree);
+    }
+
+    /// Whether every layer refused some record for a script or redeemer leaf and evaluated none of the redeemers of some other.
+    pub fn every_layer_judged(&self) -> bool {
+        let judged = |layer: &Layer| {
+            self.layers
+                .get(layer)
+                .is_some_and(|c| c.refused > 0 && c.evaluated_none > 0)
+        };
+        Layer::ALL.iter().all(judged)
+    }
+}
+
+impl fmt::Display for TxTally {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut all = TxCounts::default();
+        for counts in self.layers.values() {
+            all.merge(*counts);
+        }
+        let layers = self.layers.iter().map(|(l, c)| {
+            let TxCounts {
+                refused,
+                evaluated_none,
+                undecided,
+                disagree,
+            } = c;
+            format!("{l}:{refused}/{evaluated_none}/{undecided}/{disagree}")
+        });
+        let layers: Vec<String> = layers.collect();
+        write!(
+            f,
+            "EVAL-TX compared={} agree={} disagree={} refused={} evaluated_none={} undecided={} by_layer={} every_layer_judged={}",
+            all.refused + all.evaluated_none + all.disagree,
+            all.refused + all.evaluated_none,
+            all.disagree,
+            all.refused,
+            all.evaluated_none,
+            all.undecided,
+            layers.join(","),
+            self.every_layer_judged()
+        )?;
+        for line in &self.disagree {
+            write!(f, "\nEVAL-TX-DIFF {line}")?;
+        }
+        Ok(())
+    }
+}
+
 /// The row verdicts, response totals and fees of the evaluation judgement of one or more corpora.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EvalTally {
@@ -555,6 +745,7 @@ pub struct EvalTally {
     /// The rows the evaluator refused, with its refusal, the candidates for the known list.
     pub refused: EvalKnown,
     pub judged: BTreeSet<RecordId>,
+    pub tx: TxTally,
 }
 
 impl EvalTally {
@@ -675,6 +866,7 @@ impl EvalTally {
             undecoded,
             refused,
             judged,
+            tx,
         } = other;
         for (layer, counts) in layers {
             self.layers.entry(layer).or_default().merge(counts);
@@ -699,11 +891,13 @@ impl EvalTally {
             self.refused.entry(id).or_default().extend(rows);
         }
         self.judged.extend(judged);
+        self.tx.merge(tx);
     }
 
-    /// Whether no row, total, error or set fee disagrees.
+    /// Whether no row, transaction, total, error or set fee disagrees.
     pub fn pass(&self) -> bool {
         self.disagree.is_empty()
+            && self.tx.disagree.is_empty()
             && self.totals.disagree.is_empty()
             && self.unnamed.is_empty()
             && self.fee_differ.is_empty()
@@ -781,7 +975,7 @@ impl fmt::Display for EvalTally {
                 write!(f, "\n{prefix} {line}")?;
             }
         }
-        Ok(())
+        write!(f, "\n{}", self.tx)
     }
 }
 
@@ -1188,5 +1382,129 @@ mod tests {
             "{line}"
         );
         assert!(line.contains(" undecoded=1 every_layer_agrees="), "{line}");
+    }
+
+    fn refused_by(leaves: &[LedgerLeaf]) -> LedgerOutcome {
+        let paths = leaves.iter().map(|leaf| crate::record::FailurePath { leaf: *leaf });
+        LedgerOutcome::Refused {
+            failures: String::new(),
+            failure_names: crate::record::NonEmpty::of(paths).unwrap(),
+        }
+    }
+
+    fn accepted() -> LedgerOutcome {
+        LedgerOutcome::Accepted {
+            consumed: vec![],
+            produced: vec![],
+            accounts_post: Default::default(),
+        }
+    }
+
+    fn none_evaluated() -> Result<DolosAnswer, Malformed> {
+        Ok(DolosAnswer::Evaluated(BTreeMap::new()))
+    }
+
+    fn refused_for(why: &str) -> Result<DolosAnswer, Malformed> {
+        Ok(DolosAnswer::Refused(refusal(why)))
+    }
+
+    #[test]
+    fn an_empty_evaluation_agrees_with_an_acceptance_and_key_witness_or_fee_leaves() {
+        use LedgerLeaf as L;
+        let cases = [
+            accepted(),
+            refused_by(&[L::MissingVKeyWitnessesUTXOW]),
+            refused_by(&[L::SubInvalidWitnessesUTXOW, L::SubMissingVKeyWitnessesUTXOW]),
+            refused_by(&[L::FeeTooSmallUTxO, L::ExUnitsTooBigUTxO]),
+        ];
+        for outcome in cases {
+            let demand = TxDemand::of(&outcome);
+            assert_eq!(demand, TxDemand::EvaluateNone, "{outcome:?}");
+            let verdict = tx_verdict(demand, &none_evaluated());
+            assert_eq!(verdict, TxVerdict::EvaluatedNone, "{outcome:?}");
+            let refused = tx_verdict(demand, &refused_for("missing redeemer Spend[0]"));
+            assert!(matches!(refused, TxVerdict::Disagree { .. }), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn leaves_of_other_rules_hold_no_answer() {
+        use LedgerLeaf as L;
+        for leaves in [
+            &[L::BadInputsUTxO][..],
+            &[L::MissingVKeyWitnessesUTXOW, L::ValueNotConservedUTxO],
+            &[L::MissingRequiredGuards],
+        ] {
+            let demand = TxDemand::of(&refused_by(leaves));
+            assert_eq!(demand, TxDemand::Undecided, "{leaves:?}");
+            for answer in [none_evaluated(), refused_for("no redeemer")] {
+                assert_eq!(tx_verdict(demand, &answer), TxVerdict::Undecided);
+            }
+        }
+    }
+
+    #[test]
+    fn a_script_or_redeemer_leaf_demands_a_refusal_naming_a_script_or_redeemer() {
+        use LedgerLeaf as L;
+        let outcome = refused_by(&[L::CollectErrors, L::SubMissingRedeemers]);
+        let demand = TxDemand::of(&outcome);
+        assert_eq!(demand, TxDemand::Refuse(L::CollectErrors));
+        let empty = tx_verdict(demand, &none_evaluated());
+        assert_eq!(
+            empty,
+            TxVerdict::Disagree {
+                demand,
+                dolos: "evaluated[0 rows]".to_string()
+            }
+        );
+        let named = tx_verdict(demand, &refused_for("MissingRedeemer Spend 0"));
+        assert_eq!(
+            named,
+            TxVerdict::Refused {
+                leaf: L::CollectErrors,
+                refusal: refusal("MissingRedeemer Spend 0")
+            }
+        );
+        let unnamed = tx_verdict(demand, &refused_for("unknown era"));
+        assert!(matches!(unnamed, TxVerdict::Disagree { .. }), "{unnamed:?}");
+        let mixed = TxDemand::of(&refused_by(&[L::BadInputsUTxO, L::MissingScriptWitnessesUTXOW]));
+        assert_eq!(mixed, TxDemand::Refuse(L::MissingScriptWitnessesUTXOW));
+    }
+
+    #[test]
+    fn the_transaction_line_counts_by_layer_and_fails_the_tally_on_a_disagreement() {
+        let mut t = EvalTally::default();
+        let demand = TxDemand::Refuse(LedgerLeaf::MissingRedeemers);
+        for layer in Layer::ALL {
+            let refused = tx_verdict(demand, &refused_for("missing redeemer"));
+            t.tx.add(layer, ic(1), &refused);
+            t.tx.add(layer, ic(2), &TxVerdict::EvaluatedNone);
+            t.tx.add(layer, ic(3), &TxVerdict::Undecided);
+        }
+        assert!(t.pass());
+        assert!(t.tx.every_layer_judged());
+        let disagree = tx_verdict(demand, &none_evaluated());
+        t.tx.add(Layer::V1beta, ic(4), &disagree);
+        assert!(!t.pass());
+        let mut merged = EvalTally::default();
+        merged.merge(t.clone());
+        assert_eq!(merged, t);
+        let line = t.tx.to_string();
+        assert_eq!(
+            line,
+            "EVAL-TX compared=9 agree=8 disagree=1 refused=4 evaluated_none=4 undecided=4 by_layer=pallas:1/1/1/0,v1:1/1/1/0,v1beta:1/1/1/1,v1alpha:1/1/1/0 every_layer_judged=true\nEVAL-TX-DIFF v1beta ic#4 demand=refuse[MissingRedeemers] dolos=evaluated[0 rows]"
+        );
+        let mut one_layer = TxTally::default();
+        one_layer.add(Layer::Pallas, ic(1), &TxVerdict::EvaluatedNone);
+        assert!(!one_layer.every_layer_judged());
+    }
+
+    #[test]
+    fn every_leaf_reads_back_from_its_name() {
+        for name in ["CollectErrors", "SubMissingRedeemers", "FeeTooSmallUTxO"] {
+            let leaf = LedgerLeaf::of_name(name).unwrap();
+            assert_eq!(leaf.name(), name);
+        }
+        assert_eq!(LedgerLeaf::of_name("NoSuchLeaf"), None);
     }
 }

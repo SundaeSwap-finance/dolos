@@ -7,7 +7,7 @@ use std::{
 use crate::{
     manifest::Feature,
     record::{FailurePath, LedgerOutcome, NonEmpty, RecordId},
-    refusal::{DolosClass, RefusalClass},
+    refusal::{DolosClass, LedgerLeaf, RefusalClass},
     row::Row,
 };
 
@@ -36,7 +36,7 @@ pub fn show_ledger(outcome: &LedgerOutcome) -> String {
     match outcome {
         LedgerOutcome::Accepted { .. } => "accepted".to_string(),
         LedgerOutcome::Refused { failure_names, .. } => {
-            let leaves: Vec<&str> = failure_names.iter().map(FailurePath::leaf).collect();
+            let leaves: Vec<&str> = failure_names.iter().map(|p| p.leaf.name()).collect();
             format!("refused[{}]", leaves.join(","))
         }
     }
@@ -49,7 +49,7 @@ fn refusal_outcome(
     kind: &str,
     class: Option<RefusalClass>,
 ) -> Outcome {
-    let ledger_classes: BTreeSet<RefusalClass> = failure_names.iter().map(|p| p.class).collect();
+    let ledger_classes: BTreeSet<RefusalClass> = failure_names.iter().map(FailurePath::class).collect();
     match class {
         Some(class) if ledger_classes.contains(&class) => Outcome::Pass(Pass::Agree),
         Some(_) | None => {
@@ -218,7 +218,7 @@ pub fn outcome(
         (L::Refused { failure_names, .. }, D::Phase2Rejected, None)
             if failure_names
                 .iter()
-                .all(|p| p.leaf() == "ValidationTagMismatch") =>
+                .all(|p| p.leaf == LedgerLeaf::ValidationTagMismatch) =>
         {
             Outcome::Pass(Pass::Agree)
         }
@@ -594,11 +594,7 @@ mod tests {
 
     fn path(leaf: &str) -> FailurePath {
         FailurePath {
-            names: NonEmpty {
-                head: "UtxoFailure".to_string(),
-                tail: vec![leaf.to_string()],
-            },
-            class: RefusalClass::of_ledger_leaf(leaf).unwrap(),
+            leaf: LedgerLeaf::of_name(leaf).unwrap(),
         }
     }
 

@@ -5,7 +5,7 @@ use serde::{de::Error as _, Deserialize, Deserializer};
 use crate::{
     accounts::LedgerAccounts,
     cbor::{self, Purpose, TxIn},
-    refusal::RefusalClass,
+    refusal::{LedgerLeaf, RefusalClass},
     state::{Certs, Gov},
 };
 
@@ -176,27 +176,26 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for NonEmpty<T> {
     }
 }
 
-/// The constructor names of one ledger failure, from the outer wrapper to the leaf, and the class of its leaf.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One ledger failure, by the leaf its constructor names end in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FailurePath {
-    pub names: NonEmpty<String>,
-    pub class: RefusalClass,
+    pub leaf: LedgerLeaf,
 }
 
 impl FailurePath {
-    /// The constructor name of the failure itself.
-    pub fn leaf(&self) -> &str {
-        self.names.last()
+    /// The class of the failure's rule.
+    pub fn class(&self) -> RefusalClass {
+        self.leaf.class()
     }
 }
 
 impl<'de> Deserialize<'de> for FailurePath {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let names = NonEmpty::<String>::deserialize(d)?;
-        let leaf = names.last();
-        let class = RefusalClass::of_ledger_leaf(leaf)
-            .ok_or_else(|| D::Error::custom(format!("unclassified ledger leaf {leaf}")))?;
-        Ok(FailurePath { names, class })
+        let name = names.last();
+        let leaf = LedgerLeaf::of_name(name)
+            .ok_or_else(|| D::Error::custom(format!("unclassified ledger leaf {name}")))?;
+        Ok(FailurePath { leaf })
     }
 }
 
@@ -266,7 +265,7 @@ impl LedgerOutcome {
             LedgerOutcome::Accepted { .. } => false,
             LedgerOutcome::Refused { failure_names, .. } => failure_names
                 .iter()
-                .any(|path| path.class == RefusalClass::Decoding),
+                .any(|path| path.class() == RefusalClass::Decoding),
         }
     }
 }

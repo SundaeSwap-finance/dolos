@@ -127,12 +127,10 @@ mod tests {
     };
 
     fn refused() -> LedgerOutcome {
-        let names = NonEmpty::of(["BadInputsUTxO".to_string()]).unwrap();
         LedgerOutcome::Refused {
             failures: String::new(),
             failure_names: NonEmpty::of([FailurePath {
-                names,
-                class: crate::refusal::RefusalClass::Inputs,
+                leaf: crate::refusal::LedgerLeaf::BadInputsUTxO,
             }])
             .unwrap(),
         }

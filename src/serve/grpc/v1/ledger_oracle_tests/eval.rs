@@ -8,7 +8,7 @@ use ledger_oracle_judge::{
     context::{self, ContextTally, Listing, PallasContext, PallasContexts},
     eval::{
         self, named_in_message, wire_purpose, Answer, DolosAnswer, EvalTally, Layer, Level,
-        Malformed, Refusal, RowKey, RowVerdict, WireEval, WireFee,
+        Malformed, Refusal, RowKey, RowVerdict, TxDemand, WireEval, WireFee,
     },
     record::{LedgerRedeemers, Record, RecordId, Units},
 };
@@ -174,7 +174,24 @@ async fn wire_evals(group: &Group, tx: &[u8]) -> [(Layer, WireEval); 3] {
     ]
 }
 
-/// Judges the evaluator's and each EvalTx version's answer for one record against the ledger's rows and the rows the known list gives it, and returns the builtins called by each redeemer the evaluator ran in the ledger's units.
+/// Each EvalTx version's answer from its response, named by the evaluator's refusal and the message each version gives for what it cannot represent.
+fn wire_answers(
+    wires: &[(Layer, WireEval)],
+    evaluator: &Evaluator,
+) -> Vec<(Layer, Result<DolosAnswer, Malformed>)> {
+    let refusal = evaluator
+        .refusal
+        .as_ref()
+        .map(|(text, r)| (text.as_str(), r));
+    let answers = wires.iter().map(|(layer, wire)| {
+        let unrepresentable = evaluator.unrepresentable.get(layer);
+        let answer = wire.answer(refusal, unrepresentable.map(String::as_str));
+        (*layer, answer)
+    });
+    answers.collect()
+}
+
+/// Judges the evaluator's and each EvalTx version's answer for one record against the ledger's rows, the rows the known list gives it and, when the ledger evaluated none, its outcome's demand, and returns the builtins called by each redeemer the evaluator ran in the ledger's units.
 pub(super) async fn judge_record(
     group: &Group,
     id: RecordId,
@@ -195,13 +212,18 @@ pub(super) async fn judge_record(
     let ledger = eval::ledger_rows(record);
     tally.collisions += eval::collisions(&ledger);
     let evaluator = evaluator(group.estimate(tx));
-    let refusal = evaluator
-        .refusal
-        .as_ref()
-        .map(|(text, r)| (text.as_str(), r));
-    for (layer, wire) in wires {
-        let unrepresentable = evaluator.unrepresentable.get(&layer);
-        let answer = wire.answer(refusal, unrepresentable.map(String::as_str));
+    let demand = ledger.is_empty().then(|| TxDemand::of(&record.outcome));
+    let mut judge_tx = |layer: Layer, answer: &Result<DolosAnswer, Malformed>| {
+        if let Some(demand) = demand {
+            tally.tx.add(layer, id, &eval::tx_verdict(demand, answer));
+        }
+    };
+    let answers = wire_answers(&wires, &evaluator);
+    for (layer, answer) in &answers {
+        judge_tx(*layer, answer);
+    }
+    judge_tx(Layer::Pallas, &evaluator.answer);
+    for (layer, answer) in answers {
         tally.add_answer(layer, id, &ledger, listed, answer);
     }
     let verdicts = tally.add_answer(Layer::Pallas, id, &ledger, listed, evaluator.answer);
