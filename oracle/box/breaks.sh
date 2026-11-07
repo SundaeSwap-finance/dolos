@@ -167,7 +167,7 @@ caught() {
     v4-ref-refused) pattern='^UNSUPPORTED_UNEXPECTED [a-z]+#[0-9]+ label=reference script language ' ;;
     pointer-refused) pattern='^UNSUPPORTED_UNEXPECTED [a-z]+#[0-9]+ label=pointer address ' ;;
     collateral-unsupported) pattern='^UNSUPPORTED_UNEXPECTED [a-z]+#[0-9]+ label=collateral without Plutus$' ;;
-    indef-strings-refused) pattern='^DISAGREE [a-z]+#[0-9]+ ledger=accepted dolos=refused\[CborDecodingError\]$' ;;
+    indef-strings-refused | flat-enum-definite | indef-array-refused) pattern='^DISAGREE [a-z]+#[0-9]+ ledger=accepted dolos=refused\[CborDecodingError\]$' ;;
     sub-valid-always) pattern='^DIFF (utxo|accounts) [a-z]+#[0-9]+ ' ;;
     pointer-output-refused) pattern='^DISAGREE [a-z0-9]+#[0-9]+ ledger=refused\[PtrPresentInCollateralReturn\] dolos=accepted$' ;;
     native-guard-datum-required) pattern='^DISAGREE [a-z]+#[0-9]+ ledger=accepted dolos=refused\[DijkstraMalformedGuardDatum\]$' ;;
@@ -182,6 +182,9 @@ caught() {
     witness-v3-v4-dropped) pattern='^DIFF served_tx [a-z]+#[0-9]+ v1[a-z]* (sub_)?tx=[0-9a-f]+ differing=([a-z]+,)*scripts(,|$| )' ;;
     rational-truncated) pattern='^DIFF served_tx [a-z]+#[0-9]+ v1[a-z]* tx=[0-9a-f]+ differing=([a-z]+,)*quorum(,|$| )' ;;
     datum-sub-unsearched) pattern='^DIFF plutus_data [a-z]+#[0-9]+ ' ;;
+    bigint-truncated) pattern='^DIFF utxo .* fields=([a-z_]+,)*datum(,|$)' ;;
+    aux-plutus-dropped) pattern='^DIFF served_tx [a-z]+#[0-9]+ v1[a-z]* (sub_)?tx=[0-9a-f]+ differing=([a-z_]+,)*aux_scripts(,|$| )' ;;
+    update-keys-dropped) pattern='^DIFF served_tx [a-z]+#[0-9]+ v1 (sub_)?tx=[0-9a-f]+ differing=([a-z_]+,)*dijkstra_keys(,|$| )' ;;
     pending-registrations-ignored) pattern='^DISAGREE [a-z]+#[0-9]+ ledger=accepted dolos=refused\[DijkstraInvalidAccount\(' ;;
     endorser-tx-dropped) pattern='^ENDORSER-DIFF service=(FetchBlock|FollowTip) slot=[0-9]+ list=(ids|bytes) index=[0-9]+ ' ;;
     fee-min-deleted | aux-refused | integrity-top-deleted) pattern='^(DISAGREE|REASON_MISMATCH|RULE_MISMATCH) [a-z0-9]+#[0-9]+ ' ;;
