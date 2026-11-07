@@ -153,10 +153,23 @@ index d61d83bf6..62589b72c 100644
          }
  
 diff --git a/pallas-utxorpc/src/shared.rs b/pallas-utxorpc/src/shared.rs
-index fd504aacb..167be4bd2 100644
+index fd504aacb..799a31f3b 100644
 --- a/pallas-utxorpc/src/shared.rs
 +++ b/pallas-utxorpc/src/shared.rs
-@@ -462,6 +462,12 @@ macro_rules! impl_cardano_mapper_shared {
+@@ -45,6 +45,12 @@ macro_rules! impl_cardano_mapper_shared {
+         use $u5c as u5c;
+ 
+         fn rational_number_to_u5c(value: pallas_primitives::RationalNumber) -> u5c::RationalNumber {
++            if pallas_crypto::oracle_plant("rational-truncated") {
++                return u5c::RationalNumber {
++                    numerator: value.numerator as i32,
++                    denominator: value.denominator as u32,
++                };
++            }
+             let (numerator, denominator) = (value.numerator, value.denominator);
+             let (numerator, denominator) =
+                 match (i32::try_from(numerator), u32::try_from(denominator)) {
+@@ -462,6 +468,12 @@ macro_rules! impl_cardano_mapper_shared {
                  match x {
                      MultiEraNativeScript::AlonzoCompatible(x) => Self::map_native_script(x),
                      #[cfg(feature = "unstable")]
@@ -169,7 +182,7 @@ index fd504aacb..167be4bd2 100644
                      MultiEraNativeScript::Dijkstra(x) => Self::map_dijkstra_native_script(x),
                      _ => unimplemented!("collect_all_scripts has no arm for this native script"),
                  }
-@@ -510,6 +516,9 @@ macro_rules! impl_cardano_mapper_shared {
+@@ -510,6 +522,9 @@ macro_rules! impl_cardano_mapper_shared {
                          script: u5c::script::Script::PlutusV4(x).into(),
                      });
  
@@ -179,7 +192,7 @@ index fd504aacb..167be4bd2 100644
                  ns.chain(p1).chain(p2).chain(p3).chain(p4).collect()
              }
  
-@@ -642,6 +651,10 @@ macro_rules! impl_cardano_mapper_shared {
+@@ -642,6 +657,10 @@ macro_rules! impl_cardano_mapper_shared {
                  &self,
                  x: &pallas_traverse::MultiEraProposal,
              ) -> u5c::GovernanceActionProposal {

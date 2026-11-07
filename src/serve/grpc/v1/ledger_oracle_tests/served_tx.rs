@@ -1,4 +1,4 @@
-//! Judges the fee and witness scripts each ReadTx version maps for a transaction against the ledger's transaction.
+//! Judges the fee, witness scripts and committee thresholds each ReadTx version maps for a transaction against the ledger's transaction.
 
 use std::{fmt, panic::AssertUnwindSafe};
 
@@ -12,7 +12,7 @@ use ledger_oracle_judge::{
 };
 use pallas::{
     crypto::hash::Hasher,
-    ledger::traverse::{Era, MultiEraTx},
+    ledger::traverse::{Era, MultiEraGovActionKind, MultiEraTx},
 };
 use tonic::Request;
 
@@ -22,10 +22,44 @@ use crate::adapters::DomainAdapter;
 /// A witness script by its language, with its hash when the message carries its bytes, none for a script message with no script in it.
 type ScriptKey = Option<(ScriptLanguage, Option<[u8; 28]>)>;
 
-/// The fee and witness scripts of a transaction as the ledger holds them.
+/// The threshold a proposal sets when it updates the committee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Quorum {
+    /// A proposal of another kind.
+    Other,
+    /// A committee update with this threshold, none when the message carries none.
+    Update(Option<(i128, u128)>),
+}
+
+impl Quorum {
+    /// Whether a mapped threshold is this one within 2^-30, which a pair of 32 bit fields holds for any threshold the ledger accepts.
+    fn holds(self, mapped: Quorum) -> bool {
+        match (self, mapped) {
+            (Quorum::Other, Quorum::Other) => true,
+            (Quorum::Update(Some((n, d))), Quorum::Update(Some((m, e)))) => {
+                let gap = (n * e as i128 - m * d as i128).unsigned_abs();
+                gap << 30 <= d * e
+            }
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Display for Quorum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Quorum::Other => f.write_str("other"),
+            Quorum::Update(Some((n, d))) => write!(f, "{n}/{d}"),
+            Quorum::Update(None) => f.write_str("none"),
+        }
+    }
+}
+
+/// The fee, witness scripts and committee thresholds of a transaction as the ledger holds them.
 struct LedgerTx {
     fee: Option<u64>,
     scripts: Vec<ScriptKey>,
+    quorum: Vec<Quorum>,
 }
 
 impl LedgerTx {
@@ -35,17 +69,27 @@ impl LedgerTx {
             let hash = (language != ScriptLanguage::Native).then_some(hash);
             Some((language, hash))
         });
+        let proposals = tx.gov_proposals();
+        let quorum = proposals.iter().map(|p| match p.gov_action().kind() {
+            MultiEraGovActionKind::UpdateCommittee(.., threshold) => Quorum::Update(Some((
+                threshold.numerator.into(),
+                threshold.denominator.into(),
+            ))),
+            _ => Quorum::Other,
+        });
         LedgerTx {
             fee: tx.fee(),
             scripts: scripts.sorted().collect(),
+            quorum: quorum.collect(),
         }
     }
 }
 
-/// The fee and witness scripts a ReadTx version maps for a transaction, with no fee in a message that has no fee field.
+/// The fee, witness scripts and committee thresholds a ReadTx version maps for a transaction, with no fee in a message that has no fee field.
 struct MappedTx {
     fee: Option<WireFee>,
     scripts: Vec<ScriptKey>,
+    quorum: Vec<Quorum>,
 }
 
 /// The language and hash of a Plutus script a message carries the bytes of.
@@ -57,7 +101,9 @@ fn plutus(language: ScriptLanguage, bytes: &[u8]) -> ScriptKey {
 /// The fields one u5c version maps for a transaction message, with the given fee.
 macro_rules! mapped {
     ($version:ident, $tx:expr, $fee:expr) => {{
-        use pallas::interop::utxorpc::$version::spec::cardano::script::Script;
+        use pallas::interop::utxorpc::$version::spec::cardano::{
+            governance_action::GovernanceAction, script::Script,
+        };
         let tx = $tx;
         let witnessed = tx.witnesses.iter().flat_map(|w| &w.script);
         let scripts = witnessed.map(|s| match &s.script {
@@ -68,9 +114,20 @@ macro_rules! mapped {
             Some(Script::PlutusV3(b)) => plutus(ScriptLanguage::PlutusV3, b),
             Some(Script::PlutusV4(b)) => plutus(ScriptLanguage::PlutusV4, b),
         });
+        let quorum = tx.proposals.iter().map(|p| {
+            let action = p.gov_action.as_ref();
+            match action.and_then(|a| a.governance_action.as_ref()) {
+                Some(GovernanceAction::UpdateCommitteeAction(a)) => {
+                    let threshold = a.new_committee_threshold.as_ref();
+                    Quorum::Update(threshold.map(|r| (r.numerator.into(), r.denominator.into())))
+                }
+                _ => Quorum::Other,
+            }
+        });
         MappedTx {
             fee: $fee,
             scripts: scripts.sorted().collect(),
+            quorum: quorum.collect(),
         }
     }};
 }
@@ -129,6 +186,7 @@ macro_rules! read_tx {
 enum Field {
     Fee,
     Scripts,
+    Quorum,
 }
 
 impl fmt::Display for Field {
@@ -136,6 +194,7 @@ impl fmt::Display for Field {
         f.write_str(match self {
             Field::Fee => "fee",
             Field::Scripts => "scripts",
+            Field::Quorum => "quorum",
         })
     }
 }
@@ -166,6 +225,10 @@ fn differing(ledger: &LedgerTx, mapped: &MappedTx) -> Vec<(Field, String, String
     if ledger.scripts != mapped.scripts {
         let (l, m) = (show_scripts(&ledger.scripts), show_scripts(&mapped.scripts));
         differing.push((Field::Scripts, l, m));
+    }
+    let (l, m) = (&ledger.quorum, &mapped.quorum);
+    if l.len() != m.len() || l.iter().zip(m).any(|(l, m)| !l.holds(*m)) {
+        differing.push((Field::Quorum, l.iter().join(","), m.iter().join(",")));
     }
     differing
 }
@@ -272,6 +335,19 @@ pub(super) async fn compare(
     v1
 }
 
+#[test]
+fn a_threshold_the_fields_round_holds_and_a_truncated_one_does_not() {
+    let third = Quorum::Update(Some((1, 3)));
+    assert!(third.holds(Quorum::Update(Some((715_827_882, 2_147_483_647)))));
+    assert!(Quorum::Update(Some((5, 0))).holds(Quorum::Update(Some((1, 0)))));
+    assert!(Quorum::Other.holds(Quorum::Other));
+    let (n, d): (u64, u64) = (1_435_934_570_883, 2_500_000_000_000);
+    let truncated = Quorum::Update(Some(((n as i32).into(), (d as u32).into())));
+    assert!(!Quorum::Update(Some((n.into(), d.into()))).holds(truncated));
+    assert!(!third.holds(Quorum::Update(None)));
+    assert!(!third.holds(Quorum::Other));
+}
+
 fn ledger(fee: Option<u64>) -> LedgerTx {
     LedgerTx {
         fee,
@@ -279,6 +355,7 @@ fn ledger(fee: Option<u64>) -> LedgerTx {
             Some((ScriptLanguage::Native, None)),
             Some((ScriptLanguage::PlutusV3, Some([3; 28]))),
         ],
+        quorum: vec![Quorum::Other],
     }
 }
 
@@ -287,6 +364,7 @@ fn mapped(fee: Option<WireFee>) -> MappedTx {
     MappedTx {
         fee,
         scripts: ledger.scripts,
+        quorum: ledger.quorum,
     }
 }
 
@@ -308,9 +386,12 @@ fn a_fee_the_ledger_holds_none_of_differs_when_mapped_as_zero() {
 }
 
 #[test]
-fn a_dropped_witness_script_differs() {
+fn a_dropped_witness_script_or_proposal_differs() {
     let ledger = ledger(None);
     let mut dropped = mapped(None);
     dropped.scripts.pop();
     assert_eq!(fields(&ledger, &dropped), [Field::Scripts]);
+    let mut dropped = mapped(None);
+    dropped.quorum.clear();
+    assert_eq!(fields(&ledger, &dropped), [Field::Quorum]);
 }
