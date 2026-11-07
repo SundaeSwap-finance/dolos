@@ -58,7 +58,7 @@ use pallas::{
     },
     crypto::hash::Hasher,
     ledger::{
-        primitives::{conway::DatumOption, dijkstra},
+        primitives::{conway::DatumOption, dijkstra, PlutusData},
         traverse::{
             ComputeHash as _, Era, MultiEraOutput, MultiEraRedeemerTag as RedeemerTag, MultiEraTx,
             OriginalHash as _,
@@ -398,6 +398,7 @@ fn judged_part(uncompared: &[&str]) -> Judged {
         ("readtx", &mut state.readtx),
         ("script", &mut state.script),
         ("datum", &mut state.datum),
+        ("plutus_data", &mut state.plutus_data),
         ("served_tx", &mut state.served_tx),
     ];
     for (name, tally) in tallies {
@@ -1187,18 +1188,18 @@ async fn compare_read_tx(
     }
 }
 
-/// Where a script appears, in the witnesses of a transaction or on an output.
+/// Where a script or datum appears, in the witnesses of a transaction or on an output.
 #[derive(Debug, Clone, Copy)]
-enum ScriptAt {
+enum CarriedAt {
     Witness(TxName),
     Output(TxIn),
 }
 
-impl fmt::Display for ScriptAt {
+impl fmt::Display for CarriedAt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ScriptAt::Witness(name) => write!(f, "witness,{name}"),
-            ScriptAt::Output(input) => write!(f, "output={}", show_input(input)),
+            CarriedAt::Witness(name) => write!(f, "witness,{name}"),
+            CarriedAt::Output(input) => write!(f, "output={}", show_input(input)),
         }
     }
 }
@@ -1225,7 +1226,7 @@ fn output_script(output: &MultiEraOutput<'_>) -> Option<([u8; 28], ScriptLanguag
 }
 
 /// The language and place of a script in an accepted record, none for a script the ledger does not hold.
-type LedgerScript = Option<(ScriptLanguage, ScriptAt)>;
+type LedgerScript = Option<(ScriptLanguage, CarriedAt)>;
 
 /// Counts each script hash of the groups whose block rolled or was never made against what the script lookup serves for it, the language from the witnesses or produced outputs of an accepted record, or nothing otherwise.
 async fn compare_scripts(
@@ -1254,7 +1255,7 @@ async fn compare_scripts(
         let mut written = Vec::new();
         for (name, tx) in txs {
             let witnessed = witness_scripts(tx).into_iter();
-            carried.extend(witnessed.map(|(h, l)| (h, l, ScriptAt::Witness(name))));
+            carried.extend(witnessed.map(|(h, l)| (h, l, CarriedAt::Witness(name))));
             written.extend(tx.outputs().iter().filter_map(output_script));
         }
         for (hash, _) in &written {
@@ -1270,7 +1271,7 @@ async fn compare_scripts(
             let output = MultiEraOutput::decode(Era::Dijkstra, &entry.output.0)
                 .unwrap_or_else(|e| panic!("OUTPUT {id} {e}"));
             if let Some((hash, language)) = output_script(&output) {
-                carried.push((hash, language, ScriptAt::Output(entry.input)));
+                carried.push((hash, language, CarriedAt::Output(entry.input)));
             }
         }
         for (hash, language, at) in carried {
@@ -1303,6 +1304,98 @@ async fn compare_scripts(
         tally.add(agrees, || {
             format!(
                 "{id} script={} ledger={shown} dolos={dolos}",
+                hex::encode(hash)
+            )
+        });
+    }
+}
+
+/// The hash of the datum an output names, by hash or inline.
+fn output_datum_hash(output: &MultiEraOutput<'_>) -> Option<[u8; 32]> {
+    match output.datum()? {
+        DatumOption::Hash(hash) => Some(*hash),
+        DatumOption::Data(data) => Some(*data.original_hash()),
+    }
+}
+
+/// The bytes and place of a datum in an accepted record, none for a datum the ledger does not hold.
+type LedgerDatum = Option<(Vec<u8>, CarriedAt)>;
+
+/// Counts each datum hash of the groups whose block rolled or was never made against the datum the datum lookup serves for it, the datum in the witnesses or on the produced outputs of an accepted record, or nothing otherwise.
+async fn compare_plutus_data(
+    domain: &DomainAdapter,
+    kind: CorpusKind,
+    blocks: &[GroupBlock<'_>],
+    tally: &mut Tally,
+) {
+    let mut expected: BTreeMap<[u8; 32], (RecordId, LedgerDatum)> = BTreeMap::new();
+    let groups = blocks.iter().filter_map(|block| match block {
+        GroupBlock::Unmade(records) => Some(*records),
+        GroupBlock::Rolled(rolled) => Some(rolled.group),
+        GroupBlock::Failed => None,
+    });
+    for record in groups.flatten() {
+        let id = RecordId {
+            corpus: kind,
+            n: record.n,
+        };
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &record.tx.0)
+            .unwrap_or_else(|e| panic!("TX {id} {e}"));
+        let subs = tx.sub_transactions();
+        let txs = std::iter::once((TxName::Top(*tx.hash()), &tx));
+        let txs = txs.chain(subs.iter().map(|sub| (TxName::Sub(*sub.hash()), sub)));
+        let mut carried = Vec::new();
+        for (name, tx) in txs {
+            for datum in tx.plutus_data() {
+                let bytes = datum.raw_cbor().to_vec();
+                carried.push((*datum.original_hash(), bytes, CarriedAt::Witness(name)));
+            }
+            for hash in tx.outputs().iter().filter_map(output_datum_hash) {
+                expected.entry(hash).or_insert((id, None));
+            }
+        }
+        let LedgerOutcome::Accepted { produced, .. } = &record.outcome else {
+            for (hash, _, _) in carried {
+                expected.entry(hash).or_insert((id, None));
+            }
+            continue;
+        };
+        for entry in produced {
+            let output = MultiEraOutput::decode(Era::Dijkstra, &entry.output.0)
+                .unwrap_or_else(|e| panic!("OUTPUT {id} {e}"));
+            if let Some(DatumOption::Data(data)) = output.datum() {
+                let bytes = data.raw_cbor().to_vec();
+                carried.push((*data.original_hash(), bytes, CarriedAt::Output(entry.input)));
+            }
+        }
+        for (hash, bytes, at) in carried {
+            let entry = expected.entry(hash).or_insert((id, None));
+            if entry.1.is_none() {
+                *entry = (id, Some((bytes, at)));
+            }
+        }
+    }
+    let query = AsyncQueryFacade::new(domain.clone());
+    for (hash, (id, ledger)) in expected {
+        let shown = match &ledger {
+            Some((_, at)) => at.to_string(),
+            None => "none".to_string(),
+        };
+        let (agrees, dolos) = match (&ledger, query.plutus_data(&hash.into()).await) {
+            (_, Err(e)) => (false, format!("error={e:?}")),
+            (None, Ok(None)) => (true, "none".to_string()),
+            (Some(_), Ok(None)) => (false, "none".to_string()),
+            (None, Ok(Some(_))) => (false, "datum".to_string()),
+            (Some((bytes, _)), Ok(Some(served))) => {
+                let datum: PlutusData =
+                    minicbor::decode(bytes).unwrap_or_else(|e| panic!("DATUM {id} {e}"));
+                let same = datum == served;
+                (same, if same { "same" } else { "different" }.to_string())
+            }
+        };
+        tally.add(agrees, || {
+            format!(
+                "{id} datum={} ledger={shown} dolos={dolos}",
                 hex::encode(hash)
             )
         });
@@ -1718,6 +1811,8 @@ async fn judge_run(
     }
     let script = &mut judged.state.script;
     compare_scripts(&seeded.domain, kind, &blocks, script).await;
+    let plutus_data = &mut judged.state.plutus_data;
+    compare_plutus_data(&seeded.domain, kind, &blocks, plutus_data).await;
     let served = &mut judged.state.served_tx;
     if served_tx::compare(&seeded.domain, kind, &blocks, served).await == V1Mapping::Panics {
         return part;

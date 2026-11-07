@@ -33,10 +33,21 @@ index dbabe5f2..2f571fd1 100644
          .with(Val::EpochLength(epoch_length as u64))
          .with(Val::SlotLength(slot_length as u64))
 diff --git a/crates/cardano/src/indexes/query.rs b/crates/cardano/src/indexes/query.rs
-index a15a1ddf..da070017 100644
+index a15a1ddf..ddf1af17 100644
 --- a/crates/cardano/src/indexes/query.rs
 +++ b/crates/cardano/src/indexes/query.rs
-@@ -562,6 +562,11 @@ fn datum_in_block(block: &MultiEraBlock, datum_hash: Hash<32>) -> Option<PlutusD
+@@ -530,6 +530,10 @@ where
+ fn datum_in_block(block: &MultiEraBlock, datum_hash: Hash<32>) -> Option<PlutusData> {
+     for tx in block.txs() {
+         let searched = crate::pallas_extras::for_each_applied_tx(&tx, |tx| {
++            if tx.as_dijkstra_sub().is_some() && pallas::crypto::oracle_plant("datum-sub-unsearched")
++            {
++                return Ok(());
++            }
+             // Check witnesses
+             if let Some(plutus_data) = tx.find_plutus_data(&datum_hash) {
+                 return Err(plutus_data.clone().unwrap());
+@@ -562,6 +566,11 @@ fn datum_in_block(block: &MultiEraBlock, datum_hash: Hash<32>) -> Option<PlutusD
  fn script_in_block(block: &MultiEraBlock, script_hash: Hash<28>) -> Option<ScriptData> {
      for tx in block.txs() {
          let searched = crate::pallas_extras::for_each_applied_tx(&tx, |tx| {

@@ -12,7 +12,7 @@ fixes = [
   { commit = "185925e76", exclude = "lint" },
   { commit = "3c5f56c92", arm = "v1-guarding" },
   { commit = "89e2b9159", arm = "horizon-unbounded" },
-  { commit = "8cbc1861a", exclude = "gap", why = "no judged datum query searches a sub transaction" },
+  { commit = "8cbc1861a", arm = "datum-sub-unsearched" },
   { commit = "c4a1f5fac", exclude = "follower" },
   { commit = "7bab64ec5", arm = "system-start" },
   { commit = "831c92c10", exclude = "follower" },

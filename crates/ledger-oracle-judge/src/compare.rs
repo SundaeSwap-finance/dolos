@@ -126,6 +126,7 @@ pub struct StateTallies {
     pub readtx: Tally,
     pub script: Tally,
     pub datum: Tally,
+    pub plutus_data: Tally,
     pub served_tx: Tally,
     pub known: Vec<String>,
     pub known_fired: KnownList,
@@ -134,7 +135,7 @@ pub struct StateTallies {
 
 impl StateTallies {
     /// Each tally a passing corpus compares at least once, by name.
-    fn named(&self) -> [(&'static str, &Tally); 9] {
+    fn named(&self) -> [(&'static str, &Tally); 10] {
         let StateTallies {
             roll_fail: _,
             utxo,
@@ -149,6 +150,7 @@ impl StateTallies {
             readtx,
             script,
             datum,
+            plutus_data,
             served_tx,
             known: _,
             known_fired: _,
@@ -163,6 +165,7 @@ impl StateTallies {
             ("readtx", readtx),
             ("script", script),
             ("datum", datum),
+            ("plutus_data", plutus_data),
             ("served_tx", served_tx),
         ]
     }
@@ -193,6 +196,7 @@ impl StateTallies {
             readtx,
             script,
             datum,
+            plutus_data,
             served_tx,
             known,
             known_fired,
@@ -211,6 +215,7 @@ impl StateTallies {
         self.readtx.merge(readtx);
         self.script.merge(script);
         self.datum.merge(datum);
+        self.plutus_data.merge(plutus_data);
         self.served_tx.merge(served_tx);
         self.known.extend(known);
         self.known_fired.extend(known_fired);
@@ -297,6 +302,7 @@ impl fmt::Display for StateTallies {
             readtx,
             script,
             datum,
+            plutus_data,
             served_tx,
             known,
             known_fired: _,
@@ -307,7 +313,7 @@ impl fmt::Display for StateTallies {
             "STATE compared utxo={} as_output={} of sub_only={sub_only} \
              seeded_unjudged={seeded_unjudged} accounts={} undo={} revalidate={} \
              of dependents={dependents} params={} readtx={} script={} datum={} \
-             served_tx={} rolled_failed={}",
+             plutus_data={} served_tx={} rolled_failed={}",
             utxo.compared,
             as_output.compared,
             accounts.compared,
@@ -317,6 +323,7 @@ impl fmt::Display for StateTallies {
             readtx.compared,
             script.compared,
             datum.compared,
+            plutus_data.compared,
             served_tx.compared,
             self.rolled_failed()
         )?;
@@ -387,6 +394,7 @@ mod tests {
         state.readtx.add(true, String::new);
         state.script.add(true, String::new);
         state.datum.add(true, String::new);
+        state.plutus_data.add(true, String::new);
         state.served_tx.add(true, String::new);
         state
     }
@@ -425,6 +433,7 @@ mod tests {
             readtx: tally(&lines),
             script: tally(&lines),
             datum: tally(&lines),
+            plutus_data: tally(&lines),
             served_tx: tally(&lines),
             known: vec![line.clone()],
             known_fired: BTreeMap::from([((Locus::Accounts, supp(n)), row)]),
@@ -451,6 +460,7 @@ mod tests {
             readtx: tally(&lines),
             script: tally(&lines),
             datum: tally(&lines),
+            plutus_data: tally(&lines),
             served_tx: tally(&lines),
             known: vec!["line0".to_string(), "line1".to_string()],
             known_fired: BTreeMap::from([
@@ -474,7 +484,7 @@ mod tests {
         let mut state = compared();
         state.as_output.add(true, String::new);
         assert!(state.pass(), "{state}");
-        let empties: [fn(&mut StateTallies) -> &mut Tally; 9] = [
+        let empties: [fn(&mut StateTallies) -> &mut Tally; 10] = [
             |s| &mut s.utxo,
             |s| &mut s.as_output,
             |s| &mut s.accounts,
@@ -483,6 +493,7 @@ mod tests {
             |s| &mut s.readtx,
             |s| &mut s.script,
             |s| &mut s.datum,
+            |s| &mut s.plutus_data,
             |s| &mut s.served_tx,
         ];
         for empty in empties {
@@ -492,7 +503,7 @@ mod tests {
         }
         assert!(state.to_string().contains(
             " seeded_unjudged=0 accounts=1 undo=1 revalidate=1 of dependents=0 params=1 \
-                 readtx=1 script=1 datum=1 served_tx=1"
+                 readtx=1 script=1 datum=1 plutus_data=1 served_tx=1"
         ));
     }
 
