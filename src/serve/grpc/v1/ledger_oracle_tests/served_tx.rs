@@ -81,12 +81,64 @@ impl fmt::Display for MappedQuorum {
 /// proposal of another kind.
 type DijkstraKeys = Option<Vec<&'static str>>;
 
-/// The names of the parameters new in Dijkstra that a parameter update holds a
-/// value for.
+/// The names of the parameters new in Dijkstra that a ledger or message
+/// parameter update holds a value for, with every field of the ledger's update
+/// named so that a field it gains fails to compile.
 macro_rules! dijkstra_keys {
-    ($update:expr) => {
+    (@ledger $update:expr; [$($conway:ident),+]; $($name:ident),+) => {{
+        let pallas::ledger::primitives::dijkstra::ProtocolParamUpdate {
+            $($conway: _,)+
+            $($name,)+
+        }: &pallas::ledger::primitives::dijkstra::ProtocolParamUpdate = &$update;
+        let mut keys = vec![];
+        $(if $name.is_some() {
+            keys.push(stringify!($name));
+        })+
+        keys
+    }};
+    (@message $update:expr; [$($conway:ident),+]; $($name:ident),+) => {{
+        let update = $update;
+        let mut keys = vec![];
+        $(if update.$name.is_some() {
+            keys.push(stringify!($name));
+        })+
+        keys
+    }};
+    ($side:ident $update:expr) => {
         dijkstra_keys!(
-            $update;
+            @$side $update;
+            [
+                minfee_a,
+                minfee_b,
+                max_block_body_size,
+                max_transaction_size,
+                max_block_header_size,
+                key_deposit,
+                pool_deposit,
+                maximum_epoch,
+                desired_number_of_stake_pools,
+                pool_pledge_influence,
+                expansion_rate,
+                treasury_growth_rate,
+                min_pool_cost,
+                ada_per_utxo_byte,
+                cost_models_for_script_languages,
+                execution_costs,
+                max_tx_ex_units,
+                max_block_ex_units,
+                max_value_size,
+                collateral_percentage,
+                max_collateral_inputs,
+                pool_voting_thresholds,
+                drep_voting_thresholds,
+                min_committee_size,
+                committee_term_limit,
+                governance_action_validity_period,
+                governance_action_deposit,
+                drep_deposit,
+                drep_inactivity_period,
+                minfee_refscript_cost_per_byte
+            ];
             max_ref_script_size_per_block,
             max_ref_script_size_per_tx,
             ref_script_cost_stride,
@@ -112,14 +164,6 @@ macro_rules! dijkstra_keys {
             ref_inputs_cost_per_datum_byte
         )
     };
-    ($update:expr; $($name:ident),+) => {{
-        let update = $update;
-        let mut keys = vec![];
-        $(if update.$name.is_some() {
-            keys.push(stringify!($name));
-        })+
-        keys
-    }};
 }
 
 /// The fee, witness and auxiliary scripts, committee thresholds and Dijkstra
@@ -159,7 +203,7 @@ impl LedgerTx {
         });
         let keys = proposals.iter().map(|p| match p.gov_action().kind() {
             MultiEraGovActionKind::ParameterChange(_, MultiEraParamUpdate::Dijkstra(x), _) => {
-                Some(dijkstra_keys!(x))
+                Some(dijkstra_keys!(ledger x))
             }
             MultiEraGovActionKind::ParameterChange(..) => Some(vec![]),
             _ => None,
@@ -201,7 +245,7 @@ fn v1_dijkstra_keys(
         Some(GovernanceAction::ParameterChangeAction(a)) => Some(
             a.protocol_param_update
                 .as_ref()
-                .map_or(vec![], |u| dijkstra_keys!(u)),
+                .map_or(vec![], |u| dijkstra_keys!(message u)),
         ),
         _ => None,
     });
