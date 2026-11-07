@@ -330,11 +330,24 @@ pallas_tree() {
 # The manifest of fix commits, each with its arm or the reason it has none.
 ARMS_MANIFEST=${ARMS_MANIFEST:-$HERE/arms.toml}
 
-# The reasons arms.toml may give a fix commit no arm.
-FIX_EXCLUSIONS="oracle pin lint tooling relay follower network conway gap unrevertable"
+# The reasons arms.toml may give a fix commit no arm, a line each with the reason, why when its row must carry a why, and what it covers.
+FIX_EXCLUSION_REASONS="
+oracle - the oracle's own scripts, checked by lib_test.sh
+pin - adopts pallas commits listed under pallas
+lint - no behaviour change
+tooling - scripts outside Dolos
+relay - the relay to the node, which no judge drives
+follower - chain following, epoch state and the mempool across blocks, judged by the live leg and not by an arm
+network - node to node mini protocols, judged by the live leg
+conway - Conway and earlier era paths, which Musashi transactions no longer reach
+gap why an arm that plants the defect back and no judge catches, its why naming the miss
+unrevertable why a revert that does not apply or build at the pin, its why naming the conflict"
 
-# The reasons whose row must also carry a why.
-FIX_EXCLUSIONS_WITH_WHY="gap unrevertable"
+# The reasons of FIX_EXCLUSION_REASONS.
+FIX_EXCLUSIONS=$(echo "$FIX_EXCLUSION_REASONS" | awk 'NF { printf "%s ", $1 }')
+
+# The reasons of FIX_EXCLUSION_REASONS whose row must also carry a why.
+FIX_EXCLUSIONS_WITH_WHY=$(echo "$FIX_EXCLUSION_REASONS" | awk '$2 == "why" { printf "%s ", $1 }')
 
 # The rows of the section $1 of the arms manifest, a line base=<commit> and then one line per fix commit, its commit, arm=<arm> or exclude=<reason>, and why when the row has one.
 manifest_rows() {

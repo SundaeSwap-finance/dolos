@@ -1,5 +1,5 @@
 # The fix commits of the Dolos fork and of the pallas commit it pins, each with the arm that plants its defect back or the reason no arm does.
-# An exclusion names one of these reasons: oracle (the oracle's own scripts, checked by lib_test.sh), pin (adopts pallas commits listed under pallas), lint (no behaviour change), tooling (scripts outside Dolos), relay (the relay to the node, which no judge drives), follower (chain following, epoch state and the mempool across blocks, judged by the live leg and not by an arm), network (node to node mini protocols, judged by the live leg), conway (Conway and earlier era paths, which Musashi transactions no longer reach), gap (an arm that plants the defect back and no judge catches, its why naming the miss), unrevertable (a revert that does not apply or build at the pin, its why naming the conflict).
+# An exclusion names one of the reasons in FIX_EXCLUSION_REASONS of lib.sh.
 
 [dolos]
 base = "ce3d042ee9"
