@@ -340,6 +340,7 @@ relay - the relay to the node, which no judge drives
 follower - chain following, epoch state and the mempool across blocks, judged by the live leg and not by an arm
 network - node to node mini protocols, judged by the live leg
 conway - Conway and earlier era paths, which Musashi transactions no longer reach
+uncalled why a function no Dolos path calls, so no oracle input reaches it, its why naming the search that finds no caller
 gap why an arm that plants the defect back and no judge catches, its why naming the miss
 unrevertable why a revert that does not apply or build at the pin, its why naming the conflict"
 

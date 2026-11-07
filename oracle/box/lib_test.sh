@@ -696,6 +696,10 @@ expect fixes_missing "$(fixes_of 'a b' 'a arm = "colret"')" \
   'exit=1 FIX-ARM repo=dolos row=none subject="fix: b"|FIX-ARMS repo=dolos fixes=2 armed=1 excluded=0 unarmed=0 failing=1'
 expect fixes_unknown_arm "$(fixes_of 'a' 'a arm = "nothing"')" \
   'exit=1 FIX-ARM repo=dolos row=arm=nothing subject="fix: a"|FIX-ARMS repo=dolos fixes=1 armed=0 excluded=0 unarmed=0 failing=1'
+expect fixes_uncalled "$(fixes_of 'a' 'a exclude = "uncalled", why = "no caller"')" \
+  "exit=0 FIX-ARMS repo=dolos fixes=1 armed=0 excluded=1 unarmed=0 failing=0"
+expect fixes_uncalled_unexplained "$(fixes_of 'a' 'a exclude = "uncalled"')" \
+  'exit=1 FIX-ARM repo=dolos row=exclude=uncalled subject="fix: a"|FIX-ARMS repo=dolos fixes=1 armed=0 excluded=0 unarmed=0 failing=1'
 expect fixes_unknown_reason "$(fixes_of 'a' 'a exclude = "later"')" \
   'exit=1 FIX-ARM repo=dolos row=exclude=later subject="fix: a"|FIX-ARMS repo=dolos fixes=1 armed=0 excluded=0 unarmed=0 failing=1'
 expect fixes_base_absent "$(

@@ -58,7 +58,7 @@ fixes = [
 base = "9d9a3ff7e8"
 fixes = [
   { commit = "1337b6e6", arm = "withdrawal-order" },
-  { commit = "26573479", exclude = "gap", why = "no Dolos path gives eval_tx a Dijkstra transaction, evaluate_multi_era_tx and evaluate_tx_with_time send it to dijkstra::eval_tx" },
+  { commit = "26573479", exclude = "uncalled", why = "rg over crates and src finds no call of phase2::evaluate_tx or phase2::tx::eval_tx, and evaluate_multi_era_tx sends a Dijkstra transaction to dijkstra::eval_tx" },
   { commit = "05541ce3", arm = "collateral-unsupported" },
   { commit = "bdc3cda6", exclude = "gap", why = "no record puts a Byron output in a script context" },
   { commit = "d9d79728", arm = "ctx-sub-top-info" },
