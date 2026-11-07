@@ -138,6 +138,20 @@ index 0b4c7f227..08b27e058 100644
          }
      }
  
+diff --git a/pallas-utxorpc/src/before_v1.rs b/pallas-utxorpc/src/before_v1.rs
+index d61d83bf6..62589b72c 100644
+--- a/pallas-utxorpc/src/before_v1.rs
++++ b/pallas-utxorpc/src/before_v1.rs
+@@ -34,6 +34,9 @@ macro_rules! impl_cardano_mapper_before_v1 {
+         /// Returns the unspecified purpose for a guarding redeemer, for which this schema has no member.
+         #[cfg(feature = "unstable")]
+         fn guarding_purpose() -> u5c::RedeemerPurpose {
++            if pallas_crypto::oracle_plant("guarding-redeemer-panics") {
++                unimplemented!("map_redeemer is not yet implemented for Dijkstra")
++            }
+             u5c::RedeemerPurpose::Unspecified
+         }
+ 
 diff --git a/pallas-utxorpc/src/shared.rs b/pallas-utxorpc/src/shared.rs
 index fd504aacb..215d3e768 100644
 --- a/pallas-utxorpc/src/shared.rs
@@ -166,6 +180,40 @@ index fd504aacb..215d3e768 100644
                  u5c::GovernanceActionProposal {
                      deposit: u64_to_bigint(x.deposit()),
                      reward_account: x.reward_account().to_vec().into(),
+diff --git a/pallas-utxorpc/src/v1alpha/mod.rs b/pallas-utxorpc/src/v1alpha/mod.rs
+index dab04734e..f9a174c93 100644
+--- a/pallas-utxorpc/src/v1alpha/mod.rs
++++ b/pallas-utxorpc/src/v1alpha/mod.rs
+@@ -201,7 +201,11 @@ impl<C: LedgerContext> Mapper<C> {
+                 total_collateral: u64_to_bigint(tx.total_collateral().unwrap_or_default()),
+             }
+             .into(),
+-            fee: tx.fee().and_then(u64_to_bigint),
++            fee: if pallas_crypto::oracle_plant("fee-absent-zero") {
++                u64_to_bigint(tx.fee().unwrap_or_default())
++            } else {
++                tx.fee().and_then(u64_to_bigint)
++            },
+             validity: u5c::TxValidity {
+                 start: tx.validity_start().unwrap_or_default(),
+                 ttl: tx.ttl().unwrap_or_default(),
+diff --git a/pallas-utxorpc/src/v1beta/mod.rs b/pallas-utxorpc/src/v1beta/mod.rs
+index 6bbae61d0..df2bec1b4 100644
+--- a/pallas-utxorpc/src/v1beta/mod.rs
++++ b/pallas-utxorpc/src/v1beta/mod.rs
+@@ -119,7 +119,11 @@ impl<C: LedgerContext> Mapper<C> {
+                 total_collateral: u64_to_bigint(tx.total_collateral().unwrap_or_default()),
+             }
+             .into(),
+-            fee: tx.fee().and_then(u64_to_bigint),
++            fee: if pallas_crypto::oracle_plant("fee-absent-zero") {
++                u64_to_bigint(tx.fee().unwrap_or_default())
++            } else {
++                tx.fee().and_then(u64_to_bigint)
++            },
+             validity: u5c::TxValidity {
+                 start: tx.validity_start().unwrap_or_default(),
+                 ttl: tx.ttl().unwrap_or_default(),
 diff --git a/pallas-validate/src/phase1/conway.rs b/pallas-validate/src/phase1/conway.rs
 index 08356a15d..617d8f882 100644
 --- a/pallas-validate/src/phase1/conway.rs

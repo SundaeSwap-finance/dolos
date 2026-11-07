@@ -461,7 +461,7 @@ pub fn named_in_message(msg: &str) -> Option<Purpose> {
     })
 }
 
-/// The minimum fee an EvalTx response gives.
+/// The fee a u5c message gives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WireFee {
     Unset,

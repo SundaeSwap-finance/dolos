@@ -106,7 +106,7 @@ fn evaluator(estimate: Result<Vec<(MultiEraTxEvalResult, Vec<Builtin>)>, ChainEr
     }
 }
 
-/// The fee an EvalTx response gives, from the oneof of its big integer.
+/// The fee a u5c message gives, from the oneof of its big integer.
 macro_rules! wire_fee {
     ($version:ident, $fee:expr) => {{
         use pallas::interop::utxorpc::$version::spec::cardano::big_int::BigInt;
@@ -117,6 +117,7 @@ macro_rules! wire_fee {
         }
     }};
 }
+pub(super) use wire_fee;
 
 /// The EvalTx response of one u5c version for a transaction against the group's domain, its errors read by the given closure.
 macro_rules! wire_eval {
