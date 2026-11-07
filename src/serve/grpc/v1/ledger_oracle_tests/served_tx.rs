@@ -1,4 +1,6 @@
-//! Judges the fee, witness scripts and committee thresholds each ReadTx version maps for a transaction against the ledger's transaction.
+//! Judges the fee, witness and auxiliary scripts, committee thresholds and
+//! Dijkstra parameter keys each ReadTx version maps for a transaction against
+//! the ledger's transaction.
 
 use std::{fmt, panic::AssertUnwindSafe};
 
@@ -12,17 +14,19 @@ use ledger_oracle_judge::{
 };
 use pallas::{
     crypto::hash::Hasher,
-    ledger::traverse::{Era, MultiEraGovActionKind, MultiEraTx},
+    ledger::traverse::{Era, MultiEraGovActionKind, MultiEraParamUpdate, MultiEraTx},
 };
 use tonic::Request;
 
 use super::{eval::wire_fee, validate::panic_message, witness_scripts, GroupBlock, TxName};
 use crate::adapters::DomainAdapter;
 
-/// A witness script by its language, with its hash when the message carries its bytes, none for a script message with no script in it.
+/// A witness script by its language, with its hash when the message carries its
+/// bytes, none for a script message with no script in it.
 type ScriptKey = Option<(ScriptLanguage, Option<[u8; 28]>)>;
 
-/// The threshold a proposal sets when it updates the committee, as one side holds it.
+/// The threshold a proposal sets when it updates the committee, as one side
+/// holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Quorum<T> {
     /// A proposal of another kind.
@@ -31,14 +35,17 @@ enum Quorum<T> {
     Update(T),
 }
 
-/// A committee threshold as the ledger holds it, a 64 bit numerator and denominator.
+/// A committee threshold as the ledger holds it, a 64 bit numerator and
+/// denominator.
 type LedgerQuorum = Quorum<(u64, u64)>;
 
-/// A committee threshold as a u5c message holds it, none when the message carries none.
+/// A committee threshold as a u5c message holds it, none when the message
+/// carries none.
 type MappedQuorum = Quorum<Option<(i32, u32)>>;
 
 impl LedgerQuorum {
-    /// Whether a mapped threshold is this one within 2^-30, which a pair of 32 bit fields holds for any threshold the ledger accepts.
+    /// Whether a mapped threshold is this one within 2^-30, which a pair of 32
+    /// bit fields holds for any threshold the ledger accepts.
     fn holds(self, mapped: MappedQuorum) -> bool {
         match (self, mapped) {
             (Quorum::Other, Quorum::Other) => true,
@@ -70,11 +77,59 @@ impl fmt::Display for MappedQuorum {
     }
 }
 
-/// The fee, witness scripts and committee thresholds of a transaction as the ledger holds them.
+/// The parameters new in Dijkstra that a parameter change proposes, none for a
+/// proposal of another kind.
+type DijkstraKeys = Option<Vec<&'static str>>;
+
+/// The names of the parameters new in Dijkstra that a parameter update holds a
+/// value for.
+macro_rules! dijkstra_keys {
+    ($update:expr) => {
+        dijkstra_keys!(
+            $update;
+            max_ref_script_size_per_block,
+            max_ref_script_size_per_tx,
+            ref_script_cost_stride,
+            ref_script_cost_multiplier,
+            max_pledge_leverage,
+            min_pool_margin,
+            leios_announcement_period_length,
+            leios_vote_period_length,
+            leios_diffusion_period_length,
+            leios_committee_size,
+            leios_quorum_stake_threshold,
+            max_endorser_block_references_size,
+            max_endorser_block_txs_size,
+            max_endorser_block_execution_units,
+            max_ref_script_size_per_endorser_block,
+            peras_min_candidate_block_age,
+            peras_healing_factor,
+            peras_cert_boost,
+            peras_target_committee_size,
+            peras_bootstrap_round,
+            peras_quorum_threshold_safety_margin,
+            ref_inputs_cost_per_multi_asset_policy,
+            ref_inputs_cost_per_datum_byte
+        )
+    };
+    ($update:expr; $($name:ident),+) => {{
+        let update = $update;
+        let mut keys = vec![];
+        $(if update.$name.is_some() {
+            keys.push(stringify!($name));
+        })+
+        keys
+    }};
+}
+
+/// The fee, witness and auxiliary scripts, committee thresholds and Dijkstra
+/// parameter keys of a transaction as the ledger holds them.
 struct LedgerTx {
     fee: Option<u64>,
     scripts: Vec<ScriptKey>,
+    aux_scripts: Vec<ScriptKey>,
     quorum: Vec<LedgerQuorum>,
+    dijkstra_keys: Vec<DijkstraKeys>,
 }
 
 impl LedgerTx {
@@ -84,6 +139,17 @@ impl LedgerTx {
             let hash = (language != ScriptLanguage::Native).then_some(hash);
             Some((language, hash))
         });
+        let native = tx.multi_era_aux_native_scripts().into_iter();
+        let native = native.map(|_| Some((ScriptLanguage::Native, None)));
+        let v1 = tx.aux_plutus_v1_scripts().iter();
+        let v1 = v1.map(|s| plutus(ScriptLanguage::PlutusV1, &s.0));
+        let v2 = tx.aux_plutus_v2_scripts().iter();
+        let v2 = v2.map(|s| plutus(ScriptLanguage::PlutusV2, &s.0));
+        let v3 = tx.aux_plutus_v3_scripts().iter();
+        let v3 = v3.map(|s| plutus(ScriptLanguage::PlutusV3, &s.0));
+        let v4 = tx.aux_plutus_v4_scripts().iter();
+        let v4 = v4.map(|s| plutus(ScriptLanguage::PlutusV4, &s.0));
+        let aux_scripts = native.chain(v1).chain(v2).chain(v3).chain(v4);
         let proposals = tx.gov_proposals();
         let quorum = proposals.iter().map(|p| match p.gov_action().kind() {
             MultiEraGovActionKind::UpdateCommittee(.., threshold) => {
@@ -91,19 +157,55 @@ impl LedgerTx {
             }
             _ => Quorum::Other,
         });
+        let keys = proposals.iter().map(|p| match p.gov_action().kind() {
+            MultiEraGovActionKind::ParameterChange(_, MultiEraParamUpdate::Dijkstra(x), _) => {
+                Some(dijkstra_keys!(x))
+            }
+            MultiEraGovActionKind::ParameterChange(..) => Some(vec![]),
+            _ => None,
+        });
         LedgerTx {
             fee: tx.fee(),
             scripts: scripts.sorted().collect(),
+            aux_scripts: aux_scripts.sorted().collect(),
             quorum: quorum.collect(),
+            dijkstra_keys: keys.collect(),
         }
     }
 }
 
-/// The fee, witness scripts and committee thresholds a ReadTx version maps for a transaction, with no fee in a message that has no fee field.
+/// The fee, witness and auxiliary scripts, committee thresholds and Dijkstra
+/// parameter keys a ReadTx version maps for a transaction, with no fee or keys
+/// in a message that has no field for them.
 struct MappedTx {
     fee: Option<WireFee>,
     scripts: Vec<ScriptKey>,
+    aux_scripts: Vec<ScriptKey>,
     quorum: Vec<MappedQuorum>,
+    dijkstra_keys: Option<Vec<DijkstraKeys>>,
+}
+
+/// The Dijkstra parameter keys each proposal of a v1 transaction message
+/// proposes.
+fn v1_dijkstra_keys(
+    tx: &pallas::interop::utxorpc::v1::spec::cardano::TxCommon,
+) -> Vec<DijkstraKeys> {
+    use pallas::interop::utxorpc::v1::spec::cardano::governance_action::GovernanceAction;
+    let proposals = tx.proposals.iter();
+    let actions = proposals.map(|p| {
+        p.gov_action
+            .as_ref()
+            .and_then(|a| a.governance_action.as_ref())
+    });
+    let keys = actions.map(|action| match action {
+        Some(GovernanceAction::ParameterChangeAction(a)) => Some(
+            a.protocol_param_update
+                .as_ref()
+                .map_or(vec![], |u| dijkstra_keys!(u)),
+        ),
+        _ => None,
+    });
+    keys.collect()
 }
 
 /// The language and hash of a Plutus script a message carries the bytes of.
@@ -112,22 +214,26 @@ fn plutus(language: ScriptLanguage, bytes: &[u8]) -> ScriptKey {
     Some((language, Some(hash)))
 }
 
-/// The fields one u5c version maps for a transaction message, with the given fee.
+/// The fields one u5c version maps for a transaction message, with the given
+/// fee and Dijkstra parameter keys.
 macro_rules! mapped {
-    ($version:ident, $tx:expr, $fee:expr) => {{
+    ($version:ident, $tx:expr, $fee:expr, $keys:expr) => {{
         use pallas::interop::utxorpc::$version::spec::cardano::{
             governance_action::GovernanceAction, script::Script,
         };
         let tx = $tx;
-        let witnessed = tx.witnesses.iter().flat_map(|w| &w.script);
-        let scripts = witnessed.map(|s| match &s.script {
+        let key = |s: &Option<Script>| match s {
             None => None,
             Some(Script::Native(_)) => Some((ScriptLanguage::Native, None)),
             Some(Script::PlutusV1(b)) => plutus(ScriptLanguage::PlutusV1, b),
             Some(Script::PlutusV2(b)) => plutus(ScriptLanguage::PlutusV2, b),
             Some(Script::PlutusV3(b)) => plutus(ScriptLanguage::PlutusV3, b),
             Some(Script::PlutusV4(b)) => plutus(ScriptLanguage::PlutusV4, b),
-        });
+        };
+        let witnessed = tx.witnesses.iter().flat_map(|w| &w.script);
+        let scripts = witnessed.map(|s| key(&s.script));
+        let aux_scripts = tx.auxiliary.iter().flat_map(|a| &a.scripts);
+        let aux_scripts = aux_scripts.map(|s| key(&s.script));
         let quorum = tx.proposals.iter().map(|p| {
             let action = p.gov_action.as_ref();
             match action.and_then(|a| a.governance_action.as_ref()) {
@@ -141,7 +247,9 @@ macro_rules! mapped {
         MappedTx {
             fee: $fee,
             scripts: scripts.sorted().collect(),
+            aux_scripts: aux_scripts.sorted().collect(),
             quorum: quorum.collect(),
+            dijkstra_keys: $keys,
         }
     }};
 }
@@ -159,7 +267,8 @@ enum Answer<T> {
 }
 
 impl<T> Answer<T> {
-    /// The answer for a part of the mapped transaction, or this answer's absence, status or panic.
+    /// The answer for a part of the mapped transaction, or this answer's
+    /// absence, status or panic.
     fn then<U>(&self, part: impl FnOnce(&T) -> Answer<U>) -> Answer<U> {
         match self {
             Answer::Mapped(tx) => part(tx),
@@ -170,7 +279,8 @@ impl<T> Answer<T> {
     }
 }
 
-/// The ReadTx answer of one u5c version for a transaction hash against the domain, with a panic of its mapping caught.
+/// The ReadTx answer of one u5c version for a transaction hash against the
+/// domain, with a panic of its mapping caught.
 macro_rules! read_tx {
     ($version:ident, $domain:expr, $hash:expr) => {{
         use pallas::interop::utxorpc::$version::spec::query::{
@@ -200,7 +310,9 @@ macro_rules! read_tx {
 enum Field {
     Fee,
     Scripts,
+    AuxScripts,
     Quorum,
+    DijkstraKeys,
 }
 
 impl fmt::Display for Field {
@@ -208,12 +320,26 @@ impl fmt::Display for Field {
         f.write_str(match self {
             Field::Fee => "fee",
             Field::Scripts => "scripts",
+            Field::AuxScripts => "aux_scripts",
             Field::Quorum => "quorum",
+            Field::DijkstraKeys => "dijkstra_keys",
         })
     }
 }
 
-/// The witness scripts as a line shows them, each by its language and the first four bytes of its hash.
+/// The Dijkstra parameter keys of each proposal as a line shows them, other for
+/// a proposal that changes no parameter.
+fn show_keys(keys: &[DijkstraKeys]) -> String {
+    let mut shown = keys.iter().map(|k| match k {
+        None => "other".to_string(),
+        Some(k) if k.is_empty() => "none".to_string(),
+        Some(k) => k.join("/"),
+    });
+    shown.join(",")
+}
+
+/// The scripts as a line shows them, each by its language and the first four
+/// bytes of its hash.
 fn show_scripts(scripts: &[ScriptKey]) -> String {
     let mut shown = scripts.iter().map(|s| match s {
         None => "empty".to_string(),
@@ -223,7 +349,8 @@ fn show_scripts(scripts: &[ScriptKey]) -> String {
     shown.join(",")
 }
 
-/// Each field the mapping holds a different value in than the ledger, with the two values of each.
+/// Each field the mapping holds a different value in than the ledger, with the
+/// two values of each.
 fn differing(ledger: &LedgerTx, mapped: &MappedTx) -> Vec<(Field, String, String)> {
     let mut differing = vec![];
     if let Some(fee) = &mapped.fee {
@@ -240,14 +367,25 @@ fn differing(ledger: &LedgerTx, mapped: &MappedTx) -> Vec<(Field, String, String
         let (l, m) = (show_scripts(&ledger.scripts), show_scripts(&mapped.scripts));
         differing.push((Field::Scripts, l, m));
     }
+    if ledger.aux_scripts != mapped.aux_scripts {
+        let (l, m) = (&ledger.aux_scripts, &mapped.aux_scripts);
+        differing.push((Field::AuxScripts, show_scripts(l), show_scripts(m)));
+    }
     let (l, m) = (&ledger.quorum, &mapped.quorum);
     if l.len() != m.len() || l.iter().zip(m).any(|(l, m)| !l.holds(*m)) {
         differing.push((Field::Quorum, l.iter().join(","), m.iter().join(",")));
     }
+    if let Some(keys) = &mapped.dijkstra_keys {
+        if &ledger.dijkstra_keys != keys {
+            let (l, m) = (show_keys(&ledger.dijkstra_keys), show_keys(keys));
+            differing.push((Field::DijkstraKeys, l, m));
+        }
+    }
     differing
 }
 
-/// Adds the comparison of what one version answers for one transaction the ledger accepted.
+/// Adds the comparison of what one version answers for one transaction the
+/// ledger accepted.
 fn add(
     tally: &mut Tally,
     id: RecordId,
@@ -274,10 +412,15 @@ fn add(
     tally.add(agrees, || format!("{id} {layer} {name} {dolos}"));
 }
 
-/// Evidence that ReadTx v1 mapped each accepted transaction of a run without a panic, which the passes that serve the run through v1 take.
+/// Evidence that ReadTx v1 mapped each accepted transaction of a run without a
+/// panic, which the passes that serve the run through v1 take.
 pub(super) struct V1Maps(());
 
-/// Counts what each ReadTx version maps for the accepted records of the blocks a run rolled against the ledger's transactions, v1 by each top level hash with its sub transactions and v1beta and v1alpha by each top level and sub transaction hash, with the evidence that v1 mapped them when no v1 mapping panicked.
+/// Counts what each ReadTx version maps for the accepted records of the blocks
+/// a run rolled against the ledger's transactions, v1 by each top level hash
+/// with its sub transactions and v1beta and v1alpha by each top level and sub
+/// transaction hash, with the evidence that v1 mapped them when no v1 mapping
+/// panicked.
 pub(super) async fn compare(
     domain: &DomainAdapter,
     kind: CorpusKind,
@@ -309,7 +452,10 @@ pub(super) async fn compare(
         let common = served.then(|tx| {
             let fee = wire_fee!(v1, tx.fee.clone());
             match &tx.common {
-                Some(common) => Answer::Mapped(mapped!(v1, common, Some(fee))),
+                Some(common) => {
+                    let keys = Some(v1_dijkstra_keys(common));
+                    Answer::Mapped(mapped!(v1, common, Some(fee), keys))
+                }
                 None => Answer::Absent,
             }
         });
@@ -318,7 +464,10 @@ pub(super) async fn compare(
             let common = served.then(|tx| {
                 let sub = tx.sub_transactions.iter().find(|c| c.hash == hash[..]);
                 match sub {
-                    Some(common) => Answer::Mapped(mapped!(v1, common, None)),
+                    Some(common) => {
+                        let keys = Some(v1_dijkstra_keys(common));
+                        Answer::Mapped(mapped!(v1, common, None, keys))
+                    }
                     None => Answer::Absent,
                 }
             });
@@ -332,12 +481,12 @@ pub(super) async fn compare(
             };
             let answer = read_tx!(v1beta, domain, hash).then(|tx| {
                 let fee = wire_fee!(v1beta, tx.fee.clone());
-                Answer::Mapped(mapped!(v1beta, tx, Some(fee)))
+                Answer::Mapped(mapped!(v1beta, tx, Some(fee), None))
             });
             add(tally, id, Layer::V1beta, name, ledger, answer);
             let answer = read_tx!(v1alpha, domain, hash).then(|tx| {
                 let fee = wire_fee!(v1alpha, tx.fee.clone());
-                Answer::Mapped(mapped!(v1alpha, tx, Some(fee)))
+                Answer::Mapped(mapped!(v1alpha, tx, Some(fee), None))
             });
             add(tally, id, Layer::V1alpha, name, ledger, answer);
         }
@@ -375,7 +524,9 @@ fn ledger(fee: Option<u64>) -> LedgerTx {
             Some((ScriptLanguage::Native, None)),
             Some((ScriptLanguage::PlutusV3, Some([3; 28]))),
         ],
-        quorum: vec![Quorum::Other],
+        aux_scripts: vec![Some((ScriptLanguage::PlutusV3, Some([4; 28])))],
+        quorum: vec![Quorum::Other, Quorum::Other],
+        dijkstra_keys: vec![None, Some(vec!["peras_cert_boost"])],
     }
 }
 
@@ -384,7 +535,9 @@ fn mapped(fee: Option<WireFee>) -> MappedTx {
     MappedTx {
         fee,
         scripts: ledger.scripts,
-        quorum: vec![Quorum::Other],
+        aux_scripts: ledger.aux_scripts,
+        quorum: vec![Quorum::Other, Quorum::Other],
+        dijkstra_keys: Some(ledger.dijkstra_keys),
     }
 }
 
@@ -414,4 +567,18 @@ fn a_dropped_witness_script_or_proposal_differs() {
     let mut dropped = mapped(None);
     dropped.quorum.clear();
     assert_eq!(fields(&ledger, &dropped), [Field::Quorum]);
+}
+
+#[test]
+fn a_dropped_auxiliary_script_or_dijkstra_key_differs() {
+    let ledger = ledger(None);
+    let mut dropped = mapped(None);
+    dropped.aux_scripts.clear();
+    assert_eq!(fields(&ledger, &dropped), [Field::AuxScripts]);
+    let mut dropped = mapped(None);
+    dropped.dijkstra_keys = Some(vec![None, Some(vec![])]);
+    assert_eq!(fields(&ledger, &dropped), [Field::DijkstraKeys]);
+    let mut unmapped = mapped(None);
+    unmapped.dijkstra_keys = None;
+    assert_eq!(fields(&ledger, &unmapped), Vec::<Field>::new());
 }
