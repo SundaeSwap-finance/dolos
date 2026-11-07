@@ -623,7 +623,7 @@ index e185911e4..82160d60e 100644
          Certificate::StakeDelegation(c, pool) => {
              registered(state, c)?;
 diff --git a/pallas-validate/src/phase2/dijkstra.rs b/pallas-validate/src/phase2/dijkstra.rs
-index 965f82598..6dc90e5b2 100644
+index 71f121e29..a8362deae 100644
 --- a/pallas-validate/src/phase2/dijkstra.rs
 +++ b/pallas-validate/src/phase2/dijkstra.rs
 @@ -70,14 +70,15 @@ impl LegacyContextData for ContextOutput {
@@ -701,7 +701,7 @@ index 965f82598..6dc90e5b2 100644
      Ok(ContextOutput {
          address,
          value: output.value().into_conway(),
-@@ -370,12 +404,23 @@ pub(super) fn eval_tx_with_mode(
+@@ -362,12 +396,23 @@ pub(super) fn eval_tx_with_mode(
              let args: Vec<_> = run.args.iter().collect();
              let (result, calls) =
                  evaluator::eval_native(run.language, &run.script, &args, &run.costs, run.budget)?;
@@ -730,7 +730,33 @@ index 965f82598..6dc90e5b2 100644
                  logs: result.logs,
                  failure_message: result.failure.map(|f| f.message),
              };
-@@ -706,7 +751,9 @@ impl Legacy {
+@@ -562,7 +607,24 @@ fn level_context<'a>(
+         .flatten()
+         .map(conway_certificate)
+         .collect();
+-    let proposals: Vec<_> = level.proposals.into_iter().flatten().cloned().collect();
++    let proposals: Vec<_> = level
++        .proposals
++        .into_iter()
++        .flatten()
++        .cloned()
++        .map(|p| {
++            if !pallas_codec::oracle_plant("proposal-keys-dropped") {
++                return p;
++            }
++            use pallas_codec::minicbor::{decode, to_vec};
++            to_vec(&p)
++                .ok()
++                .and_then(|x| decode::<c::ProposalProcedure>(&x).ok())
++                .and_then(|x| to_vec(&x).ok())
++                .and_then(|x| decode(&x).ok())
++                .unwrap_or(p)
++        })
++        .collect();
+     let policies: Vec<_> = level.mint.into_iter().flat_map(|x| x.keys()).collect();
+     let voters: Vec<_> = level.votes.into_iter().flat_map(|x| x.keys()).collect();
+     let mut purposes = Vec::new();
+@@ -693,7 +755,9 @@ impl Legacy {
                  })
                  .collect(),
          };
@@ -741,7 +767,7 @@ index 965f82598..6dc90e5b2 100644
          signatories.dedup();
          Ok(Legacy {
              mint: MintValue {
-@@ -784,7 +831,29 @@ pub(super) fn runs(
+@@ -771,7 +835,29 @@ pub(super) fn runs(
          if scope.expected.is_empty() && scope.redeemers.is_empty() {
              continue;
          }
@@ -772,7 +798,7 @@ index 965f82598..6dc90e5b2 100644
          if estimate
              && (execution_limit.mem > i64::MAX as u64 || execution_limit.steps > i64::MAX as u64)
          {
-@@ -809,7 +878,7 @@ pub(super) fn runs(
+@@ -796,7 +882,7 @@ pub(super) fn runs(
                      .collect()
              };
              let args = match (language, part) {
@@ -781,7 +807,7 @@ index 965f82598..6dc90e5b2 100644
                      vec![context.script_context(key, purpose, &r.data, datum, &batch)?]
                  }
                  (n::Language::PlutusV1, Part::Top(tx)) => {
-@@ -855,14 +924,19 @@ pub(super) fn runs(
+@@ -842,14 +928,19 @@ pub(super) fn runs(
                          purpose.conway()?.1,
                      ))
                  }
@@ -804,7 +830,7 @@ index 965f82598..6dc90e5b2 100644
                          certificates: context.certificates.clone(),
                          withdrawals: x.withdrawals.into(),
 diff --git a/pallas-validate/src/phase2/dijkstra_v4_context.rs b/pallas-validate/src/phase2/dijkstra_v4_context.rs
-index 327b1a07d..983318a8b 100644
+index cdc70b06a..1a9b4acbd 100644
 --- a/pallas-validate/src/phase2/dijkstra_v4_context.rs
 +++ b/pallas-validate/src/phase2/dijkstra_v4_context.rs
 @@ -140,7 +140,10 @@ impl<'a> Context<'a> {
@@ -832,15 +858,14 @@ index 327b1a07d..983318a8b 100644
      }
  
 diff --git a/pallas-validate/src/phase2/error.rs b/pallas-validate/src/phase2/error.rs
-index b080af86f..ad8436d8c 100644
+index 3ca2ba2af..0d99adb3b 100644
 --- a/pallas-validate/src/phase2/error.rs
 +++ b/pallas-validate/src/phase2/error.rs
-@@ -16,8 +16,10 @@ labels! {
+@@ -16,7 +16,9 @@ labels! {
      pub enum UnsupportedEvaluation {
          BuiltinOutsideSubset => "V3 builtin outside audited protocol-12 subset",
          IntegerOutsideRegistrationRange => "integer operand outside audited registration range",
 +        NativeScriptGuards => "native script guards",
-         ParameterUpdateOutsideConway => "protocol parameter update outside Conway in a script context",
          ParametersRequireDijkstra => "protocol parameters require Dijkstra",
 +        PointerAddress => "pointer address in a V3 script context",
          ProtocolVersion => "protocol version (requires 12.0)",
@@ -986,10 +1011,10 @@ index e7fb39da0..ec1b63fe2 100644
          mem: i64::try_from(budget.mem)
              .map_err(|_| Error::DijkstraInvalid(EvaluationFailure::MemoryBudgetOverflow))?,
 diff --git a/pallas-validate/src/phase2/to_plutus_data.rs b/pallas-validate/src/phase2/to_plutus_data.rs
-index 055fcb76a..59d886477 100644
+index be4fafed3..9e9fd939b 100644
 --- a/pallas-validate/src/phase2/to_plutus_data.rs
 +++ b/pallas-validate/src/phase2/to_plutus_data.rs
-@@ -112,9 +112,14 @@ impl ToPlutusData for Address {
+@@ -114,9 +114,14 @@ impl ToPlutusData for Address {
                      ShelleyPaymentPart::Key(payment_keyhash) => {
                          wrap_with_constr(0, payment_keyhash.to_plutus_data())
                      }
@@ -1007,7 +1032,7 @@ index 055fcb76a..59d886477 100644
                  };
  
                  let stake_part_plutus_data = match stake_part {
-@@ -634,7 +639,11 @@ impl ToPlutusData for WithPartialCertificates<'_, Certificate> {
+@@ -640,7 +645,11 @@ impl ToPlutusData for WithPartialCertificates<'_, Certificate> {
              Certificate::StakeRegistration(stake_credential)
              | Certificate::Reg(stake_credential, _) => wrap_with_constr(
                  0,
@@ -1020,7 +1045,7 @@ index 055fcb76a..59d886477 100644
              ),
  
              Certificate::StakeDeregistration(stake_credential)
-@@ -694,8 +703,14 @@ impl ToPlutusData for WithRegistrationDeposit<'_, Certificate> {
+@@ -700,8 +709,14 @@ impl ToPlutusData for WithRegistrationDeposit<'_, Certificate> {
              Certificate::Reg(stake_credential, amount) => wrap_multiple_with_constr(
                  0,
                  vec![
@@ -1037,7 +1062,7 @@ index 055fcb76a..59d886477 100644
                  ],
              ),
  
-@@ -869,7 +884,8 @@ impl ToPlutusData for TimeRange {
+@@ -875,7 +890,8 @@ impl ToPlutusData for TimeRange {
                      vec![
                          wrap_with_constr(1, x.to_plutus_data()),
                          // NOTE: Finite lower bounds are always inclusive, unlike upper bounds.
@@ -1047,7 +1072,7 @@ index 055fcb76a..59d886477 100644
                      ],
                  ),
                  None => wrap_multiple_with_constr(
-@@ -1348,6 +1364,9 @@ impl ToPlutusData for WithWrappedStakeCredential<'_, KeyValuePairs<Address, Coin
+@@ -1561,6 +1577,9 @@ impl ToPlutusData for WithWrappedStakeCredential<'_, KeyValuePairs<Address, Coin
              self.0
                  .iter()
                  .map(|(reward_account, amount)| {

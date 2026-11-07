@@ -185,6 +185,7 @@ caught() {
     bigint-truncated) pattern='^DIFF utxo .* fields=([a-z_]+,)*datum(,|$)' ;;
     aux-plutus-dropped) pattern='^DIFF served_tx [a-z]+#[0-9]+ v1[a-z]* (sub_)?tx=[0-9a-f]+ differing=([a-z_]+,)*aux_scripts(,|$| )' ;;
     update-keys-dropped) pattern='^DIFF served_tx [a-z]+#[0-9]+ v1 (sub_)?tx=[0-9a-f]+ differing=([a-z_]+,)*dijkstra_keys(,|$| )' ;;
+    proposal-keys-dropped) pattern='^CONTEXT-DIFF [a-z]+#[0-9]+ [a-z0-9]+ [A-Za-z]+#[0-9]+ V[34] arg=0 path=[0-9.]+ field=context\.scriptContextTxInfo\.txInfoProposalProcedures ' ;;
     pending-registrations-ignored) pattern='^DISAGREE [a-z]+#[0-9]+ ledger=accepted dolos=refused\[DijkstraInvalidAccount\(' ;;
     endorser-tx-dropped) pattern='^ENDORSER-DIFF service=(FetchBlock|FollowTip) slot=[0-9]+ list=(ids|bytes) index=[0-9]+ ' ;;
     fee-min-deleted | aux-refused | integrity-top-deleted) pattern='^(DISAGREE|REASON_MISMATCH|RULE_MISMATCH) [a-z0-9]+#[0-9]+ ' ;;

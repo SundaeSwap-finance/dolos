@@ -120,4 +120,5 @@ fixes = [
   { commit = "800fd31a", arm = "indef-strings-refused" },
   { commit = "e6db7afd", arm = "witness-v3-v4-dropped" },
   { commit = "01461888", arm = "sub-valid-always" },
+  { commit = "73cef926", arm = "proposal-keys-dropped" },
 ]
