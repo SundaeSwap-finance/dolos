@@ -1,7 +1,8 @@
-//! Judges the fee each ReadTx version maps for a transaction against the ledger's transaction.
+//! Judges the fee and witness scripts each ReadTx version maps for a transaction against the ledger's transaction.
 
 use std::{fmt, panic::AssertUnwindSafe};
 
+use dolos_cardano::indexes::ScriptLanguage;
 use futures_util::FutureExt as _;
 use itertools::Itertools as _;
 use ledger_oracle_judge::{
@@ -9,27 +10,69 @@ use ledger_oracle_judge::{
     eval::{Layer, WireFee},
     record::{CorpusKind, LedgerOutcome, RecordId},
 };
-use pallas::ledger::traverse::{Era, MultiEraTx};
+use pallas::{
+    crypto::hash::Hasher,
+    ledger::traverse::{Era, MultiEraTx},
+};
 use tonic::Request;
 
-use super::{eval::wire_fee, validate::panic_message, GroupBlock, TxName};
+use super::{eval::wire_fee, validate::panic_message, witness_scripts, GroupBlock, TxName};
 use crate::adapters::DomainAdapter;
 
-/// The fee of a transaction as the ledger holds it.
+/// A witness script by its language, with its hash when the message carries its bytes, none for a script message with no script in it.
+type ScriptKey = Option<(ScriptLanguage, Option<[u8; 28]>)>;
+
+/// The fee and witness scripts of a transaction as the ledger holds them.
 struct LedgerTx {
     fee: Option<u64>,
+    scripts: Vec<ScriptKey>,
 }
 
 impl LedgerTx {
     /// The fields the ledger holds for a transaction.
     fn of(tx: &MultiEraTx<'_>) -> Self {
-        LedgerTx { fee: tx.fee() }
+        let scripts = witness_scripts(tx).into_iter().map(|(hash, language)| {
+            let hash = (language != ScriptLanguage::Native).then_some(hash);
+            Some((language, hash))
+        });
+        LedgerTx {
+            fee: tx.fee(),
+            scripts: scripts.sorted().collect(),
+        }
     }
 }
 
-/// The fee a ReadTx version maps for a transaction, with no fee in a message that has no fee field.
+/// The fee and witness scripts a ReadTx version maps for a transaction, with no fee in a message that has no fee field.
 struct MappedTx {
     fee: Option<WireFee>,
+    scripts: Vec<ScriptKey>,
+}
+
+/// The language and hash of a Plutus script a message carries the bytes of.
+fn plutus(language: ScriptLanguage, bytes: &[u8]) -> ScriptKey {
+    let hash = *Hasher::<224>::hash_tagged(bytes, language.tag());
+    Some((language, Some(hash)))
+}
+
+/// The fields one u5c version maps for a transaction message, with the given fee.
+macro_rules! mapped {
+    ($version:ident, $tx:expr, $fee:expr) => {{
+        use pallas::interop::utxorpc::$version::spec::cardano::script::Script;
+        let tx = $tx;
+        let witnessed = tx.witnesses.iter().flat_map(|w| &w.script);
+        let scripts = witnessed.map(|s| match &s.script {
+            None => None,
+            Some(Script::Native(_)) => Some((ScriptLanguage::Native, None)),
+            Some(Script::PlutusV1(b)) => plutus(ScriptLanguage::PlutusV1, b),
+            Some(Script::PlutusV2(b)) => plutus(ScriptLanguage::PlutusV2, b),
+            Some(Script::PlutusV3(b)) => plutus(ScriptLanguage::PlutusV3, b),
+            Some(Script::PlutusV4(b)) => plutus(ScriptLanguage::PlutusV4, b),
+        });
+        MappedTx {
+            fee: $fee,
+            scripts: scripts.sorted().collect(),
+        }
+    }};
 }
 
 /// What a ReadTx version answers for a transaction hash.
@@ -85,14 +128,26 @@ macro_rules! read_tx {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Field {
     Fee,
+    Scripts,
 }
 
 impl fmt::Display for Field {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Field::Fee => "fee",
+            Field::Scripts => "scripts",
         })
     }
+}
+
+/// The witness scripts as a line shows them, each by its language and the first four bytes of its hash.
+fn show_scripts(scripts: &[ScriptKey]) -> String {
+    let mut shown = scripts.iter().map(|s| match s {
+        None => "empty".to_string(),
+        Some((language, None)) => format!("{language:?}"),
+        Some((language, Some(hash))) => format!("{language:?}:{}", hex::encode(&hash[..4])),
+    });
+    shown.join(",")
 }
 
 /// Each field the mapping holds a different value in than the ledger, with the two values of each.
@@ -107,6 +162,10 @@ fn differing(ledger: &LedgerTx, mapped: &MappedTx) -> Vec<(Field, String, String
         if !holds {
             differing.push((Field::Fee, format!("{:?}", ledger.fee), format!("{fee:?}")));
         }
+    }
+    if ledger.scripts != mapped.scripts {
+        let (l, m) = (show_scripts(&ledger.scripts), show_scripts(&mapped.scripts));
+        differing.push((Field::Scripts, l, m));
     }
     differing
 }
@@ -177,7 +236,7 @@ pub(super) async fn compare(
         let common = served.then(|tx| {
             let fee = wire_fee!(v1, tx.fee.clone());
             match &tx.common {
-                Some(_) => Answer::Mapped(MappedTx { fee: Some(fee) }),
+                Some(common) => Answer::Mapped(mapped!(v1, common, Some(fee))),
                 None => Answer::Absent,
             }
         });
@@ -186,7 +245,7 @@ pub(super) async fn compare(
             let common = served.then(|tx| {
                 let sub = tx.sub_transactions.iter().find(|c| c.hash == hash[..]);
                 match sub {
-                    Some(_) => Answer::Mapped(MappedTx { fee: None }),
+                    Some(common) => Answer::Mapped(mapped!(v1, common, None)),
                     None => Answer::Absent,
                 }
             });
@@ -200,12 +259,12 @@ pub(super) async fn compare(
             };
             let answer = read_tx!(v1beta, domain, hash).then(|tx| {
                 let fee = wire_fee!(v1beta, tx.fee.clone());
-                Answer::Mapped(MappedTx { fee: Some(fee) })
+                Answer::Mapped(mapped!(v1beta, tx, Some(fee)))
             });
             add(tally, id, Layer::V1beta, name, ledger, answer);
             let answer = read_tx!(v1alpha, domain, hash).then(|tx| {
                 let fee = wire_fee!(v1alpha, tx.fee.clone());
-                Answer::Mapped(MappedTx { fee: Some(fee) })
+                Answer::Mapped(mapped!(v1alpha, tx, Some(fee)))
             });
             add(tally, id, Layer::V1alpha, name, ledger, answer);
         }
@@ -214,11 +273,21 @@ pub(super) async fn compare(
 }
 
 fn ledger(fee: Option<u64>) -> LedgerTx {
-    LedgerTx { fee }
+    LedgerTx {
+        fee,
+        scripts: vec![
+            Some((ScriptLanguage::Native, None)),
+            Some((ScriptLanguage::PlutusV3, Some([3; 28]))),
+        ],
+    }
 }
 
 fn mapped(fee: Option<WireFee>) -> MappedTx {
-    MappedTx { fee }
+    let ledger = ledger(None);
+    MappedTx {
+        fee,
+        scripts: ledger.scripts,
+    }
 }
 
 fn fields(ledger: &LedgerTx, mapped: &MappedTx) -> Vec<Field> {
@@ -236,4 +305,12 @@ fn a_fee_the_ledger_holds_none_of_differs_when_mapped_as_zero() {
     assert_eq!(fields(&ledger(Some(7)), &mapped(None)), none);
     assert_eq!(fields(&ledger(None), &zero), [Field::Fee]);
     assert_eq!(fields(&ledger(Some(7)), &unset), [Field::Fee]);
+}
+
+#[test]
+fn a_dropped_witness_script_differs() {
+    let ledger = ledger(None);
+    let mut dropped = mapped(None);
+    dropped.scripts.pop();
+    assert_eq!(fields(&ledger, &dropped), [Field::Scripts]);
 }
