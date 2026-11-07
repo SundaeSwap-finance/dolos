@@ -22,30 +22,45 @@ use crate::adapters::DomainAdapter;
 /// A witness script by its language, with its hash when the message carries its bytes, none for a script message with no script in it.
 type ScriptKey = Option<(ScriptLanguage, Option<[u8; 28]>)>;
 
-/// The threshold a proposal sets when it updates the committee.
+/// The threshold a proposal sets when it updates the committee, as one side holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Quorum {
+enum Quorum<T> {
     /// A proposal of another kind.
     Other,
-    /// A committee update with this threshold, none when the message carries none.
-    Update(Option<(i128, u128)>),
+    /// A committee update with this threshold.
+    Update(T),
 }
 
-impl Quorum {
+/// A committee threshold as the ledger holds it, a 64 bit numerator and denominator.
+type LedgerQuorum = Quorum<(u64, u64)>;
+
+/// A committee threshold as a u5c message holds it, none when the message carries none.
+type MappedQuorum = Quorum<Option<(i32, u32)>>;
+
+impl LedgerQuorum {
     /// Whether a mapped threshold is this one within 2^-30, which a pair of 32 bit fields holds for any threshold the ledger accepts.
-    fn holds(self, mapped: Quorum) -> bool {
+    fn holds(self, mapped: MappedQuorum) -> bool {
         match (self, mapped) {
             (Quorum::Other, Quorum::Other) => true,
-            (Quorum::Update(Some((n, d))), Quorum::Update(Some((m, e)))) => {
-                let gap = (n * e as i128 - m * d as i128).unsigned_abs();
-                gap << 30 <= d * e
+            (Quorum::Update((n, d)), Quorum::Update(Some((m, e)))) => {
+                let cross = i128::from(n) * i128::from(e) - i128::from(m) * i128::from(d);
+                cross.unsigned_abs() << 30 <= u128::from(d) * u128::from(e)
             }
             _ => false,
         }
     }
 }
 
-impl fmt::Display for Quorum {
+impl fmt::Display for LedgerQuorum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Quorum::Other => f.write_str("other"),
+            Quorum::Update((n, d)) => write!(f, "{n}/{d}"),
+        }
+    }
+}
+
+impl fmt::Display for MappedQuorum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Quorum::Other => f.write_str("other"),
@@ -59,7 +74,7 @@ impl fmt::Display for Quorum {
 struct LedgerTx {
     fee: Option<u64>,
     scripts: Vec<ScriptKey>,
-    quorum: Vec<Quorum>,
+    quorum: Vec<LedgerQuorum>,
 }
 
 impl LedgerTx {
@@ -71,10 +86,9 @@ impl LedgerTx {
         });
         let proposals = tx.gov_proposals();
         let quorum = proposals.iter().map(|p| match p.gov_action().kind() {
-            MultiEraGovActionKind::UpdateCommittee(.., threshold) => Quorum::Update(Some((
-                threshold.numerator.into(),
-                threshold.denominator.into(),
-            ))),
+            MultiEraGovActionKind::UpdateCommittee(.., threshold) => {
+                Quorum::Update((threshold.numerator, threshold.denominator))
+            }
             _ => Quorum::Other,
         });
         LedgerTx {
@@ -89,7 +103,7 @@ impl LedgerTx {
 struct MappedTx {
     fee: Option<WireFee>,
     scripts: Vec<ScriptKey>,
-    quorum: Vec<Quorum>,
+    quorum: Vec<MappedQuorum>,
 }
 
 /// The language and hash of a Plutus script a message carries the bytes of.
@@ -119,7 +133,7 @@ macro_rules! mapped {
             match action.and_then(|a| a.governance_action.as_ref()) {
                 Some(GovernanceAction::UpdateCommitteeAction(a)) => {
                     let threshold = a.new_committee_threshold.as_ref();
-                    Quorum::Update(threshold.map(|r| (r.numerator.into(), r.denominator.into())))
+                    Quorum::Update(threshold.map(|r| (r.numerator, r.denominator)))
                 }
                 _ => Quorum::Other,
             }
@@ -333,15 +347,25 @@ pub(super) async fn compare(
 
 #[test]
 fn a_threshold_the_fields_round_holds_and_a_truncated_one_does_not() {
-    let third = Quorum::Update(Some((1, 3)));
+    let third: LedgerQuorum = Quorum::Update((1, 3));
     assert!(third.holds(Quorum::Update(Some((715_827_882, 2_147_483_647)))));
-    assert!(Quorum::Update(Some((5, 0))).holds(Quorum::Update(Some((1, 0)))));
-    assert!(Quorum::Other.holds(Quorum::Other));
+    assert!(Quorum::Update((5, 0)).holds(Quorum::Update(Some((1, 0)))));
+    assert!(LedgerQuorum::Other.holds(Quorum::Other));
     let (n, d): (u64, u64) = (1_435_934_570_883, 2_500_000_000_000);
-    let truncated = Quorum::Update(Some(((n as i32).into(), (d as u32).into())));
-    assert!(!Quorum::Update(Some((n.into(), d.into()))).holds(truncated));
+    let truncated = Quorum::Update(Some((n as i32, d as u32)));
+    assert!(!Quorum::Update((n, d)).holds(truncated));
     assert!(!third.holds(Quorum::Update(None)));
     assert!(!third.holds(Quorum::Other));
+}
+
+#[test]
+fn the_widest_threshold_each_side_holds_compares_without_overflow() {
+    let one: LedgerQuorum = Quorum::Update((u64::MAX, u64::MAX));
+    assert!(one.holds(Quorum::Update(Some((i32::MAX, i32::MAX as u32)))));
+    assert!(!one.holds(Quorum::Update(Some((i32::MAX, u32::MAX)))));
+    assert!(!one.holds(Quorum::Update(Some((i32::MIN, u32::MAX)))));
+    let most: LedgerQuorum = Quorum::Update((u64::MAX, 1));
+    assert!(!most.holds(Quorum::Update(Some((i32::MIN, 1)))));
 }
 
 fn ledger(fee: Option<u64>) -> LedgerTx {
@@ -360,7 +384,7 @@ fn mapped(fee: Option<WireFee>) -> MappedTx {
     MappedTx {
         fee,
         scripts: ledger.scripts,
-        quorum: ledger.quorum,
+        quorum: vec![Quorum::Other],
     }
 }
 
