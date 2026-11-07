@@ -16,22 +16,27 @@ import Cardano.Crypto.Hash (hashToBytes)
 import Cardano.Crypto.Hashing (unsafeAbstractHashFromBytes)
 import Cardano.Ledger.Address (Addr (..), BootstrapAddress (..), Withdrawals (..), bootstrapKeyHash)
 import Cardano.Ledger.Alonzo.Scripts (AsIx (..), PlutusBinary (..), mkBinaryPlutusScript, pattern SpendingPurpose)
+import Cardano.Ledger.Alonzo.TxAuxData (AlonzoEraTxAuxData (..))
 import Cardano.Ledger.Alonzo.TxWits (Redeemers (..), TxDats (..))
 import Cardano.Ledger.BaseTypes (Globals (..), Network (..), StrictMaybe (..), epochInfoPure, mkCertIxPartial, mkTxIxPartial, natVersion, strictMaybeToMaybe)
 import Cardano.Ledger.Coin (Coin (..))
+import Cardano.Ledger.Conway.Governance (Constitution (..), ConwayEraGov (..), GovAction (..), constitutionGuardrailsScriptHashL)
 import Cardano.Ledger.Conway.TxCert (pattern RegDepositTxCert)
 import Cardano.Ledger.Credential (Credential (..), Ptr (..), SlotNo32 (..), StakeReference (..))
 import Cardano.Ledger.Dijkstra.Core
+import Cardano.Ledger.Dijkstra.PParams (ppuPerasCertBoostL)
 import Cardano.Ledger.Dijkstra.Scripts (pattern RequireGuard)
 import Cardano.Ledger.Hashes (EraIndependentTxBody, SafeHash, extractHash, hashAnnotated)
 import Cardano.Ledger.Keys (KeyHash (..), coerceKeyRole)
 import Cardano.Ledger.Keys.Bootstrap (BootstrapWitness (..), ChainCode (..), bootstrapWitKeyHash, makeBootstrapWitness)
 import Cardano.Ledger.Mary.Value (AssetName (..), MaryValue (..), PolicyID (..), multiAssetFromList)
 import Cardano.Ledger.Metadata (Metadatum (..))
+import Cardano.Ledger.Plutus.CostModels (mkCostModelsLenient)
 import Cardano.Ledger.Plutus.Data (Data (..), Datum (..), dataToBinaryData, hashData)
 import Cardano.Ledger.Plutus.ExUnits (ExUnits (..))
 import Cardano.Ledger.Plutus.Language (Language (..))
 import Cardano.Ledger.Plutus.TxInfo (transAddr, transCoinToLovelace, transCred, transKeyHash, transScriptHash)
+import Cardano.Ledger.Shelley.LedgerState (newEpochStateGovStateL)
 import Cardano.Ledger.Shelley.Scripts (pattern RequireAllOf, pattern RequireSignature)
 import Cardano.Ledger.Tools (setMinCoinTxOut)
 import Cardano.Ledger.TxIn (mkTxInPartial)
@@ -42,6 +47,7 @@ import Cardano.Slotting.Time (SystemStart (..), slotLengthToMillisec)
 import Codec.CBOR.Term (Term (..))
 import Control.Monad (forM_, replicateM_, void, when, (<=<))
 import Data.Functor.Identity (runIdentity)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -200,6 +206,60 @@ supplement = describe "SUPPLEMENT" $ do
     spendWithV3 "450102002499"
   validityBounds
   contextValues
+  readBackShapes
+
+-- | Transactions whose integers, scripts, arrays and proposals have shapes the read back and evaluation paths decode or map, each case with the verdict the ledger gives.
+readBackShapes :: SpecWith (ImpInit (LedgerSpec E))
+readBackShapes = describe "read back shapes" $ do
+  it "an output holds an inline datum of integers outside 64 bits" $ do
+    holder <- freshKeyAddrNoPtr_
+    let wide = Data (PV1.List (map PV1.I [2 ^ (63 :: Int), 2 ^ (64 :: Int) - 1, -(2 ^ (63 :: Int)) - 1, -(2 ^ (64 :: Int))])) :: Data E
+        out = mkBasicTxOut holder (inject (Coin 5_000_000)) & datumTxOutL .~ Datum (dataToBinaryData wide)
+    void $ trySubmitTx (mkBasicTx (mkBasicTxBody & outputsTxBodyL .~ [out]) :: Tx TopTx E)
+  it "auxiliary data holds a V3 script" $ do
+    binary <- expectJust (either (const Nothing) Just (B16.decode "4901010023357369324d"))
+    let aux = mkBasicTxAuxData & plutusScriptsTxAuxDataL .~ [(PlutusV3, PlutusBinary (toShort binary) :| [])]
+    void $ trySubmitTx (mkBasicTx mkBasicTxBody & auxDataTxL .~ SJust aux :: Tx TopTx E)
+  it "a stake registration whose credential is an indefinite length array" $ do
+    key <- KeyHashObj <$> freshKeyHash
+    deposit <- getsPParams ppKeyDepositL
+    submitEdited noEdit {editBody = overKey 4 (overFirst (overIndex 1 indefiniteArray))} (mkBasicTx (mkBasicTxBody & certsTxBodyL .~ [RegDepositTxCert key deposit]))
+  it "an output whose value is an indefinite length array" $ do
+    policy <- PolicyID <$> (impAddNativeScript . RequireSignature =<< freshKeyHash)
+    holder <- freshKeyAddrNoPtr_
+    let token = multiAssetFromList [(policy, AssetName (toShort "a"), 1)]
+        out = mkBasicTxOut holder (MaryValue (Coin 5_000_000) token)
+        value f o = case o of
+          TList (a : v : rest) -> TList (a : f v : rest)
+          m -> overKey 1 f m
+    submitEdited noEdit {editBody = overKey 1 (overFirst (value indefiniteArray))} (mkBasicTx (mkBasicTxBody & mintTxBodyL .~ token & outputsTxBodyL .~ [out]))
+  it "a V3 spend beside a parameter change that proposes a Peras parameter with no guardrail script" $ do
+    dropGuardrail
+    proposal <- mkProposal =<< mkParameterChangeGovAction SNothing (emptyPParamsUpdate & ppuPerasCertBoostL .~ SJust 7)
+    spendWithV3Using (void . trySubmitTx . (bodyTxL . proposalProceduresTxBodyL .~ [proposal])) "4901010023357369324d"
+  it "a V3 spend beside a parameter change that proposes a cost model of an unknown language with no guardrail script" $ do
+    dropGuardrail
+    models <- mkCostModelsLenient [(9, [1, 2, 3])]
+    proposal <- mkProposal =<< mkParameterChangeGovAction SNothing (emptyPParamsUpdate & ppuCostModelsL .~ SJust models)
+    spendWithV3Using (void . trySubmitTx . (bodyTxL . proposalProceduresTxBodyL .~ [proposal])) "4901010023357369324d"
+  it "a V3 spend beside a new constitution with no guardrail script" $ do
+    anchor <- arbitrary
+    previous <- getLastEnactedConstitution
+    proposal <- mkProposal (NewConstitution previous (Constitution anchor SNothing))
+    spendWithV3Using (void . trySubmitTx . (bodyTxL . proposalProceduresTxBodyL .~ [proposal])) "4901010023357369324d"
+  it "a V3 spend whose transaction pays a bootstrap address" $ do
+    boot <- freshBootstrapAddress
+    let out = mkBasicTxOut (AddrBootstrap boot) (inject (Coin 2_000_000))
+    spendWithV3Using (void . trySubmitTx . (bodyTxL . outputsTxBodyL %~ (<> [out]))) "4901010023357369324d"
+
+-- | A list term written as an indefinite length array.
+indefiniteArray :: Term -> Term
+indefiniteArray (TList xs) = TListI xs
+indefiniteArray t = t
+
+-- | Removes the guardrail script from the constitution, so a proposal names no policy and runs no script.
+dropGuardrail :: ImpTestM E ()
+dropGuardrail = modifyNES (newEpochStateGovStateL . constitutionGovStateL . constitutionGuardrailsScriptHashL .~ SNothing)
 
 -- | Spends at a validator that succeeds when the transaction's validity range equals its redeemer, each case with the range the ledger is expected to build.
 validityBounds :: SpecWith (ImpInit (LedgerSpec E))
