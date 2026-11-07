@@ -34,7 +34,7 @@ fixes = [
   { commit = "1bc9e6a23", exclude = "pin" },
   { commit = "6aa0e5102", exclude = "pin" },
   { commit = "050a69752", exclude = "relay" },
-  { commit = "7f188c640", exclude = "gap", why = "phase two at the pin accepts every judged transaction with no redeemers, so its revert changes no verdict" },
+  { commit = "7f188c640", exclude = "unrevertable", why = "its revert conflicts in crates/cardano/src/validate.rs, where 0f4bf4574 removed the requests_scripts shortcut it added" },
   { commit = "c6dd7d68e", arm = "estimate-needs-vkeys" },
   { commit = "76a934c2f", arm = "withdrawal-accounts-absent" },
   { commit = "5afd37b09", exclude = "pin" },
