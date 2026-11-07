@@ -260,21 +260,17 @@ fn add(
     tally.add(agrees, || format!("{id} {layer} {name} {dolos}"));
 }
 
-/// Whether the v1 mapping of a run's transactions panicked, which leaves the passes that map them through v1 unrun.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum V1Mapping {
-    Maps,
-    Panics,
-}
+/// Evidence that ReadTx v1 mapped each accepted transaction of a run without a panic, which the passes that serve the run through v1 take.
+pub(super) struct V1Maps(());
 
-/// Counts what each ReadTx version maps for the accepted records of the blocks a run rolled against the ledger's transactions, v1 by each top level hash with its sub transactions and v1beta and v1alpha by each top level and sub transaction hash.
+/// Counts what each ReadTx version maps for the accepted records of the blocks a run rolled against the ledger's transactions, v1 by each top level hash with its sub transactions and v1beta and v1alpha by each top level and sub transaction hash, with the evidence that v1 mapped them when no v1 mapping panicked.
 pub(super) async fn compare(
     domain: &DomainAdapter,
     kind: CorpusKind,
     blocks: &[GroupBlock<'_>],
     tally: &mut Tally,
-) -> V1Mapping {
-    let mut v1 = V1Mapping::Maps;
+) -> Option<V1Maps> {
+    let mut v1 = Some(V1Maps(()));
     let groups = blocks.iter().filter_map(GroupBlock::rolled);
     let accepted = groups
         .flat_map(|rolled| rolled.group)
@@ -294,7 +290,7 @@ pub(super) async fn compare(
             .collect();
         let served = read_tx!(v1, domain, top.0);
         if let Answer::Panicked(_) = served {
-            v1 = V1Mapping::Panics;
+            v1 = None;
         }
         let common = served.then(|tx| {
             let fee = wire_fee!(v1, tx.fee.clone());

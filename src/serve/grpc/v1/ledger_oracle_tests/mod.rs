@@ -68,7 +68,7 @@ use pallas::{
 };
 use seed::SeedPoint;
 use serve::{Event, Served, Service};
-use served_tx::V1Mapping;
+use served_tx::V1Maps;
 use tokio::{runtime::Handle, task};
 use tonic::{Request, Status};
 use validate::Relay;
@@ -1113,6 +1113,7 @@ async fn compare_read_tx(
     kind: CorpusKind,
     blocks: &[GroupBlock<'_>],
     tally: &mut Tally,
+    _: &V1Maps,
 ) {
     let mut expected: BTreeMap<TxName, (RecordId, Option<ExpectedTx>)> = BTreeMap::new();
     let groups = blocks.iter().filter_map(|block| match block {
@@ -1407,6 +1408,7 @@ async fn serve_rolled(
     domain: &DomainAdapter,
     seed: &SeedPoint,
     rolled: &[&Rolled<'_>],
+    _: &V1Maps,
 ) -> [(Service, Served); 4] {
     let hashes: Vec<BlockHash> = rolled
         .iter()
@@ -1814,13 +1816,13 @@ async fn judge_run(
     let plutus_data = &mut judged.state.plutus_data;
     compare_plutus_data(&seeded.domain, kind, &blocks, plutus_data).await;
     let served = &mut judged.state.served_tx;
-    if served_tx::compare(&seeded.domain, kind, &blocks, served).await == V1Mapping::Panics {
+    let Some(v1) = served_tx::compare(&seeded.domain, kind, &blocks, served).await else {
         return part;
-    }
+    };
     let readtx = &mut judged.state.readtx;
-    compare_read_tx(&seeded.domain, kind, &blocks, readtx).await;
+    compare_read_tx(&seeded.domain, kind, &blocks, readtx, &v1).await;
     let rolled: Vec<&Rolled> = blocks.iter().filter_map(GroupBlock::rolled).collect();
-    let services = serve_rolled(&seeded.domain, &seeded.seed, &rolled).await;
+    let services = serve_rolled(&seeded.domain, &seeded.seed, &rolled, &v1).await;
     compare_as_output(kind, run, &rolled, &services, &mut judged.state, as_output);
     sweep(
         &seeded.domain,
