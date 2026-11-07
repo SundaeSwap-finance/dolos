@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     cell::RefCell,
     fmt,
     panic::{self, AssertUnwindSafe},
@@ -94,6 +95,17 @@ fn record_panic_locations() {
             previous(info);
         }));
     });
+}
+
+/// The text a caught panic carries.
+pub(super) fn panic_message(payload: Box<dyn Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => payload
+            .downcast_ref::<&str>()
+            .map_or("non text payload", |m| m)
+            .to_string(),
+    }
 }
 
 /// The header hash and block number of the last block a run applied.
@@ -284,13 +296,7 @@ impl Group {
             .write()
             .unwrap_or_else(PoisonError::into_inner) = logic;
         self.domain.chain.clear_poison();
-        let message = match payload.downcast::<String>() {
-            Ok(message) => *message,
-            Err(payload) => payload
-                .downcast_ref::<&str>()
-                .map_or("non text payload", |m| m)
-                .to_string(),
-        };
+        let message = panic_message(payload);
         Err(RollFailure::Panic { at, message })
     }
 

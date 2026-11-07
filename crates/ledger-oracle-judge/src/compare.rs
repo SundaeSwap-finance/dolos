@@ -126,22 +126,44 @@ pub struct StateTallies {
     pub readtx: Tally,
     pub script: Tally,
     pub datum: Tally,
+    pub served_tx: Tally,
     pub known: Vec<String>,
     pub known_fired: KnownList,
     pub known_stale: Vec<String>,
 }
 
 impl StateTallies {
-    fn named(&self) -> [(&'static str, &Tally); 8] {
+    /// Each tally a passing corpus compares at least once, by name.
+    fn named(&self) -> [(&'static str, &Tally); 9] {
+        let StateTallies {
+            roll_fail: _,
+            utxo,
+            as_output,
+            sub_only: _,
+            seeded_unjudged: _,
+            accounts,
+            undo,
+            revalidate: _,
+            dependents: _,
+            params,
+            readtx,
+            script,
+            datum,
+            served_tx,
+            known: _,
+            known_fired: _,
+            known_stale: _,
+        } = self;
         [
-            ("utxo", &self.utxo),
-            ("as_output", &self.as_output),
-            ("accounts", &self.accounts),
-            ("undo", &self.undo),
-            ("params", &self.params),
-            ("readtx", &self.readtx),
-            ("script", &self.script),
-            ("datum", &self.datum),
+            ("utxo", utxo),
+            ("as_output", as_output),
+            ("accounts", accounts),
+            ("undo", undo),
+            ("params", params),
+            ("readtx", readtx),
+            ("script", script),
+            ("datum", datum),
+            ("served_tx", served_tx),
         ]
     }
 
@@ -171,6 +193,7 @@ impl StateTallies {
             readtx,
             script,
             datum,
+            served_tx,
             known,
             known_fired,
             known_stale,
@@ -188,6 +211,7 @@ impl StateTallies {
         self.readtx.merge(readtx);
         self.script.merge(script);
         self.datum.merge(datum);
+        self.served_tx.merge(served_tx);
         self.known.extend(known);
         self.known_fired.extend(known_fired);
         self.known_stale.extend(known_stale);
@@ -273,6 +297,7 @@ impl fmt::Display for StateTallies {
             readtx,
             script,
             datum,
+            served_tx,
             known,
             known_fired: _,
             known_stale,
@@ -281,7 +306,8 @@ impl fmt::Display for StateTallies {
             f,
             "STATE compared utxo={} as_output={} of sub_only={sub_only} \
              seeded_unjudged={seeded_unjudged} accounts={} undo={} revalidate={} \
-             of dependents={dependents} params={} readtx={} script={} datum={} rolled_failed={}",
+             of dependents={dependents} params={} readtx={} script={} datum={} \
+             served_tx={} rolled_failed={}",
             utxo.compared,
             as_output.compared,
             accounts.compared,
@@ -291,6 +317,7 @@ impl fmt::Display for StateTallies {
             readtx.compared,
             script.compared,
             datum.compared,
+            served_tx.compared,
             self.rolled_failed()
         )?;
         for line in roll_fail {
@@ -360,6 +387,7 @@ mod tests {
         state.readtx.add(true, String::new);
         state.script.add(true, String::new);
         state.datum.add(true, String::new);
+        state.served_tx.add(true, String::new);
         state
     }
 
@@ -397,6 +425,7 @@ mod tests {
             readtx: tally(&lines),
             script: tally(&lines),
             datum: tally(&lines),
+            served_tx: tally(&lines),
             known: vec![line.clone()],
             known_fired: BTreeMap::from([((Locus::Accounts, supp(n)), row)]),
             known_stale: vec![line],
@@ -422,6 +451,7 @@ mod tests {
             readtx: tally(&lines),
             script: tally(&lines),
             datum: tally(&lines),
+            served_tx: tally(&lines),
             known: vec!["line0".to_string(), "line1".to_string()],
             known_fired: BTreeMap::from([
                 ((Locus::Accounts, supp(0)), Row::S1),
@@ -444,7 +474,7 @@ mod tests {
         let mut state = compared();
         state.as_output.add(true, String::new);
         assert!(state.pass(), "{state}");
-        let empties: [fn(&mut StateTallies) -> &mut Tally; 8] = [
+        let empties: [fn(&mut StateTallies) -> &mut Tally; 9] = [
             |s| &mut s.utxo,
             |s| &mut s.as_output,
             |s| &mut s.accounts,
@@ -453,6 +483,7 @@ mod tests {
             |s| &mut s.readtx,
             |s| &mut s.script,
             |s| &mut s.datum,
+            |s| &mut s.served_tx,
         ];
         for empty in empties {
             let mut state = state.clone();
@@ -461,7 +492,7 @@ mod tests {
         }
         assert!(state.to_string().contains(
             " seeded_unjudged=0 accounts=1 undo=1 revalidate=1 of dependents=0 params=1 \
-                 readtx=1 script=1 datum=1"
+                 readtx=1 script=1 datum=1 served_tx=1"
         ));
     }
 
@@ -489,7 +520,7 @@ mod tests {
         let mut state = compared();
         state.as_output.add(true, String::new);
         assert!(state.pass(), "{state}");
-        assert!(state.to_string().contains(" datum=1 rolled_failed=0"));
+        assert!(state.to_string().contains(" served_tx=1 rolled_failed=0"));
         assert!(!state.to_string().contains("ROLL_FAIL"));
         state.roll_fail.push(RollFail {
             first: supp(3),
@@ -500,7 +531,7 @@ mod tests {
         });
         assert!(!state.pass(), "{state}");
         let text = state.to_string();
-        assert!(text.contains(" datum=1 rolled_failed=3\n"), "{text}");
+        assert!(text.contains(" served_tx=1 rolled_failed=3\n"), "{text}");
         assert!(
             text.contains(
                 "\nROLL_FAIL group=supp#3..supp#5 records=3 slot=40 panic at=a.rs:1:2 explicit panic"

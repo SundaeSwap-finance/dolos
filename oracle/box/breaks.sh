@@ -176,6 +176,7 @@ caught() {
     builtin-term-walk) pattern='^EVAL-DIFF pallas [a-z]+#[0-9]+ top [A-Za-z]+#[0-9]+ ledger=\(ran mem=[0-9]+ steps=[0-9]+\) dolos=\(refused V3 builtin outside audited protocol-12 subset\)$' ;;
     block-made-unserved) pattern='^DIFF undo [a-z]+#[0-9]+ ' ;;
     scripts-sub-unsearched) pattern='^DIFF script [a-z]+#[0-9]+ ' ;;
+    gov-proposal-panics | dijkstra-scripts-panic) pattern='^DIFF served_tx [a-z]+#[0-9]+ v1 tx=[0-9a-f]+ panicked=' ;;
     pending-registrations-ignored) pattern='^DISAGREE [a-z]+#[0-9]+ ledger=accepted dolos=refused\[DijkstraInvalidAccount\(' ;;
     endorser-tx-dropped) pattern='^ENDORSER-DIFF service=(FetchBlock|FollowTip) slot=[0-9]+ list=(ids|bytes) index=[0-9]+ ' ;;
     fee-min-deleted | aux-refused | integrity-top-deleted) pattern='^(DISAGREE|REASON_MISMATCH|RULE_MISMATCH) [a-z0-9]+#[0-9]+ ' ;;

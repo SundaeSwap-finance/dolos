@@ -138,6 +138,34 @@ index 0b4c7f227..08b27e058 100644
          }
      }
  
+diff --git a/pallas-utxorpc/src/shared.rs b/pallas-utxorpc/src/shared.rs
+index fd504aacb..215d3e768 100644
+--- a/pallas-utxorpc/src/shared.rs
++++ b/pallas-utxorpc/src/shared.rs
+@@ -462,6 +462,12 @@ macro_rules! impl_cardano_mapper_shared {
+                 match x {
+                     MultiEraNativeScript::AlonzoCompatible(x) => Self::map_native_script(x),
+                     #[cfg(feature = "unstable")]
++                    MultiEraNativeScript::Dijkstra(_)
++                        if pallas_crypto::oracle_plant("dijkstra-scripts-panic") =>
++                    {
++                        unimplemented!("collect_all_scripts is not yet implemented for Dijkstra")
++                    }
++                    #[cfg(feature = "unstable")]
+                     MultiEraNativeScript::Dijkstra(x) => Self::map_dijkstra_native_script(x),
+                     _ => unimplemented!("collect_all_scripts has no arm for this native script"),
+                 }
+@@ -642,6 +648,10 @@ macro_rules! impl_cardano_mapper_shared {
+                 &self,
+                 x: &pallas_traverse::MultiEraProposal,
+             ) -> u5c::GovernanceActionProposal {
++                #[cfg(feature = "unstable")]
++                if x.as_dijkstra().is_some() && pallas_crypto::oracle_plant("gov-proposal-panics") {
++                    unimplemented!("map_gov_proposal is not yet implemented for Dijkstra");
++                }
+                 u5c::GovernanceActionProposal {
+                     deposit: u64_to_bigint(x.deposit()),
+                     reward_account: x.reward_account().to_vec().into(),
 diff --git a/pallas-validate/src/phase1/conway.rs b/pallas-validate/src/phase1/conway.rs
 index 08356a15d..617d8f882 100644
 --- a/pallas-validate/src/phase1/conway.rs

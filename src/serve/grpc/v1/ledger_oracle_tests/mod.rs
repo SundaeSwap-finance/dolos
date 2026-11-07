@@ -11,6 +11,7 @@ mod output;
 mod params;
 mod seed;
 mod serve;
+mod served_tx;
 mod validate;
 
 use std::{
@@ -67,6 +68,7 @@ use pallas::{
 };
 use seed::SeedPoint;
 use serve::{Event, Served, Service};
+use served_tx::V1Mapping;
 use tokio::{runtime::Handle, task};
 use tonic::{Request, Status};
 use validate::Relay;
@@ -396,6 +398,7 @@ fn judged_part(uncompared: &[&str]) -> Judged {
         ("readtx", &mut state.readtx),
         ("script", &mut state.script),
         ("datum", &mut state.datum),
+        ("served_tx", &mut state.served_tx),
     ];
     for (name, tally) in tallies {
         if !uncompared.contains(&name) {
@@ -1713,10 +1716,14 @@ async fn judge_run(
     for (id, tally) in run_accounts {
         account_checks.entry(id).or_default().merge(tally);
     }
-    let readtx = &mut judged.state.readtx;
-    compare_read_tx(&seeded.domain, kind, &blocks, readtx).await;
     let script = &mut judged.state.script;
     compare_scripts(&seeded.domain, kind, &blocks, script).await;
+    let served = &mut judged.state.served_tx;
+    if served_tx::compare(&seeded.domain, kind, &blocks, served).await == V1Mapping::Panics {
+        return part;
+    }
+    let readtx = &mut judged.state.readtx;
+    compare_read_tx(&seeded.domain, kind, &blocks, readtx).await;
     let rolled: Vec<&Rolled> = blocks.iter().filter_map(GroupBlock::rolled).collect();
     let services = serve_rolled(&seeded.domain, &seeded.seed, &rolled).await;
     compare_as_output(kind, run, &rolled, &services, &mut judged.state, as_output);
