@@ -274,6 +274,18 @@ index fd504aac..fc162cc5 100644
                  ns.chain(p1).chain(p2).chain(p3).chain(p4).collect()
              }
  
+diff --git a/pallas-utxorpc/src/v1/mod.rs b/pallas-utxorpc/src/v1/mod.rs
+index 40fb34e2..0d19c845 100644
+--- a/pallas-utxorpc/src/v1/mod.rs
++++ b/pallas-utxorpc/src/v1/mod.rs
+@@ -430,6 +430,7 @@ impl<C: LedgerContext> Mapper<C> {
+                 .direct_deposits()
+                 .into_iter()
+                 .flatten()
++                .filter(|_| !pallas_crypto::oracle_plant("direct-deposits-dropped"))
+                 .map(map_direct_deposit)
+                 .collect(),
+             account_balance_intervals: tx
 diff --git a/pallas-utxorpc/src/v1alpha/mod.rs b/pallas-utxorpc/src/v1alpha/mod.rs
 index ce0755a2..f94c0435 100644
 --- a/pallas-utxorpc/src/v1alpha/mod.rs

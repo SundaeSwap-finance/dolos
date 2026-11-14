@@ -1,6 +1,7 @@
 //! Judges what Dolos validates and serves against ledger corpora.
 
 mod coverage;
+mod dijkstra_field;
 mod endorser;
 mod eval;
 mod guarding;
@@ -309,6 +310,17 @@ fn judged_part(uncompared: &[&str]) -> Judged {
     }
     if compared("submit") {
         agree_at_every_route(&mut state.submit);
+    }
+    if compared("dijkstra_field") {
+        for route in OutputRoute::ALL {
+            state.dijkstra_field.add(judgement::Verdict {
+                judge: Judge::DijkstraField,
+                entry: Some(route.at(Version::V1)),
+                subject: judgement::Subject::Record(supp(1)),
+                cells: Vec::new(),
+                outcome: judgement::Outcome::Agree,
+            });
+        }
     }
     judged
 }
@@ -693,10 +705,12 @@ fn missing_from_makers<'r>(
     missing
 }
 
-/// A block a run rolled, with the records it holds, their slot group, and its
-/// first record when Dolos accepted that record on submission.
+/// A block a run rolled, with its bytes as built, the records it holds, their
+/// slot group, and its first record when Dolos accepted that record on
+/// submission.
 struct Rolled<'r> {
     point: ChainPoint,
+    block: RawBlock,
     group: &'r [Record],
     records: Vec<&'r Record>,
     requeued: Option<&'r Record>,
@@ -876,13 +890,13 @@ async fn validate_run<'r>(
             .collect();
         let rolled = match validate::block(last.slot, tip, &txs) {
             Ok((next, block)) => group
-                .roll((edits.rolled_block)(id_of(last), block))
-                .map(|_| next)
+                .roll((edits.rolled_block)(id_of(last), block.clone()))
+                .map(|_| (next, block))
                 .map_err(|e| e.to_string()),
             Err(e) => Err(format!("decode {e}")),
         };
-        let next = match rolled {
-            Ok(next) => next,
+        let (next, block) = match rolled {
+            Ok(rolled) => rolled,
             Err(cause) => {
                 state.roll_fail.push(RollFail {
                     first: id_of(&records[0]),
@@ -904,6 +918,7 @@ async fn validate_run<'r>(
             .filter(|r| dolos_accepted.contains(&r.n));
         blocks.push(GroupBlock::Rolled(Rolled {
             point: ChainPoint::Specific(last.slot, next.hash()),
+            block,
             group: records,
             records: included.into_iter().map(|(r, _)| r).collect(),
             requeued,
@@ -2053,6 +2068,7 @@ async fn judge_run(
     compare_read_tx(kind, &blocks, &read, &mut judged.state.readtx);
     let rolled: Vec<&Rolled> = blocks.iter().filter_map(GroupBlock::rolled).collect();
     let routes = serve_rolled(&seeded.domain, &seeded.seed, &rolled, &read).await;
+    dijkstra_field::judge(kind, &rolled, &routes, &mut judged.state.dijkstra_field);
     compare_as_output(kind, run, &rolled, &routes, &mut judged.state, as_output);
     sweep(
         &seeded.domain,
@@ -2278,6 +2294,7 @@ fn coverage_members(
 ) -> Vec<ledger_oracle_judge::coverage::Member> {
     let mut members = coverage::members(&manifests.rules);
     members.extend(mutations.members(|e| coverage::entry_reach(e, coverage::Records::Mutants)));
+    members.extend(dijkstra_field::members());
     members
 }
 

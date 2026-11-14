@@ -1,46 +1,22 @@
 #!/bin/sh
 # Runs one tier of the oracle at REV, and oracle/README.md says what each tier checks and when to run it.
-# Usage: ROOT=dir [REV=ref] [BASE=ref] [LIVE_READS=dir] run.sh quick|done|ship
-# The quick tier judges the arms whose plants change a file that differs between BASE and REV, and BASE defaults to the commit of the last done or ship run that passed. The ship tier also judges LIVE_READS, the reads read-live.sh made of the image of REV. The done and ship tiers record their commit in runs/last-done when they pass, and the ship tier records it and the image in runs/last-ship too.
+# Usage: ROOT=dir [REV=ref] [BASE=ref] run.sh quick|done
+# The quick tier judges the arms whose plants change a file that differs between BASE and REV, and BASE defaults to the commit of the last done run that passed. The done tier records its commit in runs/last-done when it passes.
 # A tier fails when a caught or held arm served other lines than its row of served.txt records, and a change that alters what an arm serves on purpose copies the arm's row from the run's served.txt into served.txt.
 set -eu
 : "${ROOT:?}"
 BASE=${BASE:-}
 LAST_DONE="$ROOT/runs/last-done"
-LAST_SHIP="$ROOT/runs/last-ship"
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/lib.sh"
 . "$HERE/value.sh"
 . "$HERE/amaru.sh"
 trap finish EXIT
 case ${1:-} in
-  quick | done | ship) ;;
-  *) echo "usage: run.sh quick|done|ship" ; exit 2 ;;
+  quick | done) ;;
+  *) echo "usage: run.sh quick|done" ; exit 2 ;;
 esac
 start_run "$0" "$@"
-
-# Prints the live judge's verdict lines from $OUT/live.log.
-live_lines() {
-  grep -E '^(LIVE|KNOWN|KNOWN_STALE|LIVE-DIFF|LIVE-GAP) ' "$OUT/live.log" | cut -c1-400 || true
-}
-
-# Judges a copy of the candidate's reads with the served era start and tip one second late, the reads of a system start one second late, and prints the verdict of the arm that requires both times to disagree with the node.
-live_shift() {
-  shifted="$OUT/live/shifted"
-  rm -rf "$shifted" "$OUT/live-shift.log"
-  if cp -R "$OUT/live/candidate" "$shifted" &&
-    jq '.cardano.summaries[-1].start.time |= (tonumber + 1000 | tostring)' \
-      "$OUT/live/candidate/era.json" >"$shifted/era.json" &&
-    jq '.tip.timestamp |= (tonumber + 1000 | tostring)' "$OUT/live/candidate/tip.json" >"$shifted/tip.json"; then
-    LIVE_DIR="/w/${OUT#"$ROOT"/}/live/shifted" sh "$IN_IMAGE" "${OUT#"$ROOT"/}" \
-      "/w/${OUT#"$ROOT"/}/bin/judge" "$ORACLE_TESTS::live::live" --exact --ignored --nocapture \
-      >"$OUT/live-shift.log" 2>&1 || true
-    live_shift_verdict "$OUT/live-shift.log"
-  else
-    verdict=UNPLANTED
-  fi
-  echo "live-shift=$verdict"
-}
 
 # Judges the head, the control and the arms the change from BASE touches, every arm when no BASE is known.
 quick_run() {
@@ -125,32 +101,7 @@ done_run() {
   commit=$(git -C "$ROOT/$SCRATCH" rev-parse HEAD)
   judge_arms
   echo "DONE tier=done $verdicts commit=$commit logs=$OUT"
-  record_pass done "$commit" "$verdicts"
-}
-
-# Judges what the done tier judges and a copy of the reads LIVE_READS, and records the commit in runs/last-done and runs/last-ship, and the image in runs/last-ship, when every verdict passes.
-ship_run() {
-  mkdir -p "$OUT"
-  require_reads
-  require_free
-  require_lib_test
-  require_build_image
-  reset_scratch
-  commit=$(git -C "$ROOT/$SCRATCH" rev-parse HEAD)
-  rm -rf "$OUT/live"
-  cp -R "$LIVE_READS" "$OUT/live"
-  build_live_judge >"$OUT/live-leg.out" 2>&1 || true
-  judge_arms
-  live=FAIL
-  if judge_live && [ "$candidate" = PASS ]; then
-    live=PASS
-  fi
-  cat "$OUT/live-leg.out"
-  candidate_lines "$OUT/live"
-  live_lines
-  shift_verdict=$(live_shift | tail -1)
-  echo "DONE tier=ship $verdicts $shift_verdict live=$live image=$image commit=$commit logs=$OUT"
-  record_pass ship "$commit" "$verdicts $shift_verdict live=$live" "$image"
+  record_pass "$commit" "$verdicts"
 }
 
 "${1}_run"

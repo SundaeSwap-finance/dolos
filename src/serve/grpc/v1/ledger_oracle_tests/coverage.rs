@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use ledger_oracle_judge::{
     context::{language_members, Language},
     coverage::{Member, Reach},
-    judgement::{Axis, CellKey, EntryPoint, RequestShape, Route},
+    judgement::{Axis, CellKey, EntryPoint, RequestShape, Route, Version},
     refusal::leaf_members,
     rules::Rules,
 };
@@ -453,17 +453,17 @@ pub(super) fn entry_reach(entry: EntryPoint, records: Records) -> Reach {
         reason: reason.to_string(),
         command: command.to_string(),
     };
-    let route = match entry {
+    let (route, version) = match entry {
         EntryPoint::Instrument(_) => return Reach::Counted,
-        EntryPoint::Route(route, _) => route,
+        EntryPoint::Route(route, version) => (route, version),
     };
     match route {
         Route::FetchBlock | Route::FollowTip | Route::DumpHistory | Route::WatchTx
-            if records == Records::Mutants =>
+            if records == Records::Mutants && version != Version::V1 =>
         {
             excluded(
-                "a block serving route is judged only on an input an earlier record of the run made, and a mutant runs alone",
-                "grep -n -e 'that an earlier record made' -e 'MUTATION a run judged' src/serve/grpc/v1/ledger_oracle_tests/mod.rs",
+                "below v1 a block serving route is judged only on an input an earlier record of the run made, and a mutant runs alone",
+                "grep -n -e 'that an earlier record made' -e 'MUTATION a run judged' -e 'when this version has Dijkstra fields' src/serve/grpc/v1/ledger_oracle_tests/mod.rs src/serve/grpc/v1/ledger_oracle_tests/serve.rs",
             )
         }
         Route::SubmitTx
@@ -913,7 +913,8 @@ mod tests {
     }
 
     #[test]
-    fn mutants_reach_no_block_serving_route_and_no_route_a_recorded_record_cannot_reach() {
+    fn mutants_reach_a_block_serving_route_at_v1_alone_and_no_route_a_recorded_record_cannot_reach()
+    {
         use ledger_oracle_judge::judgement::{Instrument, Version};
         let v1 = |route| EntryPoint::Route(route, Version::V1);
         assert_eq!(
@@ -936,7 +937,10 @@ mod tests {
         for entry in EntryPoint::every() {
             let recorded = entry_reach(entry, Records::Recorded);
             let mutants = entry_reach(entry, Records::Mutants);
-            let block = matches!(entry, EntryPoint::Route(route, _) if blocks.contains(&route));
+            let block = matches!(
+                entry,
+                EntryPoint::Route(route, version) if blocks.contains(&route) && version != Version::V1
+            );
             match (&recorded, block) {
                 (Reach::Excluded { .. }, _) => assert_eq!(mutants, recorded, "{entry}"),
                 (Reach::Counted, true) => {
@@ -948,7 +952,7 @@ mod tests {
                 *n += usize::from(*reach != Reach::Counted);
             }
         }
-        assert_eq!(excluded, [17, 29]);
+        assert_eq!(excluded, [17, 25]);
     }
 
     /// The cells of each kept record of a corpus that pallas decodes.

@@ -1,4 +1,4 @@
-# Functions and defaults the oracle box scripts share, reading ROOT, SCRATCH, REV, BASE, JUDGED, MIN_FREE_G, OUT, HERE, TARGET, LIVE_ENV, LIVE_READS, SYNC_SLOTS_PER_S, IN_IMAGE, LOCK_POLL_SECONDS, RUN_LOCK, LAST_DONE, LAST_SHIP, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_FSYNC, NODE, ENDPOINT, GRPCURL, the ORACLE_ slice settings, CGROUP_FILE, CGROUP_ROOT, the IO_ limits and VALUE_HARNESS_URL.
+# Functions and defaults the oracle box scripts share, reading ROOT, SCRATCH, REV, BASE, JUDGED, MIN_FREE_G, OUT, HERE, TARGET, LIVE_ENV, SYNC_SLOTS_PER_S, IN_IMAGE, LOCK_POLL_SECONDS, RUN_LOCK, LAST_DONE, LAST_BOX_TEST, BOX_SETUP_HASH, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_FSYNC, NODE, ENDPOINT, GRPCURL, the ORACLE_ slice settings, CGROUP_FILE, CGROUP_ROOT, the IO_ limits and VALUE_HARNESS_URL.
 
 PALLAS=${PALLAS:-scratch/pallas}
 SCRATCH=${SCRATCH:-scratch/dolos}
@@ -297,18 +297,6 @@ arm_verdict() {
   rm -f "$OUT/served/$name.printed"
 }
 
-# Whether the live log $1 holds the served era start and the tip each disagreeing with the node on its time.
-shifted_times_differ() {
-  times='slot=[0-9]+ time=[0-9]+ node_slot=[0-9]+ '
-  grep -E "^LIVE-DIFF row=[^ ]* locus=era_summary era=[a-z]+ start_time $times" "$1" &&
-    grep -E "^LIVE-DIFF row=[^ ]* locus=era_summary tip $times" "$1"
-}
-
-# Sets verdict for the live-shift arm from the live judge's log $1 of the reads shifted one second late.
-live_shift_verdict() {
-  arm_verdict live-shift "$1" '^test result: ' "" "" shifted_times_differ "$1"
-}
-
 # Writes the lines on stdin to $OUT/served/$1 as what the arm $1 served, in byte order, without the number libtest gives a panicking test's thread, and with each panic's line in a file of the scratch tree given as the name of the innermost fn whose braces hold it and the count of lines from its fn line.
 record_served() {
   mkdir -p "$OUT/served"
@@ -457,13 +445,10 @@ passed() {
   done
 }
 
-# Records the commit $2 of a run of the tier $1, done or ship, whose verdicts $3 pass, in LAST_DONE, and for the ship tier in LAST_SHIP with the image $4, the verdicts and the UTC time.
+# Records the commit $1 of a done run whose verdicts $2 pass in LAST_DONE.
 record_pass() {
-  passed "$3" || return 1
-  echo "$2" >"$LAST_DONE"
-  if [ "$1" = ship ]; then
-    echo "commit=$2 image=$4 tier=$1 verdicts=\"$3\" time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$LAST_SHIP"
-  fi
+  passed "$2" || return 1
+  echo "$1" >"$LAST_DONE"
 }
 
 # The whole gibibytes free on the filesystem holding $1, rounded down.
@@ -511,33 +496,6 @@ build_image() {
   git -C "$ROOT/value/harness.git" archive "$rev" conformance-value-oracle/gen/image-name.sh conformance-value-oracle/gen/build-image.sh |
     tar -x -C "$ROOT/value/image-scripts" --strip-components 2 || return
   sh "$ROOT/value/image-scripts/build-image.sh" "$1" "$HERE/images"
-}
-
-# Prints the commit the image $1 was built from, its revision label, after pulling it, or exits 2 with a REFUSED line when $1 is not a repository and a digest with no tag or the label is not a full commit id.
-image_commit() {
-  case $1 in
-    *[[:space:]]*) named=no ;;
-    *) named=$(printf '%s\n' "$1" | grep -E -c '^([^@/]+/)*[^@/:]+@sha256:[0-9a-f]{64}$') || true ;;
-  esac
-  if [ "$named" != 1 ]; then
-    echo "REFUSED IMAGE=$1 is not <repository>@sha256:<64 hex digits> with no tag" >&2
-    exit 2
-  fi
-  if ! docker pull -q --platform linux/amd64 "$1" >/dev/null; then
-    echo "REFUSED IMAGE=$1 pull failed" >&2
-    exit 2
-  fi
-  revision=$(docker image inspect --platform linux/amd64 \
-    -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$1") || revision=
-  case $revision in
-    *[!0-9a-f]* | "") ;;
-    ????????????????????????????????????????)
-      echo "$revision"
-      return
-      ;;
-  esac
-  echo "REFUSED IMAGE=$1 revision=$revision is not a full commit id" >&2
-  exit 2
 }
 
 # Prints the full sha of the commit the ref $2 names in $ROOT/dolos.git, or exits 2 with a REFUSED line naming the variable $1 when it names none.
@@ -1250,8 +1208,23 @@ executable() {
   fi | sed -n 's/.*"executable":"\([^"]*\)".*/\1/p' | tail -1
 }
 
-# Exits when the test of the box functions or of the field comparison fails.
+# The record of the inputs of the last passing run of the box tests.
+LAST_BOX_TEST=${LAST_BOX_TEST:-$ROOT/runs/last-box-test}
+# The hash of the box setup that installed the tools the box tests run with, written by the box setup.
+BOX_SETUP_HASH=${BOX_SETUP_HASH:-$ROOT/box.hash}
+
+# The inputs the box tests depend on, the box setup hash and a digest of every file of the box scripts.
+box_test_inputs() {
+  echo "box=$(cat "$BOX_SETUP_HASH" 2>/dev/null || echo none) files=$( (cd "$HERE" && find . -type f -exec sha256sum {} + | LC_ALL=C sort -k2) | sha256sum | cut -c1-16)"
+}
+
+# Exits when the test of the box functions or of the field comparison fails, and runs them only when their inputs differ from those of their last pass.
 require_lib_test() {
+  inputs=$(box_test_inputs)
+  if ! leg_due "$LAST_BOX_TEST" "$inputs"; then
+    echo "BOX-TEST due=no inputs=$inputs"
+    return
+  fi
   mkdir -p "$OUT/lib-test" "$OUT/fields-test"
   if ! sh "$HERE/lib_test.sh" "$OUT/lib-test" >"$OUT/lib-test.log" 2>&1; then
     echo "REFUSED lib_test log=$OUT/lib-test.log"
@@ -1261,6 +1234,9 @@ require_lib_test() {
     echo "REFUSED fields_test log=$OUT/fields-test.log"
     exit 2
   fi
+  mkdir -p "$(dirname "$LAST_BOX_TEST")"
+  echo "$inputs" >"$LAST_BOX_TEST"
+  echo "BOX-TEST due=yes passed inputs=$inputs"
 }
 
 # Exports as BUILD_IMAGE the name of the build image of the files of images/dolos-build, building it when docker has none, and exits when that fails.
@@ -1313,36 +1289,6 @@ sync_candidate() {
   CANDIDATE=$1 COMMIT=$commit sh "$HERE/candidate.sh" "$OUT/live" >"$OUT/live/candidate.log" 2>&1 || fields=$?
   candidate_lines "$OUT/live"
   return "$fields"
-}
-
-# The candidate's verdict from the exit $1 of candidate.sh and its log $2, REFUSED only for an exit of 2 with a refusal line in the log.
-candidate_verdict() {
-  if [ "$1" -eq 0 ]; then
-    echo PASS
-  elif [ "$1" -eq 2 ] && grep -Eq '^(LIVE-CANDIDATE )?REFUSED ' "$2"; then
-    echo REFUSED
-  else
-    echo "FAIL exit=$1"
-  fi
-}
-
-# Sets image and candidate from the record of the reads in LIVE_READS, or exits 2 when it holds no record, the record names another commit than REV or its candidate refused to sync.
-require_reads() {
-  if [ -z "${LIVE_READS:-}" ] || [ ! -f "$LIVE_READS/reads.txt" ]; then
-    echo "REFUSED LIVE_READS=${LIVE_READS:-} holds no reads.txt"
-    exit 2
-  fi
-  read_commit=$(sed -n 's/^image=[^ ]* commit=\([^ ]*\) .*/\1/p' "$LIVE_READS/reads.txt")
-  if [ "$read_commit" != "$REV" ]; then
-    echo "REFUSED LIVE_READS=$LIVE_READS commit=$read_commit is not REV=$REV"
-    exit 2
-  fi
-  image=$(sed -n 's/^image=\([^ ]*\) .*/\1/p' "$LIVE_READS/reads.txt")
-  candidate=$(sed -n 's/.* candidate=\([A-Z]*\).*/\1/p' "$LIVE_READS/reads.txt")
-  if [ "$candidate" = REFUSED ]; then
-    echo "REFUSED LIVE_READS=$LIVE_READS candidate=REFUSED"
-    exit 2
-  fi
 }
 
 # Judges the candidate's reads against the node with $OUT/bin/judge, logging to $OUT/live.log.

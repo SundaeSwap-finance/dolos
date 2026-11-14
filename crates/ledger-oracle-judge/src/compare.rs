@@ -377,6 +377,7 @@ pub struct StateTallies {
     pub plutus_data: Tally,
     pub served_tx: ByRoute<TxRoute>,
     pub submit: ByRoute<SubmitRoute>,
+    pub dijkstra_field: judgement::Tally,
     pub known: Vec<String>,
     pub known_fired: KnownList,
     pub known_verdicts: Vec<Verdict>,
@@ -405,6 +406,7 @@ impl StateTallies {
             plutus_data,
             served_tx: _,
             submit: _,
+            dijkstra_field: _,
             known: _,
             known_fired: _,
             known_verdicts: _,
@@ -443,6 +445,9 @@ impl StateTallies {
         self.as_output.report(Judge::AsOutput, out, routes);
         self.served_tx.report(Judge::ServedTx, out, routes);
         self.submit.report(Judge::Submit, out, routes);
+        out.merge(self.dijkstra_field.clone());
+        let fields = OutputRoute::ALL.iter().map(|r| r.at(Version::V1));
+        required.extend(fields.map(|entry| (Judge::DijkstraField, entry)));
         for known in &self.known_verdicts {
             out.add(known.clone());
         }
@@ -481,6 +486,7 @@ impl StateTallies {
             plutus_data,
             served_tx,
             submit,
+            dijkstra_field,
             known,
             known_fired,
             known_verdicts,
@@ -503,6 +509,7 @@ impl StateTallies {
         self.plutus_data.merge(plutus_data);
         self.served_tx.merge(served_tx);
         self.submit.merge(submit);
+        self.dijkstra_field.merge(dijkstra_field);
         self.known.extend(known);
         self.known_fired.extend(known_fired);
         self.known_verdicts.extend(known_verdicts);
@@ -621,6 +628,7 @@ impl fmt::Display for StateTallies {
             plutus_data,
             served_tx,
             submit,
+            dijkstra_field: _,
             known,
             known_fired: _,
             known_verdicts: _,
@@ -712,7 +720,29 @@ mod tests {
         state.revalidate.agree();
         state.script.agree();
         state.plutus_data.agree();
+        for route in OutputRoute::ALL {
+            state.dijkstra_field.add(Verdict {
+                judge: Judge::DijkstraField,
+                entry: Some(route.at(Version::V1)),
+                subject: judgement::Subject::Selection,
+                cells: Vec::new(),
+                outcome: judgement::Outcome::Agree,
+            });
+        }
         state
+    }
+
+    /// The tally of a failing Dijkstra field verdict on each record of `ns`.
+    fn fields(ns: &[u32]) -> judgement::Tally {
+        let entry = OutputRoute::ReadTx.at(Version::V1);
+        let fails = |n: &u32| {
+            let cells = vec![CellKey::new(Axis::Field, n)];
+            Verdict::disagree(Judge::DijkstraField, entry, supp(*n), cells, "differ")
+        };
+        judgement::Tally {
+            passing: BTreeMap::new(),
+            failing: ns.iter().map(fails).collect(),
+        }
     }
 
     /// One agreeing comparison at every route, at every version.
@@ -816,6 +846,7 @@ mod tests {
             plutus_data: tally(&lines),
             served_tx: by_route(&lines),
             submit: by_route(&lines),
+            dijkstra_field: fields(&[n]),
             known: vec![line.clone()],
             known_fired: BTreeMap::from([((Locus::Accounts, supp(n)), row)]),
             known_verdicts: vec![stale(&format!("known{n}"))],
@@ -846,6 +877,7 @@ mod tests {
             plutus_data: tally(&lines),
             served_tx: by_route(&lines),
             submit: by_route(&lines),
+            dijkstra_field: fields(&[0, 1]),
             known: vec!["line0".to_string(), "line1".to_string()],
             known_fired: BTreeMap::from([
                 ((Locus::Accounts, supp(0)), Row::S1),
@@ -873,7 +905,7 @@ mod tests {
             .agree();
         assert!(passes(&state), "{state}");
         type Emptied = (fn(&mut StateTallies), usize);
-        let empties: [Emptied; 11] = [
+        let empties: [Emptied; 12] = [
             (|s| s.utxo = ByRoute::default(), entries::<UtxoRoute>()),
             (
                 |s| s.as_output = ByRoute::default(),
@@ -888,6 +920,10 @@ mod tests {
             (|s| s.plutus_data = Tally::default(), 1),
             (|s| s.served_tx = ByRoute::default(), entries::<TxRoute>()),
             (|s| s.submit = ByRoute::default(), entries::<SubmitRoute>()),
+            (
+                |s| s.dijkstra_field = judgement::Tally::default(),
+                OutputRoute::ALL.len(),
+            ),
         ];
         for (empty, failing) in empties {
             let mut state = state.clone();

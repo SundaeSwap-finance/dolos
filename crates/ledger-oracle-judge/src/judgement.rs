@@ -85,6 +85,7 @@ named! {
         Coverage = "coverage",
         Endorser = "endorser",
         Mutation = "mutation",
+        DijkstraField = "dijkstra-field",
     }
 }
 
