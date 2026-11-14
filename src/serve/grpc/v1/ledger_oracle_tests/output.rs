@@ -46,7 +46,7 @@ pub(super) struct Integer {
 }
 
 impl Integer {
-    fn of(value: i128) -> Self {
+    pub(super) fn of(value: i128) -> Self {
         let (negative, magnitude) = match value < 0 {
             true => (true, (-1 - value) as u128),
             false => (false, value as u128),
@@ -79,7 +79,7 @@ pub(super) enum Data {
 }
 
 impl Data {
-    fn ledger(data: &PlutusData) -> Self {
+    pub(super) fn ledger(data: &PlutusData) -> Self {
         match data {
             PlutusData::Constr(c) => Data::Constr {
                 tag: c.tag,
@@ -374,7 +374,7 @@ macro_rules! served_output {
             use crate::serve::grpc::$version::spec::cardano;
 
             /// The integer a served big integer states, none when the message states none.
-            fn integer(value: &cardano::BigInt) -> Option<Integer> {
+            pub(in super::super) fn integer(value: &cardano::BigInt) -> Option<Integer> {
                 use cardano::big_int::BigInt as B;
                 match value.big_int.as_ref()? {
                     B::Int(i) => Some(Integer::of((*i).into())),
@@ -384,7 +384,7 @@ macro_rules! served_output {
             }
 
             /// The datum a served Plutus data message states, none when a message in it states none.
-            fn data(value: &cardano::PlutusData) -> Option<Data> {
+            pub(in super::super) fn data(value: &cardano::PlutusData) -> Option<Data> {
                 use cardano::plutus_data::PlutusData as P;
                 let all = |items: &[cardano::PlutusData]| -> Option<Vec<Data>> {
                     items.iter().map(data).collect()
@@ -512,7 +512,7 @@ served_output!(
 /// A ledger context that resolves nothing.
 #[cfg(test)]
 #[derive(Clone)]
-struct Unresolved;
+pub(super) struct Unresolved;
 
 #[cfg(test)]
 impl pallas::interop::utxorpc::LedgerContext for Unresolved {

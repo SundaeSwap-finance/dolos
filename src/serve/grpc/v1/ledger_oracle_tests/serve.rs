@@ -29,6 +29,15 @@ pub(super) struct RouteServed {
     /// Whether the version states the inputs only sub transactions name.
     pub(super) subs: bool,
     pub(super) served: Served,
+    pub(super) messages: Messages,
+}
+
+/// The whole v1 transactions and blocks a route serves, none at a version
+/// without Dijkstra fields.
+#[derive(Debug, Default)]
+pub(super) struct Messages {
+    pub(super) txs: Vec<pallas::interop::utxorpc::v1::spec::cardano::Tx>,
+    pub(super) blocks: Vec<pallas::interop::utxorpc::v1::spec::cardano::Block>,
 }
 
 /// What ReadTx at one version serves for a transaction hash, nothing when it
@@ -151,7 +160,9 @@ macro_rules! served_routes {
         inputs: |$tx:ident| $inputs:expr,
         fetch_ref: |$r:ident| $fetch_ref:expr,
         fetched: |$f:ident| $fetched:expr,
-        exact_address: |$a:ident| $exact_address:expr $(,)?
+        exact_address: |$a:ident| $exact_address:expr,
+        keep_tx: |$kt:ident, $t:ident| $keep_tx:expr,
+        keep_block: |$kb:ident, $b:ident| $keep_block:expr $(,)?
     ) => {
         pub(super) mod $version {
             use std::{collections::BTreeSet, convert::Infallible, panic::AssertUnwindSafe};
@@ -164,7 +175,7 @@ macro_rules! served_routes {
 
             use super::super::validate::panic_message;
             use super::{hash32, Event, LatestParams, RouteServed, Served, Utxo, Utxos, NEXT};
-            use super::{Answers, OutputRoute, ReadTxAnswer, UtxoRoute, Version};
+            use super::{Answers, Messages, OutputRoute, ReadTxAnswer, UtxoRoute, Version};
             use crate::serve::grpc::$version::{
                 query::QueryServiceImpl,
                 spec::{
@@ -181,13 +192,27 @@ macro_rules! served_routes {
             /// The version these routes answer at.
             pub(in super::super) const VERSION: Version = Version::$name;
 
-            fn route(route: OutputRoute, served: Served) -> RouteServed {
+            fn route(route: OutputRoute, served: Served, messages: Messages) -> RouteServed {
                 RouteServed {
                     route,
                     version: VERSION,
                     subs: $subs,
                     served,
+                    messages,
                 }
+            }
+
+            /// Keeps a served transaction whole when this version has Dijkstra fields.
+            fn keep_tx($kt: &mut Messages, $t: &cardano::Tx) {
+                $keep_tx
+            }
+
+            /// Keeps a served block whole when this version has Dijkstra fields.
+            fn keep_block($kb: &mut Messages, block: &s::AnyChainBlock) {
+                let Some(s::any_chain_block::Chain::Cardano($b)) = &block.chain else {
+                    panic!("a served block is a Cardano block");
+                };
+                $keep_block
             }
 
             fn served_input(
@@ -232,6 +257,7 @@ macro_rules! served_routes {
             ) -> RouteServed {
                 let service = SyncServiceImpl::new(domain.clone(), CancelTokenImpl::default());
                 let mut served = Served::new();
+                let mut messages = Messages::default();
                 for hash in blocks {
                     let $r = s::BlockRef {
                         hash: hash.to_vec().into(),
@@ -246,8 +272,9 @@ macro_rules! served_routes {
                     let fetched: Vec<s::AnyChainBlock> = $fetched;
                     assert_eq!(fetched.len(), 1, "FetchBlock serves one block a ref names");
                     add_block(&mut served, &fetched[0]);
+                    keep_block(&mut messages, &fetched[0]);
                 }
-                route(OutputRoute::FetchBlock, served)
+                route(OutputRoute::FetchBlock, served, messages)
             }
 
             /// The inputs DumpHistory serves for the transactions of each block, read one block a page from it.
@@ -257,6 +284,7 @@ macro_rules! served_routes {
             ) -> RouteServed {
                 let service = SyncServiceImpl::new(domain.clone(), CancelTokenImpl::default());
                 let mut served = Served::new();
+                let mut messages = Messages::default();
                 for hash in blocks {
                     let request = s::DumpHistoryRequest {
                         start_token: Some(s::BlockRef {
@@ -270,8 +298,9 @@ macro_rules! served_routes {
                     let page = response.unwrap().into_inner().block;
                     assert_eq!(page.len(), 1, "DumpHistory serves the page a token starts");
                     add_block(&mut served, &page[0]);
+                    keep_block(&mut messages, &page[0]);
                 }
-                route(OutputRoute::DumpHistory, served)
+                route(OutputRoute::DumpHistory, served, messages)
             }
 
             /// The message ReadTx answers with at this version.
@@ -310,6 +339,7 @@ macro_rules! served_routes {
                 txs: &[[u8; 32]],
             ) -> RouteServed {
                 let mut served = Served::new();
+                let mut messages = Messages::default();
                 for hash in txs {
                     let answer = answers.get(hash).expect("ReadTx was read for every rolled transaction");
                     let response = match answer {
@@ -320,9 +350,10 @@ macro_rules! served_routes {
                     let tx = response.tx.as_ref().and_then(|tx| tx.chain.as_ref());
                     if let Some(q::any_chain_tx::Chain::Cardano(tx)) = tx {
                         add_tx(&mut served, tx);
+                        keep_tx(&mut messages, tx);
                     }
                 }
-                route(OutputRoute::ReadTx, served)
+                route(OutputRoute::ReadTx, served, messages)
             }
 
             /// What ReadTx serves for a transaction hash.
@@ -497,6 +528,7 @@ macro_rules! served_routes {
                     use s::follow_tip_response::Action as F;
                     use w::watch_tx_response::Action as W;
                     let mut follow = Served::new();
+                    let mut followed = Messages::default();
                     let mut taken = 0;
                     while taken < blocks {
                         let Ok(Some(next)) = tokio::time::timeout(NEXT, self.follow.next()).await
@@ -508,6 +540,7 @@ macro_rules! served_routes {
                             (Event::Apply, Some(F::Apply(block)))
                             | (Event::Undo, Some(F::Undo(block))) => {
                                 add_block(&mut follow, &block);
+                                keep_block(&mut followed, &block);
                                 taken += 1;
                             }
                             (_, other) => {
@@ -516,6 +549,7 @@ macro_rules! served_routes {
                         }
                     }
                     let mut watch = Served::new();
+                    let mut watched = Messages::default();
                     let mut taken = 0;
                     while taken < txs {
                         let Ok(Some(next)) = tokio::time::timeout(NEXT, self.watch.next()).await
@@ -529,6 +563,7 @@ macro_rules! served_routes {
                                     panic!("a watched transaction is a Cardano transaction");
                                 };
                                 add_tx(&mut watch, tx);
+                                keep_tx(&mut watched, tx);
                                 taken += 1;
                             }
                             (_, other) => {
@@ -537,7 +572,10 @@ macro_rules! served_routes {
                         }
                     }
                     self.cancel.cancel();
-                    [route(OutputRoute::FollowTip, follow), route(OutputRoute::WatchTx, watch)]
+                    [
+                        route(OutputRoute::FollowTip, follow, followed),
+                        route(OutputRoute::WatchTx, watch, watched),
+                    ]
                 }
             }
         }
@@ -569,6 +607,8 @@ served_routes!(
     fetch_ref: |r| Some(r),
     fetched: |f| f.block.into_iter().collect(),
     exact_address: |a| Some(a.to_vec().into()),
+    keep_tx: |m, t| m.txs.push(t.clone()),
+    keep_block: |m, b| m.blocks.push(b.clone()),
 );
 
 served_routes!(
@@ -583,6 +623,8 @@ served_routes!(
     fetch_ref: |r| vec![r],
     fetched: |f| f.block,
     exact_address: |a| Some(a.to_vec().into()),
+    keep_tx: |_m, _t| (),
+    keep_block: |_m, _b| (),
 );
 
 served_routes!(
@@ -597,6 +639,8 @@ served_routes!(
     fetch_ref: |r| vec![r],
     fetched: |f| f.block,
     exact_address: |a| a.to_vec().into(),
+    keep_tx: |_m, _t| (),
+    keep_block: |_m, _b| (),
 );
 
 /// Streams of FollowTip and WatchTx at every version, subscribed at one point.
