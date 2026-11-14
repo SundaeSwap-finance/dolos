@@ -1266,6 +1266,53 @@ pub(crate) mod tests {
         assert!(pending.refuse_undelivered().is_ok());
     }
 
+    /// The captured Block message with its endorser block wrapped in tag 24.
+    fn tagged_block_message() -> Vec<u8> {
+        let bare = include_bytes!("../../test_data/leios-rc-2026w42/fetch-block.cbor");
+        assert_eq!(bare[..2], [0x82, 0x02], "fixture precondition");
+
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.array(2).unwrap().u16(2).unwrap();
+        e.tag(minicbor::data::IanaTag::Cbor).unwrap();
+        e.bytes(&bare[2..]).unwrap();
+        e.into_writer()
+    }
+
+    /// An endorser block a relay sends wrapped in tag 24 is fetched against
+    /// its announcement and applied to the block that certifies it.
+    #[tokio::test]
+    async fn a_tagged_endorser_block_is_fetched_and_applied() {
+        let (_, txs, announced) = captured_eb();
+        let leiosfetch::Message::Block(body) = minicbor::decode(&tagged_block_message()).unwrap()
+        else {
+            panic!("fixture precondition");
+        };
+
+        let point: EbId = Point::Specific(announced.slot, announced.hash.to_vec());
+        let eb_txs: Vec<Vec<u8>> = txs.into_iter().map(|tx| tx.unwrap()).collect();
+        let relay = FakeRelay::new(point, body.raw_bytes().to_vec(), eb_txs, usize::MAX);
+        let fetched = client(relay, 64)
+            .fetch(&announced)
+            .await
+            .expect("must fetch whole");
+
+        let certifying = certifying_block();
+        let slot = MultiEraBlock::decode(&certifying).unwrap().slot();
+        let mut pending = PendingPayloads::default();
+        pending.expect(slot);
+        pending.deliver(
+            slot,
+            CertifiedPayload {
+                endorser_block: announced,
+                txs: fetched,
+            },
+        );
+
+        let out = pending.apply(vec![certifying]).expect("must resolve");
+
+        assert_eq!(MultiEraBlock::decode(&out[0]).unwrap().tx_count(), 67);
+    }
+
     /// A transaction its endorser block commits to with a false flag is
     /// fetched, checked against its reference and applied as invalid, so it
     /// spends only its collateral, and neither it nor its sub transaction
