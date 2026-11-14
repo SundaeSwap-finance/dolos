@@ -1,4 +1,4 @@
--- The schema sql_schema_imm of ouroboros-consensus 60f44c41, a LeiosDb layout none of node releases rc-2026w42 to rc-2026w45 writes.
+-- The schemas sql_schema_imm and sql_schema_vol of ouroboros-consensus 8a2a760c, which are the same.
 CREATE TABLE IF NOT EXISTS ebs (
   ebSlot INTEGER NOT NULL,
   ebHashBytes BLOB NOT NULL,
@@ -8,4 +8,3 @@ CREATE TABLE IF NOT EXISTS ebs (
   txs BLOB NOT NULL,
   PRIMARY KEY (ebSlot, ebHashBytes)
 );
-CREATE INDEX IF NOT EXISTS idx_ebs_ebHashBytes ON ebs(ebHashBytes);

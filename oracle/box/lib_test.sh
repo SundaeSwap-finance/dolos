@@ -2050,14 +2050,15 @@ node_eb_of() {
   if cmp -s "$db.want" "$db.got"; then echo "exit=$status same"; else echo "exit=$status $(cat "$db.err")"; fi
 }
 
-# Must not fire: the same block read from either partition of the rc-2026w42 layout and of the rc-2026w45 layout.
+# Must not fire: the same block read from either partition of the rc-2026w42 layout and of the rc-2026w45 layout, and from the one schema of both partitions of consensus 8a2a760c.
 expect leiosdb_rows "$(node_eb_of rows rows none rc-2026w42-imm)" "exit=0 same"
 expect leiosdb_rows_volatile "$(node_eb_of rows-vol rows none rc-2026w42-vol)" "exit=0 same"
 expect leiosdb_closure "$(node_eb_of closure closure none rc-2026w45-imm)" "exit=0 same"
 expect leiosdb_closure_volatile "$(node_eb_of closure-vol closure none rc-2026w45-vol)" "exit=0 same"
-# Must fire: a layout neither release writes, both layouts in one file, a transaction not written, a transaction whose bytes changed and a stored body whose bytes changed.
-expect leiosdb_neither "$(node_eb_of neither none none consensus-60f44c41)" \
-  "exit=1 refused: the leios store holds no known layout, it holds ebs(ebSlot, ebHashBytes, txWritten, txBounds, body, txs)"
+expect leiosdb_point "$(node_eb_of point point none consensus-8a2a760c)" "exit=0 same"
+# Must fire: a layout no node writes, both layouts in one file, a transaction not written, a transaction written but not marked, a transaction whose bytes changed and a stored body whose bytes changed.
+expect leiosdb_neither "$(node_eb_of neither none none unknown-layout)" \
+  "exit=1 refused: the leios store holds no known layout, it holds ebs(ebSlot, ebHashBytes, ebBytesSize)"
 expect leiosdb_both "$(node_eb_of both none none rc-2026w42-imm rc-2026w45-imm)" \
   "exit=1 refused: the leios store holds the layouts rows and closure"
 expect leiosdb_rows_unfilled "$(node_eb_of rows-unfilled rows unfilled rc-2026w42-imm)" "exit=1 refused: offset 3 unfilled"
@@ -2068,6 +2069,12 @@ expect leiosdb_closure_absent "$(node_eb_of closure-absent closure absent rc-202
 expect leiosdb_closure_changed "$(node_eb_of closure-changed closure tx-changed rc-2026w45-imm)" \
   "exit=1 refused: offset 3 bytes do not hash to the body's entry"
 expect leiosdb_closure_body_changed "$(node_eb_of closure-body-changed closure body-changed rc-2026w45-imm)" \
+  "exit=1 refused: the body of 17c497727d273e8dbd0bc188752ef8a7334f5fac6dc077324424a5410cc77fc0 does not hash to it"
+expect leiosdb_point_unfilled "$(node_eb_of point-unfilled point unfilled consensus-8a2a760c)" "exit=1 refused: offset 3 unfilled"
+expect leiosdb_point_unmarked "$(node_eb_of point-unmarked point unmarked consensus-8a2a760c)" "exit=1 refused: offset 3 unfilled"
+expect leiosdb_point_changed "$(node_eb_of point-changed point tx-changed consensus-8a2a760c)" \
+  "exit=1 refused: offset 3 bytes do not hash to the body's entry"
+expect leiosdb_point_body_changed "$(node_eb_of point-body-changed point body-changed consensus-8a2a760c)" \
   "exit=1 refused: the body of 17c497727d273e8dbd0bc188752ef8a7334f5fac6dc077324424a5410cc77fc0 does not hash to it"
 
 verdict
