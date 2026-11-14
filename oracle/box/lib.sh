@@ -1,4 +1,4 @@
-# Functions and defaults the oracle box scripts share, reading ROOT, SCRATCH, REV, BASE, JUDGED, MIN_FREE_G, OUT, HERE, TARGET, LIVE_ENV, LIVE_READS, SYNC_SLOTS_PER_S, IN_IMAGE, LOCK_POLL_SECONDS, RUN_LOCK, LAST_DONE, LAST_SHIP, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_FSYNC, NODE, ENDPOINT, GRPCURL, the ORACLE_ slice settings, CGROUP_FILE, CGROUP_ROOT, the IO_ limits and VALUE_HARNESS_URL.
+# Functions and defaults the oracle box scripts share, reading ROOT, SCRATCH, REV, BASE, JUDGED, MIN_FREE_G, OUT, HERE, TARGET, LIVE_ENV, LIVE_READS, SYNC_SLOTS_PER_S, IN_IMAGE, LOCK_POLL_SECONDS, RUN_LOCK, LAST_DONE, LAST_SHIP, LAST_BOX_TEST, BOX_SETUP_HASH, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_FSYNC, NODE, ENDPOINT, GRPCURL, the ORACLE_ slice settings, CGROUP_FILE, CGROUP_ROOT, the IO_ limits and VALUE_HARNESS_URL.
 
 PALLAS=${PALLAS:-scratch/pallas}
 SCRATCH=${SCRATCH:-scratch/dolos}
@@ -1250,8 +1250,23 @@ executable() {
   fi | sed -n 's/.*"executable":"\([^"]*\)".*/\1/p' | tail -1
 }
 
-# Exits when the test of the box functions or of the field comparison fails.
+# The record of the inputs of the last passing run of the box tests.
+LAST_BOX_TEST=${LAST_BOX_TEST:-$ROOT/runs/last-box-test}
+# The hash of the box setup that installed the tools the box tests run with, written by the box setup.
+BOX_SETUP_HASH=${BOX_SETUP_HASH:-$ROOT/box.hash}
+
+# The inputs the box tests depend on, the box setup hash and a digest of every file of the box scripts.
+box_test_inputs() {
+  echo "box=$(cat "$BOX_SETUP_HASH" 2>/dev/null || echo none) files=$( (cd "$HERE" && find . -type f -exec sha256sum {} + | LC_ALL=C sort -k2) | sha256sum | cut -c1-16)"
+}
+
+# Exits when the test of the box functions or of the field comparison fails, and runs them only when their inputs differ from those of their last pass.
 require_lib_test() {
+  inputs=$(box_test_inputs)
+  if ! leg_due "$LAST_BOX_TEST" "$inputs"; then
+    echo "BOX-TEST due=no inputs=$inputs"
+    return
+  fi
   mkdir -p "$OUT/lib-test" "$OUT/fields-test"
   if ! sh "$HERE/lib_test.sh" "$OUT/lib-test" >"$OUT/lib-test.log" 2>&1; then
     echo "REFUSED lib_test log=$OUT/lib-test.log"
@@ -1261,6 +1276,9 @@ require_lib_test() {
     echo "REFUSED fields_test log=$OUT/fields-test.log"
     exit 2
   fi
+  mkdir -p "$(dirname "$LAST_BOX_TEST")"
+  echo "$inputs" >"$LAST_BOX_TEST"
+  echo "BOX-TEST due=yes passed inputs=$inputs"
 }
 
 # Exports as BUILD_IMAGE the name of the build image of the files of images/dolos-build, building it when docker has none, and exits when that fails.

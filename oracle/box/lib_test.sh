@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, the overlay build's target dir, which arms an overlay switches, when two test logs differ, an encoding arm's verdict, an arm's verdict from its run, the log run_into_log writes of a run that writes to both outputs, what an arm served against its row of served.txt, the switches an overlay plant leaves out, the files a planted tree writes and whether git writes each diff as committed, the free space floor, the space the candidate's store needs, the sync deadline, the candidate's fsync state, the IO guard's breach rule, the records a passing tier writes, the reads the ship tier takes, the image read-live.sh syncs, that it builds nothing and its candidate's verdict, the box lock, the slice limits read-live.sh sets on musashi-aws, how many switched arms are judged at once, the pallas pin, the scratch pallas checkout, when the value leg is due, a value arm's verdict, what the value leg hands the harness tier and which of its steps it reruns, the value control's verdict, the amaru pin, the amaru leg's verdicts, the build image's name by the harness's image scripts, the image in-image.sh runs and the endorser block endorser_fixture.py reads from each LeiosDb layout.
+# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, the overlay build's target dir, which arms an overlay switches, when two test logs differ, an encoding arm's verdict, an arm's verdict from its run, the log run_into_log writes of a run that writes to both outputs, what an arm served against its row of served.txt, the switches an overlay plant leaves out, the files a planted tree writes and whether git writes each diff as committed, the free space floor, the space the candidate's store needs, the sync deadline, the candidate's fsync state, the IO guard's breach rule, the records a passing tier writes, the reads the ship tier takes, the image read-live.sh syncs, that it builds nothing and its candidate's verdict, the box lock, the slice limits read-live.sh sets on musashi-aws, how many switched arms are judged at once, the pallas pin, the scratch pallas checkout, when the box tests are due, when the value leg is due, a value arm's verdict, what the value leg hands the harness tier and which of its steps it reruns, the value control's verdict, the amaru pin, the amaru leg's verdicts, the build image's name by the harness's image scripts, the image in-image.sh runs and the endorser block endorser_fixture.py reads from each LeiosDb layout.
 # Usage: lib_test.sh <empty work dir>
 set -eu
 lib_test_work=$(cd "$1" && pwd)
@@ -1372,8 +1372,8 @@ git -C "$lib_test_work/quick-src" push -q "$Q/dolos.git" HEAD:refs/heads/b
 qrev=$(git -C "$lib_test_work/quick-src" rev-parse HEAD)
 cp -R "$HERE" "$lib_test_work/quick-box"
 echo 'echo "ARMS head=PASS control=CLEAN logs=x"' >"$lib_test_work/quick-box/breaks.sh"
-echo 'exit 0' >"$lib_test_work/quick-box/lib_test.sh"
-echo 'exit 0' >"$lib_test_work/quick-box/fields_test.sh"
+echo 'echo lib >>"$ROOT/box-tests"' >"$lib_test_work/quick-box/lib_test.sh"
+echo 'echo fields >>"$ROOT/box-tests"; [ ! -f "$ROOT/box-tests-fail" ]' >"$lib_test_work/quick-box/fields_test.sh"
 echo 'build_image() { echo dolos-build:stub; }' >>"$lib_test_work/quick-box/lib.sh"
 echo 'value_leg() { echo ran >>"$ROOT/legs"; echo "VALUE value-head=PASS value-control=CLEAN pin=x"; }' >>"$lib_test_work/quick-box/value.sh"
 printf '%s\n' 'amaru_leg() { echo ran >>"$ROOT/amaru-legs"; echo "AMARU amaru-head=PASS rev=x"; }' \
@@ -1398,6 +1398,27 @@ expect quick_value_line "$(grep '^DONE ' "$Q/q2.out" | sed 's/ base=.*//')" \
 # Must run the amaru leg alone on another amaru commit.
 echo 'u r2' >"$Q/amaru-pin"
 expect quick_amaru_rev "$(quick_legs 3)" "value=1 amaru=2"
+
+# The box test runs so far and the BOX-TEST line of the quick run $1 on the build root Q, without its inputs.
+quick_box_tests() {
+  quick_legs "$1" >/dev/null
+  echo "runs=$(grep -c . "$Q/box-tests" || true) $(grep '^BOX-TEST ' "$Q/q$1.out" | sed 's/ inputs=.*//')"
+}
+# Must not run the box tests again on the files and box setup they passed on.
+expect quick_box_tests_passed "$(quick_box_tests 4)" "runs=2 BOX-TEST due=no"
+# Must run them on a box file changed, on another box setup, and on each run after a failing one.
+echo '# a changed box file' >>"$lib_test_work/quick-box/breaks.sh"
+expect quick_box_tests_file "$(quick_box_tests 5)" "runs=4 BOX-TEST due=yes passed"
+expect quick_box_tests_file_passed "$(quick_box_tests 6)" "runs=4 BOX-TEST due=no"
+echo s2 >"$Q/box.hash"
+expect quick_box_tests_setup "$(quick_box_tests 7)" "runs=6 BOX-TEST due=yes passed"
+: >"$Q/box-tests-fail"
+echo '# another changed box file' >>"$lib_test_work/quick-box/breaks.sh"
+expect quick_box_tests_failed "$(quick_box_tests 8)" "runs=8 "
+expect quick_box_tests_refused "$(grep -c '^REFUSED fields_test ' "$Q/q8.out")" 1
+expect quick_box_tests_after_failed "$(quick_box_tests 9)" "runs=10 "
+rm -f "$Q/box-tests-fail"
+expect quick_box_tests_after_fixed "$(quick_box_tests 10)" "runs=12 BOX-TEST due=yes passed"
 
 # The run of the value arm emptyguards with the tier output $2, the reached line $3 and the disagreement class $4, and value_verdict's verdict for it.
 value_verdict_of() {
