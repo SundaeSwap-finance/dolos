@@ -140,6 +140,7 @@ fixes = [
   { subject = "fix(validate): accept integer operands at any size", arm = "integer-bound-restored" },
   { subject = "fix(validate): refuse a script given twice", arm = "duplicate-scripts-accepted" },
   { subject = "fix(network2): carry endorser blocks in tag 24", exclude = "network" },
+  { subject = "fix(network2): hold a tag 24 payload whole", exclude = "network" },
 ]
 
 [catches]
