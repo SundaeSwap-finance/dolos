@@ -42,6 +42,7 @@ pub mod point;
 pub mod state;
 pub mod submit;
 pub mod sync;
+pub mod undo;
 pub mod wal;
 pub mod work_unit;
 
@@ -831,7 +832,9 @@ pub trait Domain: Send + Sync + Clone + 'static {
                 .prune_history(max_slots, Some(Self::MAX_PRUNE_SLOTS_PER_HOUSEKEEPING))?;
         }
 
-        Ok(archive_pruned && wal_pruned)
+        let undo_pruned = undo::prune(self, Self::MAX_PRUNE_SLOTS_PER_HOUSEKEEPING)?;
+
+        Ok(archive_pruned && wal_pruned && undo_pruned)
     }
 
     /// Runs [`Self::housekeeping`] repeatedly until it reports no remaining

@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use dolos_core::{BlockSlot, Domain, DomainError, Genesis, WorkUnit};
+use dolos_core::{undo::Undo, BlockSlot, Domain, DomainError, Genesis, WorkUnit};
 use tracing::{debug, info};
 
 use crate::{ewrap::BoundaryWork, load_epoch, CardanoLogic};
@@ -195,7 +195,8 @@ where
             .as_mut()
             .ok_or_else(|| DomainError::Internal("ewrap boundary not loaded".into()))?;
 
-        boundary.commit_shard::<D>(domain.state(), domain.archive(), ranges)?;
+        let undo = Undo::for_work(domain)?;
+        boundary.commit_shard::<D>(domain.state(), domain.archive(), ranges, undo)?;
         Ok(())
     }
 
@@ -218,7 +219,8 @@ where
 
         info!(epoch = boundary.ending_state().number, "ewrap");
 
-        boundary.commit_finalize::<D>(domain.state(), domain.archive())?;
+        let undo = Undo::for_work(domain)?;
+        boundary.commit_finalize::<D>(domain.state(), domain.archive(), undo)?;
 
         // Replace the per-shard boundary state with the finalize-phase
         // BoundaryWork so post-finalize introspection (e.g. tests reading

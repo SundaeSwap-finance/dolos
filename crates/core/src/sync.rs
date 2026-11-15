@@ -18,6 +18,8 @@ use crate::{
     WalStore, WorkUnit,
 };
 
+use crate::undo::Journal;
+
 const MEMPOOL_FINALIZE_THRESHOLD: u32 = 6;
 const MEMPOOL_DROP_THRESHOLD: u32 = 2;
 
@@ -109,24 +111,7 @@ impl<D: Domain> SyncExt for D {
 
     #[instrument(skip_all, fields(rollback_to = %to))]
     fn rollback(&self, to: &ChainPoint) -> Result<(), DomainError> {
-        // The walk below undoes the entries the wal holds and stops at the one
-        // for `to`, so the target has to be a position the wal can reach back
-        // to. Genesis writes an entry at origin and a wal that still begins
-        // there, or holds nothing at all, can reach it. A wal that begins
-        // anywhere else holds no entry for what the state below its first
-        // entry recorded, and the walk would leave that state applied under a
-        // cursor that says origin.
-        let reachable = match to {
-            ChainPoint::Origin => {
-                matches!(
-                    self.wal().find_start()?,
-                    None | Some((ChainPoint::Origin, _))
-                )
-            }
-            _ => self.wal().contains_point(to)?,
-        };
-
-        if !reachable {
+        if !self.wal().reaches(to)? {
             return Err(DomainError::RollbackTargetNotInWal(to.clone()));
         }
 
@@ -137,6 +122,7 @@ impl<D: Domain> SyncExt for D {
         }
 
         let undo_blocks = self.wal().iter_logs(Some(to.clone()), None)?;
+        let mut journal = Journal::since(self, to)?;
 
         let writer = self.state().start_writer()?;
         let archive_writer = self.archive().start_writer()?;
@@ -150,6 +136,10 @@ impl<D: Domain> SyncExt for D {
             if point == *to {
                 break;
             }
+
+            // Work applied over this block ran after it, so its writes are
+            // undone before it is.
+            journal.restore_entities(Some(point.slot()), &mut entities)?;
 
             crate::state::undo_delta_chunk::<Self>(&mut entities, self.state(), &log.delta)?;
 
@@ -187,10 +177,14 @@ impl<D: Domain> SyncExt for D {
             info!(%point, "block undone");
         }
 
+        journal.restore_entities(None, &mut entities)?;
+
         writer.set_cursor(to.clone())?;
 
         // Persist the undone entities (`Some` upserts, `None` deletes).
         crate::state::save_entities::<Self>(&writer, &entities)?;
+
+        journal.finish::<Self::Entity>(&writer, &archive_writer)?;
 
         writer.commit()?;
         archive_writer.commit()?;

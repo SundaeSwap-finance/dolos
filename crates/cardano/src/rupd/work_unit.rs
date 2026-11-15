@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dolos_core::{
+    undo::{Undo, UndoArchiveWriter, UndoStateWriter},
     ArchiveStore, ArchiveWriter, BlockSlot, Domain, DomainError, EntityDelta as _, EntityKey,
     Genesis, LogKey, StateStore, StateWriter, TemporalKey, WorkUnit,
 };
@@ -165,7 +166,12 @@ impl RupdWorkUnit {
     /// instance of `dolos-cardano` and the two `CardanoLogic` types never
     /// unify. Taking the two stores directly keeps the bounds on `dolos-core`
     /// traits, which are shared.
-    fn commit_shard<S: StateStore>(&self, state: &S, shard_index: u32) -> Result<(), DomainError> {
+    fn commit_shard<S: StateStore>(
+        &self,
+        state: &S,
+        shard_index: u32,
+        undo: Undo,
+    ) -> Result<(), DomainError> {
         let rewards = self
             .rewards
             .as_ref()
@@ -177,7 +183,7 @@ impl RupdWorkUnit {
             "persisting pending rewards to state"
         );
 
-        let writer = state.start_writer()?;
+        let writer = UndoStateWriter::start(state, undo)?;
 
         // Persist this shard's pending rewards as PendingRewardState
         // entities. Writes are overwrite-by-key, so a crashed shard
@@ -245,6 +251,7 @@ impl RupdWorkUnit {
         &self,
         state: &S,
         archive: &A,
+        undo: Undo,
     ) -> Result<(), DomainError> {
         let work = self
             .work
@@ -261,7 +268,7 @@ impl RupdWorkUnit {
         let pool_rewards = aggregate_pending_pool_rewards(state)?;
 
         let snapshot = &work.snapshot;
-        let archive_writer = archive.start_writer()?;
+        let archive_writer = UndoArchiveWriter::start(archive, undo)?;
 
         for (pool_hash, pool_state) in snapshot.pools.iter() {
             let pool_id = EntityKey::from(pool_hash.as_slice());
@@ -400,7 +407,8 @@ where
     }
 
     fn commit_state(&mut self, domain: &D, shard_index: u32) -> Result<(), DomainError> {
-        self.commit_shard(domain.state(), shard_index)?;
+        let undo = Undo::for_work(domain)?;
+        self.commit_shard(domain.state(), shard_index, undo)?;
 
         debug!(shard = shard_index, "rupd shard state committed");
         Ok(())
@@ -428,7 +436,8 @@ where
         // and advances `rupd_progress`. The single `EpochState.incentives`
         // write happens here, after every shard has landed, so concurrent
         // shard commits can't race on this field.
-        let writer = domain.state().start_writer()?;
+        let undo = Undo::for_work(domain)?;
+        let writer = UndoStateWriter::start(domain.state(), undo)?;
 
         let epoch_key = EpochState::singleton_key();
         if let Some(mut epoch_state) = domain
@@ -444,7 +453,7 @@ where
         writer.commit()?;
 
         // ---- Archive: per-pool StakeLog entries ----
-        self.write_stake_logs(domain.state(), domain.archive())?;
+        self.write_stake_logs(domain.state(), domain.archive(), undo)?;
 
         debug!("rupd finalize committed");
         Ok(())
@@ -561,7 +570,8 @@ mod tests {
 
         assert_eq!(committed_shards(&domain), None);
 
-        unit.commit_shard(domain.state(), 0).expect("commit_shard");
+        unit.commit_shard(domain.state(), 0, Undo::Unreachable)
+            .expect("commit_shard");
 
         assert_eq!(committed_shards(&domain), Some(1));
     }
@@ -668,7 +678,7 @@ mod tests {
         // Simulate the resume: every shard already committed, so none runs.
         unit.start_shard = unit.total_shards;
 
-        unit.write_stake_logs(domain.state(), domain.archive())
+        unit.write_stake_logs(domain.state(), domain.archive(), Undo::Unreachable)
             .expect("write_stake_logs");
 
         let log = read_stake_log(&domain, chain.epoch_start(CURRENT_EPOCH - 1), pool)
@@ -723,7 +733,8 @@ mod tests {
         let (mut unit, _) = loaded_work_unit(domain.genesis(), StakeSnapshot::empty());
         unit.work.as_mut().unwrap().current_epoch = 1;
 
-        unit.commit_shard(domain.state(), 0).expect("commit_shard");
+        unit.commit_shard(domain.state(), 0, Undo::Unreachable)
+            .expect("commit_shard");
 
         assert_eq!(committed_shards(&domain), Some(1));
     }

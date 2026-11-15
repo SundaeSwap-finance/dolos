@@ -320,6 +320,8 @@ impl TableRow for AccountEpochLog {
 struct AccountEpochRewards(AccountEpochLog);
 
 impl Entity for AccountEpochRewards {
+    const NAMESPACES: &'static [Namespace] = AccountEpochLog::NAMESPACES;
+
     fn decode_entity(ns: Namespace, value: &EntityValue) -> Result<Self, dolos_core::ChainError> {
         AccountEpochLog::decode_entity(ns, value).map(AccountEpochRewards)
     }
@@ -437,6 +439,8 @@ fn render_pool_amounts(entries: &[(dolos_cardano::PoolHash, u64)]) -> String {
 struct EpochPParams(EpochState);
 
 impl Entity for EpochPParams {
+    const NAMESPACES: &'static [Namespace] = EpochState::NAMESPACES;
+
     fn decode_entity(ns: Namespace, value: &EntityValue) -> Result<Self, dolos_core::ChainError> {
         EpochState::decode_entity(ns, value).map(EpochPParams)
     }

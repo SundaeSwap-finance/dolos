@@ -1942,7 +1942,12 @@ mod tests {
         .unwrap();
 
         boundary
-            .commit_shard::<ToyDomain>(domain.state(), domain.archive(), ranges)
+            .commit_shard::<ToyDomain>(
+                domain.state(),
+                domain.archive(),
+                ranges,
+                dolos_core::undo::Undo::Unreachable,
+            )
             .unwrap();
     }
 
@@ -2006,7 +2011,11 @@ mod tests {
         let mut boundary =
             BoundaryWork::load_finalize::<ToyDomain>(domain.state(), domain.genesis()).unwrap();
         boundary
-            .commit_finalize::<ToyDomain>(domain.state(), domain.archive())
+            .commit_finalize::<ToyDomain>(
+                domain.state(),
+                domain.archive(),
+                dolos_core::undo::Undo::Unreachable,
+            )
             .unwrap();
 
         assert_eq!(read_drep_power(&domain, &reg_drep()), 147);
@@ -2161,7 +2170,11 @@ mod tests {
         let mut boundary =
             BoundaryWork::load_finalize::<ToyDomain>(domain.state(), domain.genesis()).unwrap();
         boundary
-            .commit_finalize::<ToyDomain>(domain.state(), domain.archive())
+            .commit_finalize::<ToyDomain>(
+                domain.state(),
+                domain.archive(),
+                dolos_core::undo::Undo::Unreachable,
+            )
             .unwrap();
 
         let pool_deposit = crate::load_epoch::<ToyDomain>(state)
@@ -2897,7 +2910,11 @@ mod ratification_tests {
             BoundaryWork::load_finalize::<ToyDomain>(domain.state(), domain.genesis()).unwrap();
 
         boundary
-            .commit_finalize::<ToyDomain>(domain.state(), domain.archive())
+            .commit_finalize::<ToyDomain>(
+                domain.state(),
+                domain.archive(),
+                dolos_core::undo::Undo::Unreachable,
+            )
             .unwrap();
 
         boundary
@@ -3007,7 +3024,12 @@ mod ratification_tests {
         )
         .unwrap();
         shard
-            .commit_shard::<ToyDomain>(domain.state(), domain.archive(), ranges)
+            .commit_shard::<ToyDomain>(
+                domain.state(),
+                domain.archive(),
+                ranges,
+                dolos_core::undo::Undo::Unreachable,
+            )
             .unwrap();
 
         let mut estart = crate::estart::WorkContext::load_finalize::<ToyDomain>(
@@ -3018,7 +3040,12 @@ mod ratification_tests {
         .unwrap();
         let slot = estart.chain_summary.epoch_start(estart.starting_epoch_no());
         estart
-            .commit_finalize::<ToyDomain>(domain.state(), domain.archive(), slot)
+            .commit_finalize::<ToyDomain>(
+                domain.state(),
+                domain.archive(),
+                slot,
+                dolos_core::undo::Undo::Unreachable,
+            )
             .unwrap();
 
         let after = crate::load_epoch::<ToyDomain>(domain.state()).unwrap();
@@ -3086,7 +3113,12 @@ mod ratification_tests {
         )
         .unwrap();
         shard
-            .commit_shard::<ToyDomain>(domain.state(), domain.archive(), ranges)
+            .commit_shard::<ToyDomain>(
+                domain.state(),
+                domain.archive(),
+                ranges,
+                dolos_core::undo::Undo::Unreachable,
+            )
             .unwrap();
 
         let accumulated = crate::load_gov::<ToyDomain>(domain.state())

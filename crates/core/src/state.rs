@@ -129,6 +129,7 @@ impl std::ops::Deref for StateSchema {
 
 pub trait Entity: Sized + Send {
     const KEY_SIZE: usize = 32;
+    const NAMESPACES: &'static [Namespace];
 
     fn decode_entity(ns: Namespace, value: &EntityValue) -> Result<Self, ChainError>;
     fn encode_entity(value: &Self) -> (Namespace, EntityValue);

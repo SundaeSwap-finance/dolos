@@ -101,6 +101,7 @@ struct Tables {
 enum Op {
     Apply(ChainPoint, RawBlock),
     WriteLog(Namespace, LogKey, EntityValue),
+    DeleteLog(Namespace, LogKey),
     Undo(ChainPoint),
     InsertArchiveTag(ArchiveTag),
     RemoveArchiveTag(ArchiveTag),
@@ -315,6 +316,12 @@ impl ArchiveWriter for MemoryArchiveWriter {
         self.push(Op::WriteLog(ns, key.clone(), value.clone()))
     }
 
+    fn delete_log(&self, ns: Namespace, key: &LogKey) -> Result<(), ArchiveError> {
+        self.store.check_namespace(ns)?;
+
+        self.push(Op::DeleteLog(ns, key.clone()))
+    }
+
     fn undo(&self, point: &ChainPoint) -> Result<(), ArchiveError> {
         self.push(Op::Undo(point.clone()))
     }
@@ -340,6 +347,9 @@ impl ArchiveWriter for MemoryArchiveWriter {
                 }
                 Op::WriteLog(ns, key, value) => {
                     tables.logs.insert((ns, key), value);
+                }
+                Op::DeleteLog(ns, key) => {
+                    tables.logs.remove(&(ns, key));
                 }
                 // A rollback walks the chain backwards, so at a slot holding
                 // more than one block the one to remove is the last to
