@@ -18,13 +18,13 @@ use crate::{
 pub const IC_SHA256: &str = "ab78464cdff45e6b63c45756aec73c18761c6fed5a06f72beb0820519192b248";
 
 /// The sha256 of the decompressed supplement corpus.
-pub const SUPP_SHA256: &str = "44bc823198c663f1c92540b26101c4060caa2c8378cf0e6c7c2be9101e54e59b";
+pub const SUPP_SHA256: &str = "292226548386c42ccc397db8c0dbae78fcd4e85b34a6d89d45d99ca6f9b18cfe";
 
 /// The sha256 of the decompressed phase one corpus.
 pub const P1_SHA256: &str = "5cf1c1e4dd11678aecc16017a71f4652b8d3c7230533259c1af5d943860ed8ba";
 
 /// The sha256 of the decompressed mutant corpus.
-pub const MUT_SHA256: &str = "a61ad18409cf71fb7b6b8f53d4867954181ee83a1da4f9b617903c9d4a45d398";
+pub const MUT_SHA256: &str = "40183c7eabeaf7413b9d2e803f80a2b233134647ba7aed815517c31abd0cc651";
 
 const IC_GZ: &[u8] = include_bytes!("../../../test_data/ledger-oracle/ic.jsonl.gz");
 const SUPP_GZ: &[u8] = include_bytes!("../../../test_data/ledger-oracle/supp.jsonl.gz");
@@ -330,7 +330,7 @@ mod tests {
         );
         assert_eq!(
             load(CorpusKind::Supp).unwrap().to_string(),
-            "CORPUS supp sha=44bc823198c663f1 records=2197 runs=724 kept_records=2197"
+            "CORPUS supp sha=292226548386c42c records=2201 runs=725 kept_records=2201"
         );
         assert_eq!(
             load(CorpusKind::P1).unwrap().to_string(),
@@ -338,7 +338,7 @@ mod tests {
         );
         assert_eq!(
             load(CorpusKind::Mut).unwrap().to_string(),
-            "CORPUS mut sha=a61ad18409cf71fb records=1392 runs=1392 kept_records=1392"
+            "CORPUS mut sha=40183c7eabeaf741 records=1392 runs=1392 kept_records=1392"
         );
     }
 

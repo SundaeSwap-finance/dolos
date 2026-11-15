@@ -12,18 +12,18 @@
 
 use std::collections::HashMap;
 
-use dolos_core::{ChainError, TxoRef};
+use dolos_core::{ChainError, Genesis, TxoRef};
 use pallas::{
     crypto::hash::Hash,
     ledger::{
-        primitives::conway::DatumOption,
+        primitives::{conway::DatumOption, Epoch},
         traverse::{MultiEraBlock, MultiEraInput, MultiEraOutput, MultiEraTx, OriginalHash},
     },
 };
 
 use super::{BlockVisitor, WorkDeltas};
 use crate::owned::OwnedMultiEraOutput;
-use crate::{DatumRefDecrement, DatumRefIncrement};
+use crate::{DatumRefDecrement, DatumRefIncrement, PParamsSet};
 
 /// Visitor that tracks witness datums and emits refcount deltas.
 ///
@@ -37,9 +37,50 @@ use crate::{DatumRefDecrement, DatumRefIncrement};
 pub struct DatumVisitor {
     /// Witness datums collected from current transaction's plutus_data()
     witness_datums: HashMap<Hash<32>, Vec<u8>>,
+
+    /// The witness datums of each top level transaction of the block, by the
+    /// hash of each sub transaction it lists.
+    top_witness_datums: HashMap<Hash<32>, HashMap<Hash<32>, Vec<u8>>>,
+}
+
+/// The witness datums of a transaction, by hash.
+fn witness_datums(tx: &MultiEraTx) -> HashMap<Hash<32>, Vec<u8>> {
+    tx.plutus_data()
+        .iter()
+        .map(|datum| (datum.original_hash(), datum.raw_cbor().to_vec()))
+        .collect()
 }
 
 impl BlockVisitor for DatumVisitor {
+    fn visit_root(
+        &mut self,
+        _deltas: &mut WorkDeltas,
+        block: &MultiEraBlock,
+        _genesis: &Genesis,
+        _pparams: &PParamsSet,
+        _epoch: Epoch,
+        _epoch_start: u64,
+        _protocol: u16,
+    ) -> Result<(), ChainError> {
+        self.top_witness_datums.clear();
+
+        for tx in block.txs() {
+            let subs = tx.sub_transactions();
+
+            if subs.is_empty() {
+                continue;
+            }
+
+            let datums = witness_datums(&tx);
+
+            for sub in subs {
+                self.top_witness_datums.insert(sub.hash(), datums.clone());
+            }
+        }
+
+        Ok(())
+    }
+
     fn visit_tx(
         &mut self,
         _deltas: &mut WorkDeltas,
@@ -47,13 +88,16 @@ impl BlockVisitor for DatumVisitor {
         tx: &MultiEraTx,
         _utxos: &HashMap<TxoRef, OwnedMultiEraOutput>,
     ) -> Result<(), ChainError> {
-        // Clear and collect witness datums for this transaction
-        self.witness_datums.clear();
+        self.witness_datums = witness_datums(tx);
 
-        for datum in tx.plutus_data() {
-            let datum_hash = datum.original_hash();
-            let datum_bytes = datum.raw_cbor().to_vec();
-            self.witness_datums.insert(datum_hash, datum_bytes);
+        // The ledger accepts the datum for a sub transaction's output hash from
+        // the top level witnesses too.
+        if let Some(top) = self.top_witness_datums.get(&tx.hash()) {
+            for (hash, bytes) in top {
+                self.witness_datums
+                    .entry(*hash)
+                    .or_insert_with(|| bytes.clone());
+            }
         }
 
         Ok(())

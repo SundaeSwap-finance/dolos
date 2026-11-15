@@ -132,6 +132,23 @@ index c6860497..6c798fde 100644
  
      block.block_body.transactions = MaybeIndefArray::Def(replacement);
  
+diff --git a/crates/cardano/src/roll/datums.rs b/crates/cardano/src/roll/datums.rs
+index 1fa24a15..9f8c1d75 100644
+--- a/crates/cardano/src/roll/datums.rs
++++ b/crates/cardano/src/roll/datums.rs
+@@ -92,7 +92,11 @@ impl BlockVisitor for DatumVisitor {
+ 
+         // The ledger accepts the datum for a sub transaction's output hash from
+         // the top level witnesses too.
+-        if let Some(top) = self.top_witness_datums.get(&tx.hash()) {
++        if let Some(top) = self
++            .top_witness_datums
++            .get(&tx.hash())
++            .filter(|_| !pallas::crypto::oracle_plant("sub-output-top-datum-dropped"))
++        {
+             for (hash, bytes) in top {
+                 self.witness_datums
+                     .entry(*hash)
 diff --git a/crates/cardano/src/roll/proposals.rs b/crates/cardano/src/roll/proposals.rs
 index 67cc8e65..184c81b4 100644
 --- a/crates/cardano/src/roll/proposals.rs
@@ -540,10 +557,10 @@ index 927eb5af..571f1cb6 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index 2b13bdf4..7db3cc6e 100644
+index 8db62728..e5b4f0b6 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
-@@ -184,7 +184,10 @@ fn tx_eval_to_u5c<R>(
+@@ -188,7 +188,10 @@ fn tx_eval_to_u5c<R>(
                  memory: acc.memory.checked_add(eval.units.mem)?,
              })
          }),
@@ -555,7 +572,7 @@ index 2b13bdf4..7db3cc6e 100644
          ..Default::default()
      };
      if result.ex_units.is_none() {
-@@ -216,6 +219,9 @@ fn tx_eval_to_u5c<R>(
+@@ -220,6 +223,9 @@ fn tx_eval_to_u5c<R>(
              MultiEraRedeemerTag::Reward => RedeemerPurpose::Reward,
              MultiEraRedeemerTag::Vote => RedeemerPurpose::Vote,
              MultiEraRedeemerTag::Propose => RedeemerPurpose::Propose,
@@ -565,7 +582,7 @@ index 2b13bdf4..7db3cc6e 100644
              MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
              other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
          };
-@@ -232,11 +238,15 @@ fn tx_eval_to_u5c<R>(
+@@ -236,11 +242,15 @@ fn tx_eval_to_u5c<R>(
                  entry
                      .failure_message
                      .as_deref()
@@ -582,7 +599,7 @@ index 2b13bdf4..7db3cc6e 100644
          let (payload, original_cbor) = held
              .map(|r| (r.payload, r.original_cbor))
              .unwrap_or_default();
-@@ -251,6 +261,9 @@ fn tx_eval_to_u5c<R>(
+@@ -255,6 +265,9 @@ fn tx_eval_to_u5c<R>(
              original_cbor,
          });
      }
@@ -593,10 +610,10 @@ index 2b13bdf4..7db3cc6e 100644
  }
  
 diff --git a/src/serve/grpc/v1alpha/submit.rs b/src/serve/grpc/v1alpha/submit.rs
-index 9e6aa8e9..f927cbe5 100644
+index 42ba1a3d..a0733da0 100644
 --- a/src/serve/grpc/v1alpha/submit.rs
 +++ b/src/serve/grpc/v1alpha/submit.rs
-@@ -243,9 +243,16 @@ fn tx_eval_to_u5c<R>(
+@@ -247,9 +247,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
              payload,
              index: entry.index,
@@ -634,10 +651,10 @@ index 6931eeea..5e79848e 100644
                  .clone()
                  .map(u5c::watch::any_chain_block::Chain::Cardano),
 diff --git a/src/serve/grpc/v1beta/submit.rs b/src/serve/grpc/v1beta/submit.rs
-index b74c47b4..734d3f16 100644
+index 621f48e1..fdd14598 100644
 --- a/src/serve/grpc/v1beta/submit.rs
 +++ b/src/serve/grpc/v1beta/submit.rs
-@@ -243,9 +243,16 @@ fn tx_eval_to_u5c<R>(
+@@ -247,9 +247,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
              payload,
              index: entry.index,
@@ -657,7 +674,7 @@ index b74c47b4..734d3f16 100644
              }),
              original_cbor,
          });
-@@ -291,7 +298,11 @@ where
+@@ -295,7 +302,11 @@ where
  
          info!(tx.hash = %hash, "accepted grpc transaction into mempool");
          Ok(Response::new(SubmitTxResponse {

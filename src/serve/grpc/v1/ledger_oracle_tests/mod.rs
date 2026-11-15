@@ -960,15 +960,16 @@ async fn validate_run<'r>(
 }
 
 /// The datum ReadUtxos serves for an output with a datum hash, by whether the
-/// transaction that made the output witnesses that datum.
+/// transaction that made the output, or the top level transaction of a sub
+/// transaction that made it, witnesses that datum.
 enum ExpectedDatum {
     Witnessed(Vec<u8>),
     Unwitnessed,
 }
 
 /// Counts the datum ReadUtxos and SearchUtxos serve for each ledger output with
-/// a datum hash against the datum its making transaction witnesses, or against
-/// the hash when it witnesses none.
+/// a datum hash against the datum its making transaction or that transaction's
+/// top level transaction witnesses, or against the hash when neither does.
 async fn compare_datums(
     domain: &DomainAdapter,
     id: RecordId,
@@ -991,14 +992,8 @@ async fn compare_datums(
             .unwrap_or_else(|e| panic!("TX {maker_id} {e}"));
         let txs = named_txs(tx);
         let making = txs.iter().find(|(_, t)| *t.hash() == entry.input.tx);
-        let datum = making
-            .into_iter()
-            .flat_map(|(_, t)| t.plutus_data())
-            .find(|d| d.original_hash() == hash);
-        let ledger = match datum {
-            Some(d) => {
-                ExpectedDatum::Witnessed((edits.expected_datum)(maker_id, d.raw_cbor().to_vec()))
-            }
+        let ledger = match making.and_then(|m| resolved_datum(&txs, m, *hash)) {
+            Some(bytes) => ExpectedDatum::Witnessed((edits.expected_datum)(maker_id, bytes)),
             None => ExpectedDatum::Unwitnessed,
         };
         expected.insert(entry.input, (maker_id, *hash, ledger));
@@ -1268,6 +1263,24 @@ fn witness_datums(tx: MultiEraTx<'_>) -> BTreeMap<[u8; 32], Vec<DatumBytes>> {
     let datums = |tx: &MultiEraTx<'_>| tx.plutus_data().iter().map(DatumBytes::of).collect();
     let named = named_txs(tx).into_iter();
     named.map(|(name, tx)| (name.hash(), datums(&tx))).collect()
+}
+
+/// The bytes of the datum the ledger resolves for a datum hash on an output of
+/// the transaction `making` of the batch `txs`, from its witnesses or, for a
+/// sub transaction, from its top level transaction's too.
+fn resolved_datum<'b>(
+    txs: &[(TxName, MultiEraTx<'b>)],
+    making: &(TxName, MultiEraTx<'b>),
+    hash: [u8; 32],
+) -> Option<Vec<u8>> {
+    let top = match making.0 {
+        TxName::Top(_) => None,
+        TxName::Sub(_) => txs.first(),
+    };
+    let datums = std::iter::once(making).chain(top);
+    let mut datums = datums.flat_map(|(_, tx)| tx.plutus_data());
+    let datum = datums.find(|d| *d.original_hash() == hash)?;
+    Some(datum.raw_cbor().to_vec())
 }
 
 /// Whether the ledger holds the item a lookup serves, as its cell shows it.

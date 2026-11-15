@@ -935,7 +935,7 @@ pub(crate) mod dijkstra_fixture {
     use pallas::crypto::hash::Hash;
     use pallas::ledger::primitives::{
         conway::{Anchor, GovActionId, Vote, Voter, VotingProcedure, VotingProcedures},
-        dijkstra, VrfCert,
+        dijkstra, PlutusData, VrfCert,
     };
 
     use crate::OwnedMultiEraBlock;
@@ -1130,6 +1130,45 @@ pub(crate) mod dijkstra_fixture {
         }
     }
 
+    /// A witness set that holds the datums given and nothing else.
+    pub fn witness_set_with_datums(datums: Vec<PlutusData>) -> dijkstra::WitnessSet<'static> {
+        let datums: Vec<_> = datums.into_iter().map(KeepRaw::from).collect();
+
+        dijkstra::WitnessSet {
+            plutus_data: dijkstra::NonEmptySet::try_from(datums)
+                .ok()
+                .map(KeepRaw::from),
+            ..witness_set()
+        }
+    }
+
+    /// A sub transaction whose one output is locked by the datum hash given
+    /// and whose witness set holds the datums given.
+    pub fn sub_transaction_with_output_datum_hash(
+        hash: Hash<32>,
+        datums: Vec<PlutusData>,
+    ) -> dijkstra::SubTransaction<'static> {
+        let output = dijkstra::PostAlonzoTransactionOutput {
+            address: Bytes::from([[0x60].as_slice(), &[0x01; 28]].concat()),
+            value: dijkstra::Value::Coin(2_000_000),
+            datum_option: Some(KeepRaw::from(dijkstra::DatumOption::Hash(hash))),
+            script_ref: None,
+        };
+        let sub = sub_transaction_with_certs(vec![]);
+        let sub_body = dijkstra::SubTransactionBody {
+            outputs: MaybeIndefArray::Def(vec![dijkstra::TransactionOutput::PostAlonzo(
+                KeepRaw::from(output),
+            )]),
+            ..sub.sub_transaction_body.unwrap()
+        };
+
+        dijkstra::SubTransaction {
+            sub_transaction_body: KeepRaw::from(sub_body),
+            transaction_witness_set: KeepRaw::from(witness_set_with_datums(datums)),
+            auxiliary_data: Nullable::Null,
+        }
+    }
+
     /// A body that holds the certificates and the sub transactions given and
     /// no governance.
     pub fn body_with_certs(
@@ -1154,6 +1193,22 @@ pub(crate) mod dijkstra_fixture {
     /// A ranking block at [`SLOT`] holding the transactions given in order,
     /// each with its producer verdict.
     pub fn block_of(txs: Vec<(dijkstra::TransactionBody<'static>, bool)>) -> OwnedMultiEraBlock {
+        let txs = txs
+            .into_iter()
+            .map(|(body, success)| (body, witness_set(), success));
+
+        block_of_witnessed(txs.collect())
+    }
+
+    /// A ranking block at [`SLOT`] holding the transactions given in order,
+    /// each with its witness set and its producer verdict.
+    pub fn block_of_witnessed(
+        txs: Vec<(
+            dijkstra::TransactionBody<'static>,
+            dijkstra::WitnessSet<'static>,
+            bool,
+        )>,
+    ) -> OwnedMultiEraBlock {
         let header_body = dijkstra::HeaderBody {
             block_number: 1,
             slot: SLOT,
@@ -1184,9 +1239,9 @@ pub(crate) mod dijkstra_fixture {
 
         let txs = txs
             .into_iter()
-            .map(|(body, success)| dijkstra::BlockTransaction {
+            .map(|(body, witnesses, success)| dijkstra::BlockTransaction {
                 transaction_body: KeepRaw::from(body),
-                transaction_witness_set: KeepRaw::from(witness_set()),
+                transaction_witness_set: KeepRaw::from(witnesses),
                 auxiliary_data: Nullable::Null,
                 success,
             })
@@ -1212,7 +1267,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use dolos_core::NsKey;
-    use pallas::codec::utils::{NonEmptySet, NonZeroInt, Set};
+    use pallas::codec::utils::{MaybeIndefArray, NonEmptySet, NonZeroInt, Set};
     use pallas::crypto::hash::Hash;
     use pallas::ledger::primitives::conway::{
         Anchor, Certificate, GovAction, GovActionId, ProposalProcedure, TransactionBody, Vote,
@@ -1600,6 +1655,76 @@ mod tests {
                 stats.tx_count,
             ),
             (0, 0, 0, 1)
+        );
+    }
+
+    /// The datums a crawl records for outputs locked by a datum hash, by hash.
+    fn datums_recorded(deltas: &WorkDeltas) -> Vec<(Hash<32>, Vec<u8>)> {
+        deltas
+            .entities
+            .values()
+            .flatten()
+            .filter_map(|delta| match delta {
+                CardanoDelta::DatumRefIncrement(x) => Some((x.datum_hash, x.datum_bytes.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A datum that is a list of the number of empty lists given.
+    fn datum(items: usize) -> PlutusData {
+        let empty = || PlutusData::Array(MaybeIndefArray::Def(vec![]));
+
+        PlutusData::Array(MaybeIndefArray::Def((0..items).map(|_| empty()).collect()))
+    }
+
+    fn datum_hash(datum: &PlutusData) -> Hash<32> {
+        let bytes = pallas::codec::minicbor::to_vec(datum).unwrap();
+
+        pallas::crypto::hash::Hasher::<256>::hash(&bytes)
+    }
+
+    /// Crawls a block whose first transaction witnesses the datums `top` and
+    /// lists a sub transaction with one output locked by the hash of
+    /// `datum(0)`, and whose second transaction witnesses the datums
+    /// `sibling`.
+    fn crawl_sub_output_datum_hash(top: Vec<PlutusData>, sibling: Vec<PlutusData>) -> WorkDeltas {
+        let sub =
+            dijkstra_fixture::sub_transaction_with_output_datum_hash(datum_hash(&datum(0)), vec![]);
+        let block = dijkstra_fixture::block_of_witnessed(vec![
+            (
+                dijkstra_fixture::body_with_certs(vec![], vec![sub]),
+                dijkstra_fixture::witness_set_with_datums(top),
+                true,
+            ),
+            (
+                dijkstra_fixture::body_with_certs(vec![], vec![]),
+                dijkstra_fixture::witness_set_with_datums(sibling),
+                true,
+            ),
+        ]);
+
+        crawl_block(block, 12)
+    }
+
+    /// The must-not case. A datum that only another transaction of the block
+    /// witnesses is not recorded for a sub transaction's output hash.
+    #[test]
+    fn a_sub_output_hash_only_another_transaction_witnesses_records_no_datum() {
+        let deltas = crawl_sub_output_datum_hash(vec![datum(1)], vec![datum(0)]);
+
+        assert_eq!(datums_recorded(&deltas), vec![]);
+    }
+
+    /// The must-fire case. A datum the top level transaction witnesses is
+    /// recorded for its sub transaction's output hash.
+    #[test]
+    fn a_sub_output_hash_its_top_level_transaction_witnesses_records_the_datum() {
+        let deltas = crawl_sub_output_datum_hash(vec![datum(0)], vec![]);
+
+        assert_eq!(
+            datums_recorded(&deltas),
+            vec![(datum_hash(&datum(0)), vec![0x80])]
         );
     }
 

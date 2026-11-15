@@ -236,6 +236,21 @@ supplement = describe "SUPPLEMENT" $ do
   tableCells
   builtinCalls
   scriptsGivenTwice
+  it "a child output holds a hash datum given in the top witnesses, and a later child spends it" $ do
+    pp <- getsPParams id
+    holder <- freshKeyAddrNoPtr_
+    funded <- freshFundedTxIn
+    let datum = Data (PV1.I 43) :: Data E
+        maker :: Tx SubTx E
+        maker = mkBasicTx $ mkBasicTxBody & inputsTxBodyL .~ [funded] & outputsTxBodyL .~ [setMinCoinTxOut pp (mkBasicTxOut holder mempty & datumTxOutL .~ DatumHash (hashData datum))]
+    top <- submitTx (mkTopTxWithSubTxs [maker] & witsTxL . datsTxWitsL .~ TxDats [(hashData datum, datum)])
+    made <- expectJust . listToMaybe . OMap.elems $ top ^. bodyTxL . subTransactionsTxBodyL
+    passTick
+    funded' <- freshFundedTxIn
+    receiver <- freshKeyAddrNoPtr_
+    let spender :: Tx SubTx E
+        spender = mkBasicTx $ mkBasicTxBody & inputsTxBodyL .~ [txInAt 0 made, funded'] & outputsTxBodyL .~ [setMinCoinTxOut pp (mkBasicTxOut receiver mempty)]
+    submitTx_ (mkTopTxWithSubTxs [spender])
 
 -- | Spends whose witness set gives the native script or the V3 script they spend at twice.
 scriptsGivenTwice :: SpecWith (ImpInit (LedgerSpec E))

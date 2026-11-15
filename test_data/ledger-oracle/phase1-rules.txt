@@ -152,3 +152,4 @@ unsupported[subtransaction body fields] | leaves DecoderErrorDeserialiseFailure,
 unsupported[subtransactions] | unrepresentable because it marks a construct the validator does not implement rather than a ledger rule | excluded Dolos sends only a transaction of an era before Dijkstra to the multi era entry that answers it command: grep -n -B2 'phase1::validate_tx' dolos/crates/cardano/src/validate.rs
 unsupported[unsuccessful block transaction] | unrepresentable because it marks a construct the validator does not implement rather than a ledger rule | excluded every submission decodes as a mempool transaction first, whose decoder refuses a false validity flag command: git -C pallas show 2b7bd3fb:pallas-primitives/src/dijkstra/model.rs | grep -n 'not allowed for .is_valid.'
 unsupported[witness fields] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads every
+known supp#2198 | refused[PostAlonzo(UnneededDatum)] | accepted

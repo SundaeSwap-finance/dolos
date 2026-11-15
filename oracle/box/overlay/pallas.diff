@@ -275,10 +275,10 @@ index fd504aac..fc162cc5 100644
              }
  
 diff --git a/pallas-utxorpc/src/since_v1beta.rs b/pallas-utxorpc/src/since_v1beta.rs
-index 5c5c5498..df9742a5 100644
+index 6fc334fb..87ee0805 100644
 --- a/pallas-utxorpc/src/since_v1beta.rs
 +++ b/pallas-utxorpc/src/since_v1beta.rs
-@@ -41,7 +41,13 @@ macro_rules! impl_cardano_mapper_since_v1beta {
+@@ -50,7 +50,13 @@ macro_rules! impl_cardano_mapper_since_v1beta {
                          u5c::Datum {
                              hash: x.to_vec().into(),
                              payload: witnessed.map(|d| self.map_plutus_datum(d)),
@@ -294,10 +294,18 @@ index 5c5c5498..df9742a5 100644
                      }
                  })
 diff --git a/pallas-utxorpc/src/v1/mod.rs b/pallas-utxorpc/src/v1/mod.rs
-index 40fb34e2..0d19c845 100644
+index c03c073d..cb0ce2f0 100644
 --- a/pallas-utxorpc/src/v1/mod.rs
 +++ b/pallas-utxorpc/src/v1/mod.rs
-@@ -430,6 +430,7 @@ impl<C: LedgerContext> Mapper<C> {
+@@ -340,6 +340,7 @@ impl<C: LedgerContext> Mapper<C> {
+         let start = tx.validity_start();
+         let ttl = tx.ttl();
+         // The ledger accepts the datum for a sub transaction's output hash from the top level witnesses too.
++        let top = top.filter(|_| !pallas_crypto::oracle_plant("sub-output-datum-top-unmapped"));
+         let datums: Vec<_> = std::iter::once(tx).chain(top).collect();
+ 
+         u5c::TxCommon {
+@@ -433,6 +434,7 @@ impl<C: LedgerContext> Mapper<C> {
                  .direct_deposits()
                  .into_iter()
                  .flatten()
