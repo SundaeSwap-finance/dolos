@@ -397,6 +397,7 @@ where
 #[cfg(test)]
 mod tests {
     include!("../submit_tests.rs");
+    include!("../predicate_tests.rs");
 
     fn tx_hash(tx: &u5c::cardano::Tx) -> Vec<u8> {
         tx.common.as_ref().unwrap().hash.to_vec()

@@ -543,10 +543,10 @@ index 75809d92..2ebba81f 100644
          let resolved = if refs.is_empty() {
              Some(UtxoMap::new())
 diff --git a/src/serve/grpc/v1/query.rs b/src/serve/grpc/v1/query.rs
-index e5795963..2bb3a5b6 100644
+index 4367525c..873ff5b2 100644
 --- a/src/serve/grpc/v1/query.rs
 +++ b/src/serve/grpc/v1/query.rs
-@@ -864,6 +864,9 @@ fn into_u5c_utxo<S: Domain>(
+@@ -865,6 +865,9 @@ fn into_u5c_utxo<S: Domain>(
  
      let parsed_output = MultiEraOutput::try_from(body)?;
      let mut parsed = mapper.map_tx_output(&parsed_output, None);
@@ -557,7 +557,7 @@ index e5795963..2bb3a5b6 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index e3b4b775..e4604c77 100644
+index dd2c00b3..a2e20247 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
 @@ -193,7 +193,10 @@ fn tx_eval_to_u5c<R>(
@@ -610,7 +610,7 @@ index e3b4b775..e4604c77 100644
  }
  
 diff --git a/src/serve/grpc/v1alpha/submit.rs b/src/serve/grpc/v1alpha/submit.rs
-index 8dd06804..eaa20cf1 100644
+index 19e3aaa6..0f6d727f 100644
 --- a/src/serve/grpc/v1alpha/submit.rs
 +++ b/src/serve/grpc/v1alpha/submit.rs
 @@ -252,9 +252,16 @@ fn tx_eval_to_u5c<R>(
@@ -634,10 +634,10 @@ index 8dd06804..eaa20cf1 100644
              original_cbor,
          });
 diff --git a/src/serve/grpc/v1alpha/watch.rs b/src/serve/grpc/v1alpha/watch.rs
-index 6931eeea..5e79848e 100644
+index a91e15ca..bfadf66f 100644
 --- a/src/serve/grpc/v1alpha/watch.rs
 +++ b/src/serve/grpc/v1alpha/watch.rs
-@@ -400,7 +400,11 @@ fn block_to_txs<C: ChainReads>(
+@@ -415,7 +415,11 @@ fn block_to_txs<C: ChainReads>(
              .tx
              .then_some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
          block: (mask.block != BlockMask::none()).then(|| u5c::watch::AnyChainBlock {
@@ -651,7 +651,7 @@ index 6931eeea..5e79848e 100644
                  .clone()
                  .map(u5c::watch::any_chain_block::Chain::Cardano),
 diff --git a/src/serve/grpc/v1beta/submit.rs b/src/serve/grpc/v1beta/submit.rs
-index cfbbde5e..e4e3348a 100644
+index 9568cf10..6701d4dd 100644
 --- a/src/serve/grpc/v1beta/submit.rs
 +++ b/src/serve/grpc/v1beta/submit.rs
 @@ -252,9 +252,16 @@ fn tx_eval_to_u5c<R>(
@@ -710,10 +710,10 @@ index c2fa5a49..1ab08846 100644
              None
          },
 diff --git a/src/serve/grpc/v1beta/watch.rs b/src/serve/grpc/v1beta/watch.rs
-index 16594757..84b296ac 100644
+index bb88c43f..0f6439fd 100644
 --- a/src/serve/grpc/v1beta/watch.rs
 +++ b/src/serve/grpc/v1beta/watch.rs
-@@ -392,7 +392,11 @@ fn block_to_txs<C: ChainReads>(
+@@ -407,7 +407,11 @@ fn block_to_txs<C: ChainReads>(
              .tx
              .then_some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
          block: (mask.block != BlockMask::none()).then(|| u5c::watch::AnyChainBlock {

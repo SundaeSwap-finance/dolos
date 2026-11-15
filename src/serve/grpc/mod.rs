@@ -11,6 +11,7 @@ pub(crate) mod block_refs;
 mod convert;
 mod eval;
 mod masking;
+mod predicate;
 #[cfg(test)]
 mod read_counting;
 mod selection;

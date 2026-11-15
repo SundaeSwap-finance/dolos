@@ -12,8 +12,9 @@ use crate::prelude::*;
 use crate::serve::grpc::block_context::{BlockContext, BlockTxs, NoInputs};
 use crate::serve::grpc::block_refs::BlockRefData;
 use crate::serve::grpc::masking::apply_mask;
+use crate::serve::grpc::predicate::{self, Admitted};
 use crate::serve::grpc::run_blocking;
-use crate::serve::grpc::selection::{self, Selection};
+use crate::serve::grpc::selection::Selection;
 use crate::serve::ChainReads;
 
 fn to_chain_point(data: &BlockRefData) -> u5c::query::ChainPoint {
@@ -116,17 +117,17 @@ impl<T: IntoSet> IntoSet for Option<T> {
     }
 }
 
-impl selection::UtxoPredicate for u5c::query::UtxoPredicate {
+impl predicate::Predicate for u5c::query::UtxoPredicate {
     type Pattern = u5c::query::AnyUtxoPattern;
 
-    fn into_clauses(self) -> selection::Clauses<Self> {
+    fn into_clauses(self) -> predicate::Clauses<Self> {
         let Self {
             r#match,
             not,
             all_of,
             any_of,
         } = self;
-        selection::Clauses {
+        predicate::Clauses {
             matching: r#match,
             not,
             all_of,
@@ -1087,7 +1088,7 @@ where
 
         let utxos = run_blocking(&self.domain, move |domain| {
             let set =
-                selection::select(predicate, &mut |pattern| pattern.into_set(domain.state()))?
+                predicate::evaluate(predicate, &mut |pattern| pattern.into_set(domain.state()))?
                     .into_bounded()?;
 
             StateStore::get_utxos(domain.state(), set.into_iter().collect_vec())

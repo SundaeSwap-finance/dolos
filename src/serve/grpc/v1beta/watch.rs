@@ -13,6 +13,7 @@ use super::criterion;
 use crate::prelude::*;
 use crate::serve::grpc::block_context::BlockContext;
 use crate::serve::grpc::masking::{BlockMask, TxMask};
+use crate::serve::grpc::predicate;
 use crate::serve::grpc::run_blocking;
 use crate::serve::grpc::stream::ChainStream;
 
@@ -336,21 +337,35 @@ fn matches_chain(chain: &Chain, tx: &u5c::cardano::Tx) -> bool {
     }
 }
 
+impl<'a> predicate::Predicate for &'a u5c::watch::TxPredicate {
+    type Pattern = &'a u5c::watch::AnyChainTxPattern;
+
+    fn into_clauses(self) -> predicate::Clauses<Self> {
+        let u5c::watch::TxPredicate {
+            r#match,
+            not,
+            all_of,
+            any_of,
+        } = self;
+        predicate::Clauses {
+            matching: r#match.as_ref(),
+            not: not.iter().collect(),
+            all_of: all_of.iter().collect(),
+            any_of: any_of.iter().collect(),
+        }
+    }
+}
+
 pub(super) fn apply_predicate(predicate: &u5c::watch::TxPredicate, tx: &u5c::cardano::Tx) -> bool {
-    let tx_matches = predicate
-        .r#match
-        .as_ref()
-        .and_then(|pattern| pattern.chain.as_ref())
-        .is_none_or(|chain| matches_chain(chain, tx));
-
-    let not_clause = predicate.not.iter().any(|p| apply_predicate(p, tx));
-
-    let and_clause = predicate.all_of.iter().all(|p| apply_predicate(p, tx));
-
-    let or_clause =
-        predicate.any_of.is_empty() || predicate.any_of.iter().any(|p| apply_predicate(p, tx));
-
-    tx_matches && !not_clause && and_clause && or_clause
+    let Ok(admitted) = predicate::evaluate(predicate, &mut |pattern| {
+        Ok::<_, std::convert::Infallible>(
+            pattern
+                .chain
+                .as_ref()
+                .is_none_or(|chain| matches_chain(chain, tx)),
+        )
+    });
+    admitted
 }
 
 /// The transactions of a block the request admits, each built when read with
