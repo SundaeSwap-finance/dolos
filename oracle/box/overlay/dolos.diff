@@ -82,11 +82,25 @@ index d91af359..cb331e0b 100644
          entity.deposit = 0;
      }
  
+diff --git a/crates/cardano/src/model/pools.rs b/crates/cardano/src/model/pools.rs
+index d31e4e79..b0e9ea18 100644
+--- a/crates/cardano/src/model/pools.rs
++++ b/crates/cardano/src/model/pools.rs
+@@ -430,6 +430,9 @@ impl dolos_core::EntityDelta for PoolDeRegistration {
+ 
+             // apply changes
+             entity.retiring_epoch = Some(self.epoch);
++            if pallas::crypto::oracle_plant("retiring-pool-deposit-zeroed") {
++                entity.deposit = 0;
++            }
+         }
+     }
+ 
 diff --git a/crates/cardano/src/model/proposals.rs b/crates/cardano/src/model/proposals.rs
-index e7df64fd..068f9a9e 100644
+index f0ae7090..aa9331d6 100644
 --- a/crates/cardano/src/model/proposals.rs
 +++ b/crates/cardano/src/model/proposals.rs
-@@ -664,7 +664,11 @@ impl dolos_core::EntityDelta for NewProposalV2 {
+@@ -665,7 +665,11 @@ impl dolos_core::EntityDelta for NewProposalV2 {
              idx: self.idx,
              action: self.action.clone(),
              reward_account: self.reward_account.clone(),
@@ -118,6 +132,32 @@ index c6860497..6c798fde 100644
  
      block.block_body.transactions = MaybeIndefArray::Def(replacement);
  
+diff --git a/crates/cardano/src/roll/proposals.rs b/crates/cardano/src/roll/proposals.rs
+index 67cc8e65..184c81b4 100644
+--- a/crates/cardano/src/roll/proposals.rs
++++ b/crates/cardano/src/roll/proposals.rs
+@@ -164,6 +164,10 @@ fn param_update_to_pparamset(update: &MultiEraParamUpdate) -> Result<PParamsSet,
+         drep_inactivity_period => DrepInactivityPeriod
+     };
+ 
++    if pallas::crypto::oracle_plant("coins-per-byte-mapped-twice") {
++        map_shared_pparam!(update, ada_per_utxo_byte, set, MinUtxoValue);
++    }
++
+     // TODO: these are special cases where we don't have automatic type
+     // mappings. We should fix this at the Pallas level.
+ 
+@@ -545,6 +549,10 @@ impl BlockVisitor for ProposalVisitor {
+             return Ok(());
+         };
+ 
++        if pallas::crypto::oracle_plant("drep-votes-kept") {
++            return Ok(());
++        }
++
+         for proposal in self.votes_held.take_votes(&unregistration.cred) {
+             self.pending_votes.push(
+                 DRepVotesRemoved::new(proposal, unregistration.cred.clone(), block.slot()).into(),
 diff --git a/crates/cardano/src/utxoset.rs b/crates/cardano/src/utxoset.rs
 index 340a6ece..bca7fc38 100644
 --- a/crates/cardano/src/utxoset.rs
@@ -406,10 +446,10 @@ index 519e927a..2eb12435 100644
          ChainError::CborDecodingError(x) => ClientFault::InvalidBytes(x.to_string()),
          ChainError::AddressDecoding(x) => ClientFault::InvalidBytes(x.to_string()),
 diff --git a/crates/core/src/sync.rs b/crates/core/src/sync.rs
-index f501516c..aaa23f63 100644
+index 061c2caf..3ad2a47c 100644
 --- a/crates/core/src/sync.rs
 +++ b/crates/core/src/sync.rs
-@@ -201,6 +201,9 @@ impl<D: Domain> SyncExt for D {
+@@ -204,6 +204,9 @@ impl<D: Domain> SyncExt for D {
  
  /// Drops the pending transactions the ledger refuses once the state has moved.
  fn revalidate_mempool<D: Domain>(domain: &D, chain: &D::Chain) {

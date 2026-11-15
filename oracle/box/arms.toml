@@ -62,6 +62,9 @@ fixes = [
   { subject = "fix(trp): apply witnesses to Dijkstra txs", arm = "dijkstra-witnesses-refused" },
   { subject = "fix(grpc): fill EvalTx redeemer data", arm = "eval-redeemer-data-unset" },
   { subject = "fix(grpc): report the EvalTx minimum fee", arm = "eval-fee-unset" },
+  { subject = "fix(cardano): map a coins per byte update once", arm = "coins-per-byte-mapped-twice" },
+  { subject = "fix(cardano): keep a retiring pool deposit", arm = "retiring-pool-deposit-zeroed" },
+  { subject = "fix(cardano): drop an unregistered DRep's votes", arm = "drep-votes-kept" },
 ]
 
 [pallas]
@@ -266,6 +269,9 @@ withdrawal-unapplied = ["judge=accounts answer:differ field:balance"]
 drep-unregistration-ignored = ["judge=ledger-state table:dreps answer:dolos_only"]
 proposal-deposit-dropped = ["judge=ledger-state table:proposals answer:differ field:deposit"]
 spent-utxo-kept = ["judge=utxo bytes:dolos_only"]
+coins-per-byte-mapped-twice = ["judge=ledger-state table:proposals answer:differ field:gov_action"]
+retiring-pool-deposit-zeroed = ["judge=ledger-state table:stake_pools answer:differ field:deposit"]
+drep-votes-kept = ["judge=ledger-state table:proposals answer:differ field:drep_votes"]
 n2n-magic-wrong = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests::the_node_accepts_the_proposal_at_the_leios_version"]
 n2n-v16-four-fields = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests::the_node_accepts_the_proposal_at_the_leios_version"]
 n2n-leios-minimum-above-node = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests::a_recorded_endorser_block_is_fetched_as_dolos_serves_it"]
