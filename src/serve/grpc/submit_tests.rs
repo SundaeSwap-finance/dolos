@@ -479,3 +479,44 @@ async fn estimation_rpc_submission_still_enforces_phase_two() {
     exact(&evaluate(&domain, &insufficient).await);
     assert!(!domain.mempool().has_pending());
 }
+
+#[tokio::test]
+async fn every_handler_reads_the_stores_on_the_blocking_pool() {
+    use crate::serve::grpc::read_counting::ReadCountingDomain;
+
+    let (toy, bytes) = capture::fixture(true);
+    let domain = ReadCountingDomain::new(toy);
+    let service = SubmitServiceImpl::new(domain.clone());
+    let mut reads = Vec::new();
+
+    domain.take();
+    service.eval_tx(request(&bytes)).await.unwrap();
+    reads.push(("eval_tx", domain.take()));
+
+    let hash = service
+        .submit_tx(Request::new(SubmitTxRequest {
+            tx: Some(AnyChainTx {
+                r#type: Some(any_chain_tx::Type::Raw(bytes.into())),
+            }),
+        }))
+        .await
+        .unwrap()
+        .into_inner()
+        .r#ref;
+    reads.push(("submit_tx", domain.take()));
+
+    service
+        .wait_for_tx(Request::new(WaitForTxRequest { r#ref: vec![hash] }))
+        .await
+        .unwrap();
+    reads.push(("wait_for_tx", domain.take()));
+
+    assert_eq!(
+        reads,
+        [
+            ("eval_tx", (0, true)),
+            ("submit_tx", (0, true)),
+            ("wait_for_tx", (0, true)),
+        ]
+    );
+}

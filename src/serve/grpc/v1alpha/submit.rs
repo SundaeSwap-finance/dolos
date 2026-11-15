@@ -12,6 +12,7 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, info};
 
 use crate::prelude::*;
+use crate::serve::grpc::run_blocking;
 
 pub struct SubmitServiceImpl<D>
 where
@@ -161,8 +162,6 @@ where
 
         debug!("received new grpc submit tx request");
 
-        let chain = self.domain.read_chain();
-
         let tx = message
             .tx
             .ok_or_else(|| Status::invalid_argument("missing tx"))?;
@@ -171,10 +170,14 @@ where
             _ => return Err(Status::invalid_argument("missing or unsupported tx type")),
         };
 
-        let hash = self
-            .domain
-            .receive_tx("grpc", &chain, tx_bytes.as_ref())
-            .map_err(|error| crate::serve::grpc::convert::submit_error_status(error.into()))?;
+        let hash = run_blocking(&self.domain, move |domain| {
+            let chain = domain.read_chain();
+
+            domain
+                .receive_tx("grpc", &chain, tx_bytes.as_ref())
+                .map_err(|error| crate::serve::grpc::convert::submit_error_status(error.into()))
+        })
+        .await?;
 
         info!(tx.hash = %hash, "accepted grpc transaction into mempool");
         Ok(Response::new(SubmitTxResponse {
@@ -193,17 +196,22 @@ where
             .map(|x| Hash::from(x.as_ref()))
             .collect();
 
-        let initial_stages: Vec<_> = subjects
-            .iter()
-            .map(|x| {
-                Result::<_, Status>::Ok(WaitForTxResponse {
-                    stage: tx_stage_to_u5c(self.domain.mempool().check_status(x).stage),
-                    r#ref: x.to_vec().into(),
+        let (subjects, initial_stages, updates) = run_blocking(&self.domain, move |domain| {
+            let initial_stages: Vec<_> = subjects
+                .iter()
+                .map(|x| {
+                    Result::<_, Status>::Ok(WaitForTxResponse {
+                        stage: tx_stage_to_u5c(domain.mempool().check_status(x).stage),
+                        r#ref: x.to_vec().into(),
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        let updates = self.domain.mempool().subscribe();
+            let updates = domain.mempool().subscribe();
+
+            Ok((subjects, initial_stages, updates))
+        })
+        .await?;
 
         let updates = UpdateFilter::<D::Mempool>::new(updates, subjects)
             .map(|x| Ok(event_to_wait_for_tx_response(x)))
@@ -249,10 +257,12 @@ where
             _ => return Err(Status::invalid_argument("missing or unsupported tx type")),
         };
 
-        let chain = self.domain.read_chain();
+        let result = run_blocking(&self.domain, move |domain| {
+            let chain = domain.read_chain();
 
-        let result = self.domain.estimate_tx(&chain, &tx_raw);
-        let result = tx_eval_to_u5c(result);
+            Ok(tx_eval_to_u5c(domain.estimate_tx(&chain, &tx_raw)))
+        })
+        .await?;
 
         let report = AnyChainEval {
             chain: Some(Chain::Cardano(result)),
