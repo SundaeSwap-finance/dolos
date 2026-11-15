@@ -2,7 +2,7 @@
 
 use std::{
     collections::VecDeque,
-    fmt,
+    fmt, fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -23,6 +23,7 @@ use pallas::{
         },
     },
 };
+use serde::de::DeserializeOwned;
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::TcpStream,
@@ -30,10 +31,7 @@ use tokio::{
 };
 
 use super::super::spec::sync as s;
-use super::{
-    endorser::{block_txs, listed, tx_id, Listed},
-    live::{files, read},
-};
+use super::endorser::{block_txs, listed, tx_id, Listed};
 use crate::sync::{
     leios::{
         proposal, AnnouncedEndorserBlock, Error, LeiosClient, LeiosTransport, ManagerTransport,
@@ -563,6 +561,24 @@ fn certified(natives: &[Vec<u8>]) -> (Vec<Certified>, Vec<String>) {
         });
     }
     (found, unpaired)
+}
+
+fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> T {
+    let path = dir.join(name);
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("N2N {} {e}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("N2N {} {e}", path.display()))
+}
+
+/// The files in the reads directory whose names start with the prefix, in name
+/// order.
+fn files(dir: &Path, prefix: &str) -> Vec<String> {
+    let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("N2N {} {e}", dir.display()));
+    let mut names: Vec<String> = entries
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(prefix))
+        .collect();
+    names.sort();
+    names
 }
 
 /// The native bytes of each block the reads dir holds a FetchBlock answer for.

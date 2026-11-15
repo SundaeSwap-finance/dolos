@@ -10,7 +10,6 @@ pub mod coverage;
 pub mod eval;
 pub mod judgement;
 pub mod ledger_state;
-pub mod live;
 pub mod manifest;
 pub mod mutation;
 pub mod parallel;
