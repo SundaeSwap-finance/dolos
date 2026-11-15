@@ -67,6 +67,7 @@ fixes = [
   { subject = "fix(cardano): drop an unregistered DRep's votes", arm = "drep-votes-kept" },
   { subject = "fix(cardano): charge a reaped pool the new deposit", exclude = "follower" },
   { subject = "fix(cardano): keep a sub output datum from the top", arm = "sub-output-top-datum-dropped" },
+  { subject = "fix(cardano): accept a sub datum the top witnesses", exclude = "pin" },
 ]
 
 [pallas]
@@ -150,6 +151,7 @@ fixes = [
   { subject = "fix(network2): hold a tag 24 payload whole", exclude = "network" },
   { subject = "fix(utxorpc): serve a witnessed datum's bytes", arm = "hash-datum-bytes-dropped" },
   { subject = "fix(utxorpc): map a sub output datum from the top", arm = "sub-output-datum-top-unmapped" },
+  { subject = "fix(validate): match the ledger's top datum set", arm = "top-witnessed-sub-datum-refused" },
 ]
 
 [catches]
@@ -283,3 +285,4 @@ n2n-leios-minimum-above-node = ["test=serve::grpc::v1::ledger_oracle_tests::n2n:
 n2n-fetched-tx-dropped = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests::a_recorded_endorser_block_is_fetched_as_dolos_serves_it"]
 sub-output-top-datum-dropped = ["judge=datum entry=read_utxos:v1 bytes:ledger_only"]
 sub-output-datum-top-unmapped = ["judge=served-tx layer:v1 tx:sub field:output_datums"]
+top-witnessed-sub-datum-refused = ["judge=validation failure:disagree"]
