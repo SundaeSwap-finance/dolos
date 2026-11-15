@@ -35,12 +35,16 @@ change_a() {
   commit
 }
 
-# Runs build_checked with messages naming each unit given as name=fresh, printing its exit and output.
+# Runs build_checked with messages naming each unit given as name=fresh, a name with a leading slash being the unit's output file, printing its exit and output.
 build() {
   : >"$ROOT/messages"
   for arg in "$@"; do
-    printf '{"reason":"compiler-artifact","filenames":["/w/target/release/deps/lib%s-1.rlib"],"fresh":%s}\n' \
-      "${arg%=*}" "${arg#*=}" >>"$ROOT/messages"
+    unit=${arg%=*}
+    case $unit in
+      /*) ;;
+      *) unit=/w/target/release/deps/lib$unit-1.rlib ;;
+    esac
+    printf '{"reason":"compiler-artifact","filenames":["%s"],"fresh":%s}\n' "$unit" "${arg#*=}" >>"$ROOT/messages"
   done
   (
     SCRATCH=scratch/dolos IN_IMAGE=$ROOT/runner.sh
@@ -103,6 +107,35 @@ build x=false y=false >/dev/null
 change_a
 expect between "$(build y=true)" "exit=0 "
 expect skipped "$(build x=true y=true)" "exit=1 STALE unit=/w/target/release/deps/libx-1.rlib file=a.rs"
+
+# Must fire: a fresh unit with no dep-info, on trees that did not change.
+setup no_dep_info
+build x=false z=false >/dev/null
+expect no_dep_info "$(build x=true z=true)" "exit=1 STALE unit=/w/target/release/deps/libz-1.rlib dep_info=missing"
+
+# Must not fire, then must fire: a unit that reads a pallas file, fresh before and after that file changed.
+setup pallas_changed
+mkdir -p "$ROOT/scratch/pallas"
+git -C "$ROOT/scratch/pallas" init -q
+echo 1 >"$ROOT/scratch/pallas/p.rs"
+git -C "$ROOT/scratch/pallas" add -A
+git -C "$ROOT/scratch/pallas" -c user.name=t -c user.email=t@t commit -q -m t
+echo "/w/target/release/deps/libw-1.rlib: /w/scratch/pallas/p.rs" >"$ROOT/target/release/deps/w-1.d"
+build w=false >/dev/null
+expect pallas_unchanged "$(build w=true)" "exit=0 "
+echo 2 >"$ROOT/scratch/pallas/p.rs"
+git -C "$ROOT/scratch/pallas" -c user.name=t -c user.email=t@t commit -q -a -m t
+expect pallas_changed "$(build w=true)" "exit=1 STALE unit=/w/target/release/deps/libw-1.rlib file=/w/scratch/pallas/p.rs"
+
+# Must not fire, then must fire: a build script fresh before and after a file it reads changed, its dep-info named for the script and its unit hash.
+setup build_script
+script=/w/target/release/build/s-0f/build-script-build
+mkdir -p "$ROOT/target/release/build/s-0f"
+echo "$script: /w/scratch/dolos/a.rs" >"$ROOT/target/release/build/s-0f/build_script_build-0f.d"
+build "$script=false" >/dev/null
+expect build_script_unchanged "$(build "$script=true")" "exit=0 "
+change_a
+expect build_script_changed "$(build "$script=true")" "exit=1 STALE unit=$script file=a.rs"
 
 # Must hand an overlay build the overlay's target dir and keep its record there, and must leave the head's record and trees as they were.
 setup overlay_target

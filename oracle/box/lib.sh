@@ -1089,25 +1089,6 @@ changed_files() {
   fi | sed "s#^#$4#"
 }
 
-# The first dep-info file rustc wrote beside one of the output files of a unit, its outputs given comma separated.
-dep_info() {
-  echo "$1" | tr , '\n' | while read -r out; do
-    out=${out#/w/}
-    stem=$(basename "$out" | sed -E 's/^lib(.*)\.(rlib|rmeta|so|a)$/\1/')
-    # A build script's output is a link named build-script-<name> in a dir named after the package and the unit hash.
-    case $stem in
-      build-script-*)
-        dir=$(dirname "$out")
-        stem="$(echo "$stem" | tr - _)-${dir##*-}"
-        ;;
-    esac
-    if [ -f "$ROOT/$(dirname "$out")/$stem.d" ]; then
-      echo "$ROOT/$(dirname "$out")/$stem.d"
-      break
-    fi
-  done
-}
-
 # The output files of each unit a message file names, comma separated, one line per unit, only the fresh ones when $2 is fresh.
 units() {
   only=
@@ -1120,24 +1101,84 @@ units() {
 
 # One line for each unit cargo reports fresh whose dep-info names a file changed between the trees of its last build and the trees $2 and $3, or that has no dep-info.
 fresh_reading() {
-  units "$1" fresh | while read -r outs; do
-    built=$(awk -v outs="$outs" '$3 == outs { print $1, $2 }' "$BUILT" 2>/dev/null || true)
-    built=${built:-none none}
-    changed="$1.changed-$(echo "$built" | tr ' ' -)"
-    if [ ! -f "$changed" ]; then
+  units "$1" fresh >"$1.fresh"
+  fresh_built=$BUILT
+  if [ ! -f "$fresh_built" ]; then
+    fresh_built=/dev/null
+  fi
+  # The trees each fresh unit was last built from, none for a unit with no record, and the files changed since each pair of them.
+  awk 'NR == FNR { built[$3] = $1 " " $2; next } { print ($0 in built) ? built[$0] : "none none" }' "$fresh_built" "$1.fresh" |
+    sort -u | while read -r fresh_dolos fresh_pallas; do
       {
-        changed_files "$ROOT/$SCRATCH" "${built% *}" "$2" ""
-        changed_files "$ROOT/$PALLAS" "${built#* }" "$3" "/w/$PALLAS/"
-      } >"$changed"
-    fi
-    d=$(dep_info "$outs")
-    if [ -z "$d" ]; then
-      echo "STALE unit=$outs dep_info=missing"
-      continue
-    fi
-    tr ' ' '\n' <"$d" | sed "s/:\$//; s#^/w/$SCRATCH/##" | grep -x -F -f "$changed" | sort -u |
-      sed "s#^#STALE unit=$outs file=#"
-  done
+        changed_files "$ROOT/$SCRATCH" "$fresh_dolos" "$2" ""
+        changed_files "$ROOT/$PALLAS" "$fresh_pallas" "$3" "/w/$PALLAS/"
+      } >"$1.changed-$fresh_dolos-$fresh_pallas"
+    done
+  # The dep-info of a unit is the first file <stem>.d beside one of its outputs, the stem of a build script output build-script-<name> in a dir ending in its unit hash being build_script_<name>-<hash>.
+  awk -v root="$ROOT" -v scratch="/w/$SCRATCH/" -v changed="$1.changed-" '
+    function dep_info(outs, o, n, i, out, dir, stem, hash, path, line) {
+      n = split(outs, o, ",")
+      for (i = 1; i <= n; i++) {
+        out = o[i]
+        sub(/^\/w\//, "", out)
+        dir = out
+        if (!sub(/\/[^\/]*$/, "", dir)) dir = "."
+        stem = out
+        sub(/^.*\//, "", stem)
+        if (stem ~ /^lib.*\.(rlib|rmeta|so|a)$/) {
+          sub(/^lib/, "", stem)
+          sub(/\.(rlib|rmeta|so|a)$/, "", stem)
+        }
+        if (stem ~ /^build-script-/) {
+          gsub(/-/, "_", stem)
+          hash = dir
+          sub(/^.*-/, "", hash)
+          stem = stem "-" hash
+        }
+        path = root "/" dir "/" stem ".d"
+        if ((getline line < path) >= 0) {
+          close(path)
+          return path
+        }
+      }
+      return ""
+    }
+    NR == FNR { built[$3] = $1 "-" $2; next }
+    {
+      pair = ($0 in built) ? built[$0] : "none-none"
+      if (!(pair in loaded)) {
+        loaded[pair] = 1
+        file = changed pair
+        while ((getline line < file) > 0) is_changed[pair, line] = 1
+        close(file)
+      }
+      d = dep_info($0)
+      if (d == "") {
+        print "STALE unit=" $0 " dep_info=missing"
+        next
+      }
+      n = 0
+      split("", seen)
+      while ((getline line < d) > 0) {
+        count = split(line, words, " ")
+        for (w = 1; w <= count; w++) {
+          word = words[w]
+          sub(/:$/, "", word)
+          if (index(word, scratch) == 1) word = substr(word, length(scratch) + 1)
+          if (((pair, word) in is_changed) && !(word in seen)) {
+            seen[word] = 1
+            k = ++n
+            while (k > 1 && sorted[k - 1] > word) {
+              sorted[k] = sorted[k - 1]
+              k--
+            }
+            sorted[k] = word
+          }
+        }
+      }
+      close(d)
+      for (k = 1; k <= n; k++) print "STALE unit=" $0 " file=" sorted[k]
+    }' "$fresh_built" "$1.fresh"
 }
 
 # Records the trees $2 and $3 for each unit a message file names, keeping the record of every other unit.
