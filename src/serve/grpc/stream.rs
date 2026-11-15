@@ -11,14 +11,18 @@ impl ChainStream {
     /// The item is a `Result` because the stream would otherwise end the same
     /// way on a catch up that failed and on a cancellation, and a client has
     /// nothing else to read that tells the two apart.
-    pub fn start<D: Domain, C: CancelToken>(
+    pub async fn start<D: Domain, C: CancelToken>(
         domain: D,
         intersect: Vec<ChainPoint>,
         cancel: C,
     ) -> Result<Option<impl Stream<Item = Result<TipEvent, DomainError>> + 'static>, DomainError>
     {
-        let Some((mut crawler, intersected)) = ChainCrawler::<D>::start(&domain, &intersect)?
-        else {
+        let started =
+            super::on_blocking_pool(move || ChainCrawler::<D>::start(&domain, &intersect))
+                .await
+                .map_err(|e| DomainError::Internal(e.to_string()))??;
+
+        let Some((mut crawler, intersected)) = started else {
             return Ok(None);
         };
 
@@ -26,7 +30,24 @@ impl ChainStream {
             yield Ok(TipEvent::Mark(intersected.clone()));
 
             loop {
-                match crawler.next_block() {
+                let read = super::on_blocking_pool(move || {
+                    let next = crawler.next_block();
+                    (crawler, next)
+                })
+                .await;
+
+                let next = match read {
+                    Ok((returned, next)) => {
+                        crawler = returned;
+                        next
+                    }
+                    Err(error) => {
+                        yield Err(DomainError::Internal(error.to_string()));
+                        return;
+                    }
+                };
+
+                match next {
                     Ok(Some((point, block))) => yield Ok(TipEvent::Apply(point, block)),
                     Ok(None) => break,
                     Err(error) => {
@@ -92,6 +113,7 @@ mod tests {
             vec![chain_point.clone()],
             CancelTokenImpl(CancellationToken::new()),
         )
+        .await
         .unwrap()
         .expect("intersect point should be found");
 
@@ -143,6 +165,7 @@ mod tests {
             vec![start],
             CancelTokenImpl(CancellationToken::new()),
         )
+        .await
         .unwrap()
         .expect("the archive holds the start point");
 
@@ -159,6 +182,39 @@ mod tests {
         assert!(
             matches!(&last, Err(DomainError::ArchiveWalGap(_))),
             "{last:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_start_and_catch_up_read_the_stores_on_the_blocking_pool() {
+        use crate::serve::grpc::read_counting::ReadCountingDomain;
+
+        let toy = ToyDomain::new(None, None);
+        for i in 0..=30 {
+            use dolos_core::SyncExt;
+            toy.roll_forward(make_conway_block(i * 10).1).unwrap();
+        }
+        let domain = ReadCountingDomain::new(toy);
+
+        let s = ChainStream::start::<ReadCountingDomain, CancelTokenImpl>(
+            domain.clone(),
+            vec![make_conway_block(0).0],
+            CancelTokenImpl(CancellationToken::new()),
+        )
+        .await
+        .unwrap()
+        .expect("the wal holds the start point");
+        let start = domain.take();
+
+        pin_mut!(s);
+        for _ in 0..=30 {
+            s.next().await.unwrap().unwrap();
+        }
+        let catch_up = domain.take();
+
+        assert_eq!(
+            [("start", start), ("catch_up", catch_up)],
+            [("start", (0, true)), ("catch_up", (0, true))]
         );
     }
 
@@ -181,7 +237,8 @@ mod tests {
             domain,
             vec![unknown_point],
             CancelTokenImpl(CancellationToken::new()),
-        );
+        )
+        .await;
 
         assert!(result.unwrap().is_none());
     }

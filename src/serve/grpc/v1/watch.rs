@@ -12,6 +12,7 @@ use tonic::{Request, Response, Status};
 use super::criterion;
 use crate::prelude::*;
 use crate::serve::grpc::block_context::BlockContext;
+use crate::serve::grpc::run_blocking;
 use crate::serve::grpc::stream::ChainStream;
 
 fn outputs_match_address(
@@ -414,8 +415,8 @@ fn roll_to_watch_response<C: ChainReads>(
     context: &C,
     log: &TipEvent,
     request: &u5c::watch::WatchTxRequest,
-) -> impl Stream<Item = u5c::watch::WatchTxResponse> {
-    let responses: Box<dyn Iterator<Item = u5c::watch::WatchTxResponse> + Send> = match log {
+) -> Box<dyn Iterator<Item = u5c::watch::WatchTxResponse> + Send> {
+    match log {
         TipEvent::Apply(_, block) => {
             let mut txs = block_to_txs(block, context, request).peekable();
             if txs.peek().is_none() {
@@ -438,9 +439,7 @@ fn roll_to_watch_response<C: ChainReads>(
         ),
         // TODO: shouldn't we have a u5c event for origin?
         TipEvent::Mark(..) => Box::new(std::iter::empty()),
-    };
-
-    tokio_stream::iter(responses)
+    }
 }
 
 pub struct WatchServiceImpl<D, C>
@@ -486,6 +485,7 @@ where
 
         let stream =
             ChainStream::start::<D, _>(self.domain.clone(), intersect.clone(), self.cancel.clone())
+                .await
                 .map_err(|e| Status::internal(format!("failed to start chain stream: {e}")))?
                 .ok_or_else(|| {
                     Status::not_found(format!(
@@ -494,16 +494,27 @@ where
                 })?;
 
         let domain = self.domain.clone();
+        let request = std::sync::Arc::new(inner_req);
 
-        let stream = stream.flat_map(move |log| match log {
-            Ok(log) => roll_to_watch_response(&domain, &log, &inner_req)
-                .map(Ok)
-                .left_stream(),
-            Err(error) => futures_util::stream::once(async move {
-                Err(Status::internal(format!("chain stream failed: {error}")))
+        let stream = stream
+            .then(move |log| {
+                let domain = domain.clone();
+                let request = request.clone();
+                async move {
+                    let log =
+                        log.map_err(|e| Status::internal(format!("chain stream failed: {e}")))?;
+                    run_blocking(&domain, move |domain| {
+                        Ok(roll_to_watch_response(&domain, &log, &request))
+                    })
+                    .await
+                }
             })
-            .right_stream(),
-        });
+            .flat_map(|responses| match responses {
+                Ok(responses) => tokio_stream::iter(responses.map(Ok)).left_stream(),
+                Err(status) => {
+                    futures_util::stream::once(async move { Err(status) }).right_stream()
+                }
+            });
 
         Ok(Response::new(Box::pin(stream)))
     }
@@ -987,5 +998,60 @@ mod tests {
 
         assert!(outputs_match_address(&address, &outputs));
         assert!(outputs_match_asset(&asset, &token(1, b"coin")));
+    }
+
+    #[tokio::test]
+    async fn watch_tx_reads_the_stores_on_the_blocking_pool() {
+        use crate::serve::grpc::read_counting::ReadCountingDomain;
+        use dolos_core::{ArchiveStore as _, ArchiveWriter as _};
+        use pallas::interop::utxorpc::v1::spec::watch::watch_service_server::WatchService as _;
+
+        let (blocks, _, _) = dolos_testing::synthetic::build_synthetic_blocks(
+            dolos_testing::synthetic::SyntheticBlockConfig {
+                block_count: 3,
+                txs_per_block: 2,
+                ..Default::default()
+            },
+        );
+        let toy = dolos_testing::toy_domain::ToyDomain::new(None, None);
+        let writer = toy.archive().start_writer().unwrap();
+        let mut points = vec![];
+        for raw in &blocks {
+            let block = MultiEraBlock::decode(raw).unwrap();
+            let point = ChainPoint::Specific(block.slot(), block.hash());
+            writer.apply(&point, raw).unwrap();
+            points.push(point);
+        }
+        writer.commit().unwrap();
+
+        let domain = ReadCountingDomain::new(toy);
+        let service =
+            WatchServiceImpl::new(domain.clone(), crate::serve::CancelTokenImpl::default());
+
+        let mut stream = service
+            .watch_tx(Request::new(u5c::watch::WatchTxRequest {
+                intersect: vec![u5c::watch::BlockRef {
+                    slot: points[0].slot(),
+                    hash: points[0].hash().unwrap().to_vec().into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let start = domain.take();
+
+        let answer = stream.next().await.unwrap().unwrap();
+        let first_answer = domain.take();
+
+        assert!(matches!(
+            answer.action,
+            Some(u5c::watch::watch_tx_response::Action::Apply(_))
+        ));
+        assert_eq!(
+            [("start", start), ("first_answer", first_answer)],
+            [("start", (0, true)), ("first_answer", (0, true))]
+        );
     }
 }
