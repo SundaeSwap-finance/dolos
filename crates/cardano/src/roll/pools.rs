@@ -6,7 +6,7 @@ use pallas::ledger::traverse::{MultiEraBlock, MultiEraCert, MultiEraTx};
 use super::WorkDeltas;
 use crate::pallas_extras;
 use crate::roll::BlockVisitor;
-use crate::{MintedBlocksInc, PParamsSet, PoolDeRegistration, PoolRegistration};
+use crate::{MintedBlocksInc, PParamsSet, PoolDeRegistration, PoolRegistrationV2};
 
 #[derive(Default, Clone)]
 pub struct PoolStateVisitor {
@@ -52,7 +52,7 @@ impl BlockVisitor for PoolStateVisitor {
             let epoch = self.epoch.expect("value set in root");
             let deposit = self.deposit.expect("value set in root");
 
-            deltas.add_for_entity(PoolRegistration::new(
+            deltas.add_for_entity(PoolRegistrationV2::new(
                 cert.clone(),
                 block.slot(),
                 epoch,

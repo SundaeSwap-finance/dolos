@@ -1401,7 +1401,7 @@ mod tests {
     }
 
     /// The operator hash of the fixture's `PoolRegistration` certificate,
-    /// which `PoolRegistration::key` uses as the `pools` entity key.
+    /// which `PoolRegistrationV2::key` uses as the `pools` entity key.
     fn cert_pool_key() -> EntityKey {
         EntityKey::from([0x77u8; 28].as_slice())
     }

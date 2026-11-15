@@ -279,6 +279,7 @@ pub enum CardanoDelta {
     GovDistrBoundaryCredit(Box<GovDistrBoundaryCredit>),
     DirectDeposit(Box<DirectDeposit>),
     DRepVotesRemoved(Box<DRepVotesRemoved>),
+    PoolRegistrationV2(Box<PoolRegistrationV2>),
 }
 
 impl CardanoDelta {
@@ -320,7 +321,6 @@ delta_from!(ControlledAmountDec);
 delta_from!(StakeRegistration);
 delta_from!(StakeDelegation);
 delta_from!(StakeDeregistration);
-delta_from!(PoolRegistration);
 delta_from!(PoolDeRegistration);
 delta_from!(MintedBlocksInc);
 delta_from!(MintStatsUpdate);
@@ -346,6 +346,7 @@ mod legacy_delta_from {
     delta_from!(EpochTransition);
     delta_from!(EpochWrapUp);
     delta_from!(EpochWrapUpV2);
+    delta_from!(PoolRegistration);
 }
 delta_from!(DRepDelegatorDrop);
 delta_from!(PoolDelegatorRetire);
@@ -385,6 +386,7 @@ delta_from!(GovDistrBoundaryCredit);
 delta_from!(ProposalResolved);
 delta_from!(DirectDeposit);
 delta_from!(DRepVotesRemoved);
+delta_from!(PoolRegistrationV2);
 
 #[allow(deprecated)]
 impl dolos_core::EntityDelta for CardanoDelta {
@@ -451,6 +453,7 @@ impl dolos_core::EntityDelta for CardanoDelta {
             Self::TreasuryWithdrawal(x) => x.key(),
             Self::DirectDeposit(x) => x.key(),
             Self::DRepVotesRemoved(x) => x.key(),
+            Self::PoolRegistrationV2(x) => x.key(),
             Self::EnqueueMir(x) => x.key(),
             Self::DequeueMir(x) => x.key(),
             Self::DatumRefIncrement(x) => x.key(),
@@ -522,6 +525,7 @@ impl dolos_core::EntityDelta for CardanoDelta {
             Self::TreasuryWithdrawal(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::DirectDeposit(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::DRepVotesRemoved(x) => Self::downcast_apply(x.as_mut(), entity),
+            Self::PoolRegistrationV2(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::EnqueueMir(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::DequeueMir(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::DatumRefIncrement(x) => Self::downcast_apply(x.as_mut(), entity),
@@ -593,6 +597,7 @@ impl dolos_core::EntityDelta for CardanoDelta {
             Self::TreasuryWithdrawal(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::DirectDeposit(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::DRepVotesRemoved(x) => Self::downcast_undo(x.as_ref(), entity),
+            Self::PoolRegistrationV2(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::EnqueueMir(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::DequeueMir(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::DatumRefIncrement(x) => Self::downcast_undo(x.as_ref(), entity),

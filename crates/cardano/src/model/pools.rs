@@ -212,6 +212,7 @@ pub(crate) mod testing {
 
 // --- Deltas ---
 
+#[deprecated(note = "kept for WAL replay, emit `PoolRegistrationV2` instead")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolRegistration {
     pub(crate) cert: MultiEraPoolRegistration,
@@ -228,6 +229,7 @@ pub struct PoolRegistration {
     pub(crate) prev_retiring_epoch: Option<u64>,
 }
 
+#[allow(deprecated)]
 impl PoolRegistration {
     pub fn new(
         cert: MultiEraPoolRegistration,
@@ -247,6 +249,7 @@ impl PoolRegistration {
     }
 }
 
+#[allow(deprecated)]
 impl dolos_core::EntityDelta for PoolRegistration {
     type Entity = PoolState;
 
@@ -337,6 +340,117 @@ impl dolos_core::EntityDelta for PoolRegistration {
         let entity = entity.as_mut().expect("existing pool");
         entity.snapshot = self.prev_snapshot.clone().expect("apply captured snapshot");
         entity.retiring_epoch = self.prev_retiring_epoch;
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolRegistrationV2 {
+    pub(crate) cert: MultiEraPoolRegistration,
+    pub(crate) slot: BlockSlot,
+    pub(crate) epoch: Epoch,
+
+    // params
+    pub(crate) pool_deposit: u64,
+
+    // undo
+    pub(crate) prev: Option<PoolState>,
+}
+
+impl PoolRegistrationV2 {
+    pub fn new(
+        cert: MultiEraPoolRegistration,
+        slot: BlockSlot,
+        epoch: Epoch,
+        pool_deposit: u64,
+    ) -> Self {
+        Self {
+            cert,
+            slot,
+            epoch,
+            pool_deposit,
+            prev: None,
+        }
+    }
+}
+
+impl dolos_core::EntityDelta for PoolRegistrationV2 {
+    type Entity = PoolState;
+
+    fn key(&self) -> NsKey {
+        let key = self.cert.operator.as_slice();
+        NsKey::from((PoolState::NS, key))
+    }
+
+    fn apply(&mut self, entity: &mut Option<PoolState>) {
+        self.prev = entity.clone();
+
+        if let Some(entity) = entity {
+            debug!(
+                slot = self.slot,
+                operator = hex::encode(self.cert.operator),
+                "updating pool registration",
+            );
+
+            let is_currently_retired = entity.snapshot.unwrap_live().is_retired;
+
+            if is_currently_retired {
+                // A reaped pool registers anew. Blocks minted this epoch stay
+                // for its leader rewards.
+                let preserved_blocks = entity.snapshot.unwrap_live().blocks_minted;
+                entity.snapshot.replace(
+                    PoolSnapshot {
+                        is_retired: false,
+                        is_new: true,
+                        blocks_minted: preserved_blocks,
+                        params: self.cert.clone().into(),
+                    },
+                    self.epoch,
+                );
+
+                // A reaped pool pays the current deposit, while a registered
+                // pool keeps the deposit it paid.
+                entity.deposit = self.pool_deposit;
+            } else {
+                entity.snapshot.schedule(
+                    self.epoch,
+                    Some(PoolSnapshot {
+                        is_retired: false,
+                        is_new: false,
+                        blocks_minted: 0,
+                        params: self.cert.clone().into(),
+                    }),
+                );
+            }
+
+            entity.retiring_epoch = None;
+        } else {
+            debug!(
+                slot = self.slot,
+                operator = hex::encode(self.cert.operator),
+                "applying pool registration",
+            );
+
+            *entity = Some(PoolState {
+                register_slot: self.slot,
+                operator: self.cert.operator,
+                snapshot: EpochValue::with_live(
+                    self.epoch,
+                    PoolSnapshot {
+                        is_retired: false,
+                        blocks_minted: 0,
+                        params: self.cert.clone().into(),
+                        is_new: true,
+                    },
+                ),
+                blocks_minted_total: 0,
+                retiring_epoch: None,
+                deposit: self.pool_deposit,
+            });
+        }
+    }
+
+    fn undo(&self, entity: &mut Option<PoolState>) {
+        *entity = self.prev.clone();
     }
 }
 
@@ -530,6 +644,7 @@ mod prop_tests {
     use proptest::prelude::*;
 
     prop_compose! {
+        #[allow(deprecated)]
         fn any_pool_registration()(
             cert in any_multi_era_pool_registration(),
             slot in root::any_slot(),
@@ -537,6 +652,17 @@ mod prop_tests {
             pool_deposit in root::any_lovelace(),
         ) -> PoolRegistration {
             PoolRegistration::new(cert, slot, epoch, pool_deposit)
+        }
+    }
+
+    prop_compose! {
+        fn any_pool_registration_v2()(
+            cert in any_multi_era_pool_registration(),
+            slot in root::any_slot(),
+            epoch in root::any_epoch(),
+            pool_deposit in root::any_lovelace(),
+        ) -> PoolRegistrationV2 {
+            PoolRegistrationV2::new(cert, slot, epoch, pool_deposit)
         }
     }
 
@@ -571,6 +697,7 @@ mod prop_tests {
 
     proptest! {
         #[test]
+        #[allow(deprecated)]
         fn pool_registration_roundtrip(
             entity in prop::option::of(any_pool_state()),
             mut delta in any_pool_registration(),
@@ -578,6 +705,17 @@ mod prop_tests {
             // For existing pools `apply` schedules or replaces the snapshot,
             // both of which assert alignment under `strict`, so the delta
             // carries the pool's epoch.
+            if let Some(entity) = &entity {
+                delta.epoch = entity.snapshot.epoch().expect("any_pool_state fills a concrete epoch");
+            }
+            assert_delta_roundtrip(entity, delta);
+        }
+
+        #[test]
+        fn pool_registration_v2_roundtrip(
+            entity in prop::option::of(any_pool_state()),
+            mut delta in any_pool_registration_v2(),
+        ) {
             if let Some(entity) = &entity {
                 delta.epoch = entity.snapshot.epoch().expect("any_pool_state fills a concrete epoch");
             }
@@ -617,6 +755,41 @@ mod prop_tests {
 
             prop_assert_eq!(retired.retiring_epoch, Some(epoch));
             prop_assert_eq!(retired.deposit, deposit);
+        }
+
+        #[test]
+        fn a_registered_pool_registering_again_keeps_its_deposit(
+            mut entity in any_pool_state(),
+            mut delta in any_pool_registration_v2(),
+        ) {
+            use dolos_core::EntityDelta as _;
+
+            entity.snapshot.unwrap_live_mut().is_retired = false;
+            delta.epoch = entity.snapshot.epoch().expect("any_pool_state fills a concrete epoch");
+            prop_assume!(delta.pool_deposit != entity.deposit);
+
+            let deposit = entity.deposit;
+            let mut state = Some(entity);
+            delta.apply(&mut state);
+
+            prop_assert_eq!(state.expect("the pool stays registered").deposit, deposit);
+        }
+
+        #[test]
+        fn a_reaped_pool_registering_again_takes_the_current_deposit(
+            mut entity in any_pool_state(),
+            mut delta in any_pool_registration_v2(),
+        ) {
+            use dolos_core::EntityDelta as _;
+
+            entity.snapshot.unwrap_live_mut().is_retired = true;
+            delta.epoch = entity.snapshot.epoch().expect("any_pool_state fills a concrete epoch");
+            prop_assume!(delta.pool_deposit != entity.deposit);
+
+            let mut state = Some(entity);
+            delta.apply(&mut state);
+
+            prop_assert_eq!(state.expect("the pool is registered again").deposit, delta.pool_deposit);
         }
 
         #[test]

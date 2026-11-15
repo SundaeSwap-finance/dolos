@@ -65,6 +65,7 @@ fixes = [
   { subject = "fix(cardano): map a coins per byte update once", arm = "coins-per-byte-mapped-twice" },
   { subject = "fix(cardano): keep a retiring pool deposit", arm = "retiring-pool-deposit-zeroed" },
   { subject = "fix(cardano): drop an unregistered DRep's votes", arm = "drep-votes-kept" },
+  { subject = "fix(cardano): charge a reaped pool the new deposit", exclude = "follower" },
 ]
 
 [pallas]

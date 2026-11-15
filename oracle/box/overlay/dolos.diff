@@ -83,10 +83,10 @@ index d91af359..cb331e0b 100644
      }
  
 diff --git a/crates/cardano/src/model/pools.rs b/crates/cardano/src/model/pools.rs
-index d31e4e79..b0e9ea18 100644
+index 54098690..6956efd0 100644
 --- a/crates/cardano/src/model/pools.rs
 +++ b/crates/cardano/src/model/pools.rs
-@@ -430,6 +430,9 @@ impl dolos_core::EntityDelta for PoolDeRegistration {
+@@ -544,6 +544,9 @@ impl dolos_core::EntityDelta for PoolDeRegistration {
  
              // apply changes
              entity.retiring_epoch = Some(self.epoch);
