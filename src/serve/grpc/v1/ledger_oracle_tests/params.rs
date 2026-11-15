@@ -122,6 +122,17 @@ fn cost_models(c: &Canon) -> Vec<P> {
             "PlutusV1" => out.push(P::CostModelsPlutusV1(costs(model))),
             "PlutusV2" => out.push(P::CostModelsPlutusV2(costs(model))),
             "PlutusV3" => out.push(P::CostModelsPlutusV3(costs(model))),
+            "Unknown" => {
+                let Canon::Map(by_index) = model else {
+                    panic!("PARAMS expected unknown cost models, found {model}")
+                };
+                for (index, model) in by_index {
+                    let index = index.parse().unwrap_or_else(|_| {
+                        panic!("PARAMS unmapped key=costModels.Unknown.{index}")
+                    });
+                    unknown.insert(index, costs(model));
+                }
+            }
             other => {
                 let index = LANGUAGES
                     .iter()
@@ -691,6 +702,35 @@ mod tests {
             seed_values(&PParams(map)).err().as_deref(),
             Some("PARAMS unmapped key=notAParameter")
         );
+    }
+
+    #[test]
+    fn an_unknown_language_cost_model_seeds_by_its_index() {
+        let mut map = serde_json::Map::new();
+        let models = serde_json::json!({"PlutusV3": [4], "Unknown": {"9": [1, 2, 3]}});
+        map.insert("costModels".into(), models);
+        let seeded = seed_values(&PParams(map)).unwrap();
+        let unknown = seeded.iter().find_map(|p| match p {
+            P::CostModelsUnknown(unknown) => Some(unknown.clone()),
+            _ => None,
+        });
+        assert_eq!(unknown, Some(BTreeMap::from([(9, vec![1, 2, 3])])));
+    }
+
+    /// The must-not case. A parameter set without a model for a language
+    /// outside the named three seeds an empty map, which clears the model
+    /// genesis gave.
+    #[test]
+    fn cost_models_of_known_languages_only_seed_an_empty_unknown_entry() {
+        let mut map = serde_json::Map::new();
+        let models = serde_json::json!({"PlutusV3": [4], "Unknown": {}});
+        map.insert("costModels".into(), models);
+        let seeded = seed_values(&PParams(map)).unwrap();
+        let expected = vec![
+            P::CostModelsPlutusV3(vec![4]),
+            P::CostModelsUnknown(BTreeMap::new()),
+        ];
+        assert_eq!(seeded, expected);
     }
 
     /// The thresholds named by `names`, each the ratio of its position in the

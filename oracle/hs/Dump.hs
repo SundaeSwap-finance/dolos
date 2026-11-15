@@ -250,7 +250,12 @@ recordLine n prev edited g (TRC (env, st, stAnn)) res =
       epoch = ledgerEpochNo env
       valid = tx ^. isPhase2ValidTxL == Phase2Valid
       bytes = fromMaybe (serialize' (eraProtVerHigh @E) tx) edited
-      accountsJson s = A.toJSON (s ^. lsCertStateL . certDStateL . accountsL)
+      -- Each account without the deprecated "reward" key, which repeats "balance".
+      accountsJson s = case A.toJSON (s ^. lsCertStateL . certDStateL . accountsL) of
+        A.Object o -> A.Object (fmap withoutReward o)
+        other -> other
+      withoutReward (A.Object a) = A.Object (KM.delete "reward" a)
+      withoutReward other = other
       refused shown names =
         A.object ["refused" A..= A.object ["failures" A..= take 300 shown, "failure_names" A..= names]]
       decoded = decodeTx (pvMajor (ledgerPp env ^. ppProtocolVersionL)) bytes
@@ -266,6 +271,8 @@ recordLine n prev edited g (TRC (env, st, stAnn)) res =
                         [ "consumed" A..= consumed pre p
                         , "produced" A..= pairs (produced pre p)
                         , "accounts_post" A..= accountsJson st'
+                        , "certs_post" A..= certsJson st'
+                        , "gov_post" A..= govJson st'
                         ]
                   ]
               , Just st'

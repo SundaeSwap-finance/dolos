@@ -15,16 +15,16 @@ use crate::{
 };
 
 /// The sha256 of the decompressed Imp spec corpus.
-pub const IC_SHA256: &str = "38eb868092373a3d10f9f0da913216115b5ce00459993b435768b2e6274575d6";
+pub const IC_SHA256: &str = "ab78464cdff45e6b63c45756aec73c18761c6fed5a06f72beb0820519192b248";
 
 /// The sha256 of the decompressed supplement corpus.
-pub const SUPP_SHA256: &str = "9b2c7e5715c7c633bd394c3b29aa76704f226d76bdee225d610bd9e893af4dd3";
+pub const SUPP_SHA256: &str = "44bc823198c663f1c92540b26101c4060caa2c8378cf0e6c7c2be9101e54e59b";
 
 /// The sha256 of the decompressed phase one corpus.
-pub const P1_SHA256: &str = "861611cc08a7ff09d45e1bdfda556ab8c8a0bed534df8a16ed228a74481539a2";
+pub const P1_SHA256: &str = "5cf1c1e4dd11678aecc16017a71f4652b8d3c7230533259c1af5d943860ed8ba";
 
 /// The sha256 of the decompressed mutant corpus.
-pub const MUT_SHA256: &str = "c1bc44e941219581185bf6e2010ba4b83dad021e14d2050eda4566e84cf6e80c";
+pub const MUT_SHA256: &str = "a61ad18409cf71fb7b6b8f53d4867954181ee83a1da4f9b617903c9d4a45d398";
 
 const IC_GZ: &[u8] = include_bytes!("../../../test_data/ledger-oracle/ic.jsonl.gz");
 const SUPP_GZ: &[u8] = include_bytes!("../../../test_data/ledger-oracle/supp.jsonl.gz");
@@ -326,19 +326,19 @@ mod tests {
     fn committed_corpora_load_into_their_runs() {
         assert_eq!(
             load(CorpusKind::Ic).unwrap().to_string(),
-            "CORPUS ic sha=38eb868092373a3d records=9853 runs=892 kept_records=9853"
+            "CORPUS ic sha=ab78464cdff45e6b records=9853 runs=892 kept_records=9853"
         );
         assert_eq!(
             load(CorpusKind::Supp).unwrap().to_string(),
-            "CORPUS supp sha=9b2c7e5715c7c633 records=2197 runs=724 kept_records=2197"
+            "CORPUS supp sha=44bc823198c663f1 records=2197 runs=724 kept_records=2197"
         );
         assert_eq!(
             load(CorpusKind::P1).unwrap().to_string(),
-            "CORPUS p1 sha=861611cc08a7ff09 records=65 runs=22 kept_records=65"
+            "CORPUS p1 sha=5cf1c1e4dd11678a records=65 runs=22 kept_records=65"
         );
         assert_eq!(
             load(CorpusKind::Mut).unwrap().to_string(),
-            "CORPUS mut sha=c1bc44e941219581 records=1392 runs=1392 kept_records=1392"
+            "CORPUS mut sha=a61ad18409cf71fb records=1392 runs=1392 kept_records=1392"
         );
     }
 
@@ -350,7 +350,7 @@ mod tests {
         let e = verify(CorpusKind::Ic, &bytes, IC_SHA256).unwrap_err();
         assert!(e
             .to_string()
-            .starts_with("CORPUS ic sha mismatch expected=38eb8680"));
+            .starts_with("CORPUS ic sha mismatch expected=ab78464c"));
     }
 
     #[test]

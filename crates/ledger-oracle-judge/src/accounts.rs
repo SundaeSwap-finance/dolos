@@ -119,7 +119,6 @@ pub struct LedgerAccount {
     pub deposit: u64,
     #[serde(deserialize_with = "parsed_option")]
     pub drep: Option<DRep>,
-    pub reward: u64,
     #[serde(deserialize_with = "pool_option")]
     pub spool: Option<[u8; 28]>,
 }
@@ -131,6 +130,7 @@ pub type LedgerAccounts = BTreeMap<Credential, LedgerAccount>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {
     pub balance: u64,
+    pub deposit: Option<u64>,
     pub pool: Option<[u8; 28]>,
     pub drep: Option<DRep>,
 }
@@ -139,6 +139,7 @@ impl From<&LedgerAccount> for Account {
     fn from(a: &LedgerAccount) -> Self {
         Account {
             balance: a.balance,
+            deposit: Some(a.deposit),
             pool: a.spool,
             drep: a.drep,
         }
@@ -148,6 +149,10 @@ impl From<&LedgerAccount> for Account {
 impl fmt::Display for Account {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "balance={}", self.balance)?;
+        match &self.deposit {
+            Some(deposit) => write!(f, ",deposit={deposit}")?,
+            None => write!(f, ",deposit=none")?,
+        }
         match &self.pool {
             Some(pool) => write!(f, ",pool={}", hex::encode(pool))?,
             None => write!(f, ",pool=none")?,
@@ -196,11 +201,13 @@ fn cells(ledger: Option<&Account>, dolos: Option<&Account>) -> Vec<CellKey> {
     };
     let Account {
         balance,
+        deposit,
         pool,
         drep,
     } = ledger;
     let fields = [
         ("balance", *balance != dolos.balance),
+        ("deposit", *deposit != dolos.deposit),
         ("pool", *pool != dolos.pool),
         ("drep", *drep != dolos.drep),
     ];
@@ -223,7 +230,7 @@ mod tests {
 
     fn account(balance: u64) -> String {
         format!(
-            r#"{{"keyHash-{KEY}": {{"balance": {balance}, "deposit": 2000000, "drep": "drep-keyHash-{KEY}", "reward": {balance}, "spool": "{KEY}"}}}}"#
+            r#"{{"keyHash-{KEY}": {{"balance": {balance}, "deposit": 2000000, "drep": "drep-keyHash-{KEY}", "spool": "{KEY}"}}}}"#
         )
     }
 
@@ -234,8 +241,12 @@ mod tests {
         assert_eq!(credential.to_string(), format!("keyHash-{KEY}"));
         assert_eq!(account.spool, Some(hash28(KEY).unwrap()));
         assert_eq!(account.drep, Some(DRep::Key(hash28(KEY).unwrap())));
-        let bad = r#"{"pointer-00": {"balance": 0, "deposit": 0, "drep": null, "reward": 0, "spool": null}}"#;
+        let bad = r#"{"pointer-00": {"balance": 0, "deposit": 0, "drep": null, "spool": null}}"#;
         assert!(serde_json::from_str::<LedgerAccounts>(bad).is_err());
+        let alias = format!(
+            r#"{{"keyHash-{KEY}": {{"balance": 0, "deposit": 0, "drep": null, "reward": 0, "spool": null}}}}"#
+        );
+        assert!(serde_json::from_str::<LedgerAccounts>(&alias).is_err());
     }
 
     #[test]
@@ -261,14 +272,14 @@ mod tests {
         assert_eq!(
             tally.disagree,
             vec![Finding::new(id, vec![CellKey::new(Axis::Answer, "differ"), CellKey::new(Axis::Field, "balance")], format!(
-                "account=keyHash-{KEY} ledger=balance=5,pool={KEY},drep-keyHash-{KEY} dolos=balance=6,pool={KEY},drep-keyHash-{KEY}"
+                "account=keyHash-{KEY} ledger=balance=5,deposit=2000000,pool={KEY},drep-keyHash-{KEY} dolos=balance=6,deposit=2000000,pool={KEY},drep-keyHash-{KEY}"
             ))]
         );
 
         let mut tally = Tally::default();
         compare(id, &LedgerAccounts::new(), &same, &mut tally);
         assert_eq!(tally.compared, 1);
-        assert!(tally.disagree[0].detail.ends_with(" ledger=none dolos=balance=5,pool=1cca48da7f291b81a09ddc0e132fce0c5a1ef3410e5a70f9fcd5f777,drep-keyHash-1cca48da7f291b81a09ddc0e132fce0c5a1ef3410e5a70f9fcd5f777"));
+        assert!(tally.disagree[0].detail.ends_with(" ledger=none dolos=balance=5,deposit=2000000,pool=1cca48da7f291b81a09ddc0e132fce0c5a1ef3410e5a70f9fcd5f777,drep-keyHash-1cca48da7f291b81a09ddc0e132fce0c5a1ef3410e5a70f9fcd5f777"));
     }
 
     #[test]
@@ -294,6 +305,10 @@ mod tests {
         assert_eq!(
             cells(&ledger, &off(|a| a.balance += 1)),
             [["answer:differ", "field:balance"]]
+        );
+        assert_eq!(
+            cells(&ledger, &off(|a| a.deposit = None)),
+            [["answer:differ", "field:deposit"]]
         );
         assert_eq!(
             cells(&ledger, &off(|a| a.pool = None)),

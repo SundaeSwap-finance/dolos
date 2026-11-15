@@ -280,6 +280,7 @@ fn judged_part(uncompared: &[&str]) -> Judged {
     let state = &mut judged.state;
     let tallies = [
         ("accounts", &mut state.accounts),
+        ("ledger_state", &mut state.ledger_state.tally),
         ("undo", &mut state.undo),
         ("script", &mut state.script),
         ("plutus_data", &mut state.plutus_data),
@@ -874,10 +875,16 @@ async fn validate_run<'r>(
             judged.insert(id);
         }
         let accepted = records.iter().filter_map(|r| match &r.outcome {
-            LedgerOutcome::Accepted { accounts_post, .. } => Some((r, accounts_post)),
+            LedgerOutcome::Accepted {
+                accounts_post,
+                certs_post,
+                gov_post,
+                ..
+            } => Some((r, accounts_post, (&**certs_post, &**gov_post))),
             LedgerOutcome::Refused { .. } => None,
         });
-        let Some((last, accounts_post)) = accepted.clone().next_back() else {
+        let Some((last, accounts_post, (certs_post, gov_post))) = accepted.clone().next_back()
+        else {
             blocks.push(GroupBlock::Unmade(records));
             continue;
         };
@@ -943,6 +950,8 @@ async fn validate_run<'r>(
         let served = dolos_accounts(group.domain());
         let checks = account_checks.entry(id_of(last)).or_default();
         accounts::compare(id_of(last), accounts_post, &served, &mut checks.0);
+        let tally = &mut state.ledger_state;
+        ledger_state::compare(group.domain(), id_of(last), certs_post, gov_post, tally);
     }
     (blocks, account_checks)
 }
@@ -1058,6 +1067,7 @@ fn dolos_accounts(domain: &DomainAdapter) -> BTreeMap<Credential, Account> {
             };
             let served = Account {
                 balance: account.stake.live().map_or(0, |s| s.withdrawable()),
+                deposit: account.deposit,
                 pool: account.delegated_pool_live().map(|pool| **pool),
                 drep,
             };
@@ -2044,6 +2054,14 @@ async fn judge_run(
     let served = dolos_accounts(&seeded.domain);
     let checks = account_checks.entry(id).or_default();
     accounts::compare(id, &first.accounts_pre, &served, &mut checks.0);
+    let (certs, gov) = (&first.certs_pre, &first.gov_pre);
+    ledger_state::compare(
+        &seeded.domain,
+        id,
+        certs,
+        gov,
+        &mut judged.state.ledger_state,
+    );
     let expected = (edits.expected_params)(run.pparams());
     for (version, served) in serve::read_params(&seeded.domain).await {
         let tally = judged.state.params.at(ParamsRoute::ReadParams, version);
@@ -2262,6 +2280,7 @@ fn print_views(all: &Judged, manifests: &Manifests, whole: bool, out: &mut judge
     }
     println!("{}", all.eval);
     println!("{}", all.eval.deep_line(&eval::eval_fields()));
+    println!("{}", all.state.ledger_state.deep_line());
     println!("{}", all.context);
     print_candidates(all);
 }

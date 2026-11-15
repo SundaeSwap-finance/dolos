@@ -2524,14 +2524,6 @@ mod tests {
         }
     }
 
-    fn accepted() -> LedgerOutcome {
-        LedgerOutcome::Accepted {
-            consumed: vec![],
-            produced: vec![],
-            accounts_post: Default::default(),
-        }
-    }
-
     fn none_evaluated() -> Result<DolosAnswer, Malformed> {
         Ok(DolosAnswer::Evaluated(BTreeMap::new()))
     }
@@ -2544,7 +2536,7 @@ mod tests {
     fn an_empty_evaluation_agrees_with_an_acceptance_and_key_witness_or_fee_leaves() {
         use LedgerLeaf as L;
         let cases = [
-            accepted(),
+            LedgerOutcome::accepted_empty(),
             refused_by(&[L::MissingVKeyWitnessesUTXOW]),
             refused_by(&[L::SubInvalidWitnessesUTXOW, L::SubMissingVKeyWitnessesUTXOW]),
             refused_by(&[L::FeeTooSmallUTxO, L::ExUnitsTooBigUTxO]),

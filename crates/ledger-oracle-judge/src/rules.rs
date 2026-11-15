@@ -428,7 +428,6 @@ impl Rules {
 mod tests {
     use super::*;
     use crate::{
-        accounts::LedgerAccounts,
         coverage,
         record::{CorpusKind, FailurePath, NonEmpty},
         refusal::{DolosClass, RefusalClass},
@@ -460,14 +459,6 @@ unsupported[witness fields] | unrepresentable because the native validator does 
         LedgerOutcome::Refused {
             failures: String::new(),
             failure_names: NonEmpty::of(paths).unwrap(),
-        }
-    }
-
-    fn accepted() -> LedgerOutcome {
-        LedgerOutcome::Accepted {
-            consumed: Vec::new(),
-            produced: Vec::new(),
-            accounts_post: LedgerAccounts::default(),
         }
     }
 
@@ -518,7 +509,13 @@ unsupported[witness fields] | unrepresentable because the native validator does 
             &unsupported,
             &mut tally,
         );
-        judge(rules, 5, &accepted(), &DolosVerdict::Accepted, &mut tally);
+        judge(
+            rules,
+            5,
+            &LedgerOutcome::accepted_empty(),
+            &DolosVerdict::Accepted,
+            &mut tally,
+        );
         tally
     }
 
@@ -624,7 +621,13 @@ unsupported[witness fields] | unrepresentable because the native validator does 
         let rules = rules(TABLE);
         let mut tally = every_side(&rules);
         let evaluation = DolosVerdict::Phase2Unsupported(LABEL.to_string());
-        judge(&rules, 8, &accepted(), &evaluation, &mut tally);
+        judge(
+            &rules,
+            8,
+            &LedgerOutcome::accepted_empty(),
+            &evaluation,
+            &mut tally,
+        );
         let (lines, failing) = bar(&rules, &tally, false);
         assert_eq!(failing, Vec::<String>::new(), "{lines:?}");
     }
@@ -634,7 +637,13 @@ unsupported[witness fields] | unrepresentable because the native validator does 
         let rules = rules(TABLE);
         let mut tally = every_side(&rules);
         let feature = DolosVerdict::Unsupported(LABEL.to_string());
-        judge(&rules, 8, &accepted(), &feature, &mut tally);
+        judge(
+            &rules,
+            8,
+            &LedgerOutcome::accepted_empty(),
+            &feature,
+            &mut tally,
+        );
         let (_, failing) = bar(&rules, &tally, false);
         assert_eq!(
             failing,
@@ -739,7 +748,7 @@ unsupported[witness fields] | unrepresentable because the native validator does 
             ledger_answer(&ledger),
             "refused[DepositIncorrectDELEG,ValueNotConservedUTxO]"
         );
-        assert_eq!(ledger_answer(&accepted()), "accepted");
+        assert_eq!(ledger_answer(&LedgerOutcome::accepted_empty()), "accepted");
     }
 
     const EXCLUDED: &str = "\
@@ -802,7 +811,13 @@ refused[DijkstraInvalidMetadata] | leaves DecoderErrorDeserialiseFailure | reads
     fn a_record_on_an_excluded_side_fails_the_coverage_table_and_none_passes_it() {
         let rules = rules(EXCLUDED);
         let mut tally = RuleTally::default();
-        judge(&rules, 1, &accepted(), &DolosVerdict::Accepted, &mut tally);
+        judge(
+            &rules,
+            1,
+            &LedgerOutcome::accepted_empty(),
+            &DolosVerdict::Accepted,
+            &mut tally,
+        );
         let lines = covered(&rules, &tally, 0);
         assert_eq!(lines.last().unwrap(), "coverage=PASS", "{lines:#?}");
         assert!(lines.contains(

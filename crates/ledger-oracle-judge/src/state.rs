@@ -1,6 +1,6 @@
 //! The pool, vote and governance state the ledger ran a record from.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use serde::{de::Error as _, Deserialize, Deserializer};
 
@@ -11,8 +11,20 @@ use crate::{
 };
 
 /// A fixed length hash written as a hex string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Hex<const N: usize>(pub [u8; N]);
+
+impl<const N: usize> fmt::Display for Hex<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&hex::encode(self.0))
+    }
+}
+
+impl<const N: usize> fmt::Debug for Hex<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
 
 impl<'de, const N: usize> Deserialize<'de> for Hex<N> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -88,12 +100,16 @@ pub struct RewardAccount {
     pub network: String,
 }
 
+/// A ledger field Dolos does not keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotHeld;
+
 /// A registered pool's BLS key and the epoch it was registered in.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BlsKey {
+pub struct BlsKey<E = u64> {
     pub bks_key: BlsKeyPair,
-    pub bks_registered_in: u64,
+    pub bks_registered_in: E,
 }
 
 /// A BLS public key with its proof of possession.
@@ -107,9 +123,9 @@ pub struct BlsKeyPair {
 /// A registered pool as the ledger holds it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct StakePool {
+pub struct StakePool<E = u64> {
     pub sps_account_id: CredentialObject,
-    pub sps_bls_key: Option<BlsKey>,
+    pub sps_bls_key: Option<BlsKey<E>>,
     pub sps_cost: u64,
     pub sps_delegators: Vec<CredentialObject>,
     pub sps_deposit: u64,
@@ -126,7 +142,7 @@ pub struct StakePool {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PoolParams {
     pub account_address: RewardAccount,
-    pub bls_key: Option<Unseen>,
+    pub bls_key: Option<BlsKeyPair>,
     pub cost: u64,
     pub margin: Fraction,
     pub metadata: Option<Unseen>,
@@ -140,10 +156,10 @@ pub struct PoolParams {
 /// The pools the ledger holds.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Pools {
+pub struct Pools<E = u64> {
     pub future_stake_pool_params: BTreeMap<Hex<28>, PoolParams>,
     pub retiring: BTreeMap<Hex<28>, u64>,
-    pub stake_pools: BTreeMap<Hex<28>, StakePool>,
+    pub stake_pools: BTreeMap<Hex<28>, StakePool<E>>,
     pub vrf_key_hashes: BTreeMap<Hex<32>, u64>,
 }
 
@@ -184,8 +200,8 @@ pub struct Votes {
 /// The certificate state the ledger ran a record from, without its accounts.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Certs {
-    pub pstate: Pools,
+pub struct Certs<E = u64> {
+    pub pstate: Pools<E>,
     pub vstate: Votes,
 }
 
@@ -217,10 +233,10 @@ pub struct Constitution {
 /// A governance action.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "tag", content = "contents", deny_unknown_fields)]
-pub enum GovAction {
-    ParameterChange(Option<ActionId>, PParams, Option<Hex<28>>),
+pub enum GovAction<P = Option<Hex<28>>, U = PParams> {
+    ParameterChange(Option<ActionId>, U, P),
     HardForkInitiation(Option<ActionId>, ProtocolVersion),
-    TreasuryWithdrawals(Vec<(RewardAccount, u64)>, Option<Hex<28>>),
+    TreasuryWithdrawals(Vec<(RewardAccount, u64)>, P),
     NoConfidence(Option<ActionId>),
     UpdateCommittee(
         Option<ActionId>,
@@ -243,23 +259,23 @@ pub enum Vote {
 /// What a proposal asks for.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProposalProcedure {
+pub struct ProposalProcedure<P = Option<Hex<28>>, U = PParams> {
     pub anchor: Anchor,
     pub deposit: u64,
-    pub gov_action: GovAction,
+    pub gov_action: GovAction<P, U>,
     pub return_addr: RewardAccount,
 }
 
 /// A live proposal with the votes cast on it.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Proposal {
+pub struct Proposal<P = Option<Hex<28>>, U = PParams> {
     pub action_id: ActionId,
     pub committee_votes: BTreeMap<Credential, Vote>,
     #[serde(rename = "dRepVotes")]
     pub drep_votes: BTreeMap<Credential, Vote>,
     pub expires_after: u64,
-    pub proposal_procedure: ProposalProcedure,
+    pub proposal_procedure: ProposalProcedure<P, U>,
     pub proposed_in: u64,
     pub stake_pool_votes: BTreeMap<Hex<28>, Vote>,
 }
@@ -285,11 +301,53 @@ pub struct Committee {
 /// The governance state the ledger ran a record from.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Gov {
+pub struct Gov<P = Option<Hex<28>>, U = PParams> {
     pub committee: Option<Committee>,
     pub constitution: Constitution,
-    pub proposals: Vec<Proposal>,
+    pub proposals: Vec<Proposal<P, U>>,
     pub roots: Roots,
+}
+
+/// Certificate state with no pools, DReps or committee authorizations.
+#[cfg(test)]
+pub fn empty_certs<E>() -> Certs<E> {
+    Certs {
+        pstate: Pools {
+            future_stake_pool_params: BTreeMap::new(),
+            retiring: BTreeMap::new(),
+            stake_pools: BTreeMap::new(),
+            vrf_key_hashes: BTreeMap::new(),
+        },
+        vstate: Votes {
+            committee_state: CommitteeState {
+                cs_committee_creds: BTreeMap::new(),
+            },
+            dreps: BTreeMap::new(),
+            num_dormant_epochs: 0,
+        },
+    }
+}
+
+/// Governance state with no committee, proposals or enacted roots.
+#[cfg(test)]
+pub fn empty_gov<P, U>() -> Gov<P, U> {
+    Gov {
+        committee: None,
+        constitution: Constitution {
+            anchor: Anchor {
+                data_hash: Hex([0; 32]),
+                url: String::new(),
+            },
+            script: None,
+        },
+        proposals: Vec::new(),
+        roots: Roots {
+            committee: None,
+            constitution: None,
+            hard_fork: None,
+            pparam_update: None,
+        },
+    }
 }
 
 #[cfg(test)]

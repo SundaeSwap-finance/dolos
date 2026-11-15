@@ -314,6 +314,8 @@ pub enum LedgerOutcome {
         consumed: Vec<TxIn>,
         produced: Vec<UtxoEntry>,
         accounts_post: LedgerAccounts,
+        certs_post: Box<Certs>,
+        gov_post: Box<Gov>,
     },
     Refused {
         failures: String,
@@ -322,6 +324,19 @@ pub enum LedgerOutcome {
 }
 
 impl LedgerOutcome {
+    /// An accepted outcome that spends and makes nothing and leaves empty
+    /// accounts, certificate and governance state.
+    #[cfg(test)]
+    pub fn accepted_empty() -> LedgerOutcome {
+        LedgerOutcome::Accepted {
+            consumed: Vec::new(),
+            produced: Vec::new(),
+            accounts_post: LedgerAccounts::new(),
+            certs_post: Box::new(crate::state::empty_certs()),
+            gov_post: Box::new(crate::state::empty_gov()),
+        }
+    }
+
     /// Whether the ledger's decoder refused the transaction's bytes.
     pub fn undecoded(&self) -> bool {
         match self {

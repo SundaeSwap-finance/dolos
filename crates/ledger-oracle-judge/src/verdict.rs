@@ -696,14 +696,6 @@ mod tests {
         assert_eq!(merged, part(0, "first"));
     }
 
-    fn accepted() -> LedgerOutcome {
-        LedgerOutcome::Accepted {
-            consumed: vec![],
-            produced: vec![],
-            accounts_post: Default::default(),
-        }
-    }
-
     fn path(leaf: &str) -> FailurePath {
         FailurePath {
             leaf: LedgerLeaf::of_name(leaf).unwrap(),
@@ -802,7 +794,7 @@ mod tests {
 
     #[test]
     fn a_refusal_of_a_variant_the_table_names_is_never_unknown() {
-        for ledger in [accepted(), refused("BadInputsUTxO")] {
+        for ledger in [LedgerOutcome::accepted_empty(), refused("BadInputsUTxO")] {
             for class in [
                 DolosClass::NoRule,
                 DolosClass::Rule(RefusalClass::Value),
@@ -823,7 +815,7 @@ mod tests {
         let expected = Outcome::Fail(Fail::UnknownRefusal {
             dolos: "refused[FutureVariant]".into(),
         });
-        for ledger in [accepted(), refused("BadInputsUTxO")] {
+        for ledger in [LedgerOutcome::accepted_empty(), refused("BadInputsUTxO")] {
             let judged = outcome(&ledger, &unknown, None);
             assert_eq!(judged, expected);
             assert_eq!(with_known(judged, Some(&Row::V2)), expected);
@@ -856,7 +848,14 @@ mod tests {
     #[test]
     fn matching_answers_agree() {
         let agree = Outcome::Pass(Pass::Agree);
-        assert_eq!(outcome(&accepted(), &DolosVerdict::Accepted, None), agree);
+        assert_eq!(
+            outcome(
+                &LedgerOutcome::accepted_empty(),
+                &DolosVerdict::Accepted,
+                None
+            ),
+            agree
+        );
         assert_eq!(
             outcome(&refused("BadInputsUTxO"), &input_refusal(), None),
             agree
@@ -880,7 +879,7 @@ mod tests {
     fn failing_scripts_agree_only_with_a_tag_mismatch_alone() {
         let agree = Outcome::Pass(Pass::Agree);
         for ledger in [
-            accepted(),
+            LedgerOutcome::accepted_empty(),
             refused_by(&["ValidationTagMismatch", "BadInputsUTxO"]),
         ] {
             let judged = outcome(&ledger, &DolosVerdict::Phase2Rejected, None);
@@ -926,7 +925,7 @@ mod tests {
         let unsupported = DolosVerdict::Unsupported("certificate kind".into());
         assert_eq!(
             outcome(
-                &accepted(),
+                &LedgerOutcome::accepted_empty(),
                 &unsupported,
                 Some(&feature("certificate kind"))
             ),
@@ -935,13 +934,17 @@ mod tests {
             })
         );
         assert_eq!(
-            outcome(&accepted(), &unsupported, Some(&feature("pointer address"))),
+            outcome(
+                &LedgerOutcome::accepted_empty(),
+                &unsupported,
+                Some(&feature("pointer address"))
+            ),
             Outcome::Fail(Fail::UnsupportedUnexpected {
                 label: "certificate kind".into()
             })
         );
         assert_eq!(
-            outcome(&accepted(), &unsupported, None),
+            outcome(&LedgerOutcome::accepted_empty(), &unsupported, None),
             Outcome::Fail(Fail::UnsupportedUnexpected {
                 label: "certificate kind".into()
             })
@@ -952,7 +955,7 @@ mod tests {
     fn a_declared_record_that_dolos_supports_is_a_stale_manifest() {
         assert_eq!(
             outcome(
-                &accepted(),
+                &LedgerOutcome::accepted_empty(),
                 &DolosVerdict::Accepted,
                 Some(&feature("certificate kind"))
             ),
@@ -1003,7 +1006,7 @@ mod tests {
     #[test]
     fn a_known_record_passes_while_it_fails_and_fails_once_it_agrees() {
         let row = Row::V2;
-        let failing = outcome(&accepted(), &input_refusal(), None);
+        let failing = outcome(&LedgerOutcome::accepted_empty(), &input_refusal(), None);
         assert_eq!(
             with_known(failing.clone(), None),
             failing,
@@ -1027,13 +1030,13 @@ mod tests {
     ) {
         let unsupported = DolosVerdict::Unsupported("certificate kind".into());
         let expected = outcome(
-            &accepted(),
+            &LedgerOutcome::accepted_empty(),
             &unsupported,
             Some(&feature("certificate kind")),
         );
-        let unexpected = outcome(&accepted(), &unsupported, None);
+        let unexpected = outcome(&LedgerOutcome::accepted_empty(), &unsupported, None);
         let stale = outcome(
-            &accepted(),
+            &LedgerOutcome::accepted_empty(),
             &input_refusal(),
             Some(&feature("certificate kind")),
         );
@@ -1073,12 +1076,12 @@ mod tests {
     #[test]
     fn a_dependent_refused_for_another_rule_or_with_no_failing_maker_keeps_its_outcome() {
         let value = dolos_refused("PreservationOfValue", DolosClass::Rule(RefusalClass::Value));
-        let refused_for_value = outcome(&accepted(), &value, None);
+        let refused_for_value = outcome(&LedgerOutcome::accepted_empty(), &value, None);
         assert_eq!(
             with_failing_makers(refused_for_value.clone(), &value, failing(&[1])),
             refused_for_value
         );
-        let refused_for_inputs = outcome(&accepted(), &input_refusal(), None);
+        let refused_for_inputs = outcome(&LedgerOutcome::accepted_empty(), &input_refusal(), None);
         assert_eq!(
             with_failing_makers(refused_for_inputs.clone(), &input_refusal(), failing(&[])),
             refused_for_inputs
@@ -1108,12 +1111,12 @@ mod tests {
     fn a_dependent_refused_for_its_inputs_is_a_cascade_naming_its_failing_makers() {
         let mut tally = ValidationTally::default();
         let maker_outcome = outcome(
-            &accepted(),
+            &LedgerOutcome::accepted_empty(),
             &DolosVerdict::Unsupported("plutus v4".into()),
             None,
         );
         tally.add(supp(1), maker_outcome, Vec::new());
-        let disagree = outcome(&accepted(), &input_refusal(), None);
+        let disagree = outcome(&LedgerOutcome::accepted_empty(), &input_refusal(), None);
         tally.add(
             supp(2),
             with_failing_makers(disagree, &input_refusal(), failing(&[1])),
@@ -1165,7 +1168,7 @@ mod tests {
 
     #[test]
     fn a_cascade_is_a_failing_maker_and_a_known_row_holds_it() {
-        let disagree = outcome(&accepted(), &input_refusal(), None);
+        let disagree = outcome(&LedgerOutcome::accepted_empty(), &input_refusal(), None);
         let cascade = with_failing_makers(disagree, &input_refusal(), failing(&[1]));
         assert_eq!(
             maker(supp(2), &input_refusal(), &cascade),

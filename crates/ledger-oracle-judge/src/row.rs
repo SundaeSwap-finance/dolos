@@ -7,6 +7,8 @@ pub enum Check {
     Utxo,
     AsOutput,
     Accounts,
+    LedgerState,
+    EvalTx,
     Undo,
     Params,
     ReadTx,
@@ -142,7 +144,7 @@ pub fn coverage(row: Row) -> Coverage {
             Uncovered("child bodies are canonical, and an edited body breaks its signatures")
         }
         Row::V25 => Partial(Validation, &[ReadTx], "Plutus in a batch is unsupported"),
-        Row::V28 => Uncovered("the ledger gives no execution unit estimate to judge EvalTx"),
+        Row::V28 => Covered(EvalTx, &[]),
         Row::S1 => Covered(AsOutput, &[LiveAsOutput, LiveBlock]),
         Row::S2 | Row::S3 | Row::S4 | Row::S7 => Covered(AsOutput, &[]),
         Row::S5 => Covered(Undo, &[]),
@@ -181,7 +183,7 @@ pub fn coverage(row: Row) -> Coverage {
         Row::S17 => Uncovered("stake distribution changes only across an epoch change"),
         Row::S18 => Partial(
             Accounts,
-            &[],
+            &[LedgerState],
             "account entities in state only, minibf answers and epoch rewards are not compared",
         ),
         Row::S19 => Covered(ReadTx, &[]),
@@ -229,5 +231,11 @@ mod tests {
             vec![Check::Validation, Check::Accounts]
         );
         assert!(coverage(Row::V3).checks().is_empty());
+    }
+
+    #[test]
+    fn evaltx_and_the_ledger_state_judge_their_rows() {
+        assert_eq!(judged_by(Check::EvalTx), vec![Row::V28]);
+        assert_eq!(judged_by(Check::LedgerState), vec![Row::S18]);
     }
 }

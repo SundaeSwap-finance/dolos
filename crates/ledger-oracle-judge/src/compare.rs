@@ -4,6 +4,7 @@ use crate::{
     judgement::{
         self, Axis, CellKey, EntryPoint, Finding, Instrument, Judge, Route, Verdict, Version,
     },
+    ledger_state::LedgerStateChecks,
     manifest::{KnownList, Locus},
     record::{CorpusKind, RecordId},
     row::Row,
@@ -367,6 +368,7 @@ pub struct StateTallies {
     pub sub_unheld: usize,
     pub seeded_unjudged: usize,
     pub accounts: Tally,
+    pub ledger_state: LedgerStateChecks,
     pub undo: Tally,
     pub revalidate: Tally,
     pub dependents: usize,
@@ -387,7 +389,7 @@ pub struct StateTallies {
 impl StateTallies {
     /// Each tally a passing corpus compares at least once, by its judge and the
     /// entry point it drives.
-    fn named(&self) -> [(Judge, EntryPoint, &Tally); 4] {
+    fn named(&self) -> [(Judge, EntryPoint, &Tally); 5] {
         let StateTallies {
             roll_fail: _,
             utxo: _,
@@ -396,6 +398,7 @@ impl StateTallies {
             sub_unheld: _,
             seeded_unjudged: _,
             accounts,
+            ledger_state,
             undo,
             revalidate: _,
             dependents: _,
@@ -414,6 +417,11 @@ impl StateTallies {
         } = self;
         [
             (Judge::Accounts, AccountChecks::ENTRY, accounts),
+            (
+                Judge::LedgerState,
+                LedgerStateChecks::ENTRY,
+                &ledger_state.tally,
+            ),
             (Judge::Undo, Instrument::ApplyBlock.into(), undo),
             (Judge::Script, Instrument::ScriptByHash.into(), script),
             (
@@ -476,6 +484,7 @@ impl StateTallies {
             sub_unheld,
             seeded_unjudged,
             accounts,
+            ledger_state,
             undo,
             revalidate,
             dependents,
@@ -499,6 +508,7 @@ impl StateTallies {
         self.sub_unheld += sub_unheld;
         self.seeded_unjudged += seeded_unjudged;
         self.accounts.merge(accounts);
+        self.ledger_state.merge(ledger_state);
         self.undo.merge(undo);
         self.revalidate.merge(revalidate);
         self.dependents += dependents;
@@ -618,6 +628,7 @@ impl fmt::Display for StateTallies {
             sub_unheld,
             seeded_unjudged,
             accounts,
+            ledger_state,
             undo,
             revalidate,
             dependents,
@@ -638,12 +649,13 @@ impl fmt::Display for StateTallies {
             f,
             "STATE compared utxo={} as_output={} of sub_only={sub_only} \
              sub_unheld={sub_unheld} \
-             seeded_unjudged={seeded_unjudged} accounts={} undo={} revalidate={} \
-             of dependents={dependents} params={} readtx={} script={} datum={} \
-             plutus_data={} served_tx={} submit={} rolled_failed={}",
+             seeded_unjudged={seeded_unjudged} accounts={} ledger_state={} undo={} \
+             revalidate={} of dependents={dependents} params={} readtx={} script={} \
+             datum={} plutus_data={} served_tx={} submit={} rolled_failed={}",
             utxo.compared(),
             as_output.compared(),
             accounts.compared,
+            ledger_state.tally.compared,
             undo.compared,
             revalidate.compared,
             params.compared(),
@@ -716,6 +728,7 @@ mod tests {
             ..Default::default()
         };
         state.accounts.agree();
+        state.ledger_state.tally.agree();
         state.undo.agree();
         state.revalidate.agree();
         state.script.agree();
@@ -800,6 +813,13 @@ mod tests {
         }
     }
 
+    fn ledger_state(lines: &[&str]) -> LedgerStateChecks {
+        LedgerStateChecks {
+            tally: tally(lines),
+            compared: Default::default(),
+        }
+    }
+
     /// The tally of the lines at the first route of `R`, at v1.
     fn by_route<R: ServedRoutes>(lines: &[&str]) -> ByRoute<R> {
         ByRoute(BTreeMap::from([((R::ALL[0], Version::V1), tally(lines))]))
@@ -836,6 +856,7 @@ mod tests {
             sub_unheld: 4,
             seeded_unjudged: 2,
             accounts: tally(&lines),
+            ledger_state: ledger_state(&lines),
             undo: tally(&lines),
             revalidate: tally(&lines),
             dependents: 3,
@@ -867,6 +888,7 @@ mod tests {
             sub_unheld: 8,
             seeded_unjudged: 4,
             accounts: tally(&lines),
+            ledger_state: ledger_state(&lines),
             undo: tally(&lines),
             revalidate: tally(&lines),
             dependents: 6,
@@ -905,13 +927,14 @@ mod tests {
             .agree();
         assert!(passes(&state), "{state}");
         type Emptied = (fn(&mut StateTallies), usize);
-        let empties: [Emptied; 12] = [
+        let empties: [Emptied; 13] = [
             (|s| s.utxo = ByRoute::default(), entries::<UtxoRoute>()),
             (
                 |s| s.as_output = ByRoute::default(),
                 entries::<OutputRoute>(),
             ),
             (|s| s.accounts = Tally::default(), 1),
+            (|s| s.ledger_state = LedgerStateChecks::default(), 1),
             (|s| s.undo = Tally::default(), 1),
             (|s| s.params = ByRoute::default(), entries::<ParamsRoute>()),
             (|s| s.readtx = ByRoute::default(), entries::<TxRoute>()),
@@ -934,7 +957,7 @@ mod tests {
             assert!(judged.clone().all(|v| v.ends_with("judged=0")), "{out}");
         }
         let expected = format!(
-            " seeded_unjudged=0 accounts=1 undo=1 revalidate=1 of dependents=0 params={} \
+            " seeded_unjudged=0 accounts=1 ledger_state=1 undo=1 revalidate=1 of dependents=0 params={} \
              readtx={} script=1 datum={} plutus_data=1 served_tx={}",
             entries::<ParamsRoute>(),
             entries::<TxRoute>(),

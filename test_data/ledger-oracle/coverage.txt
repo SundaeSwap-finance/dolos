@@ -989,14 +989,15 @@ entry:min_fee 13187
 entry:apply_block 102684
 entry:revalidate 1974
 entry:read_accounts 2997
+entry:read_ledger_state 17173
 entry:script_by_hash 1769
 entry:plutus_data 1314
 entry:submit_tx:v1 4509
 entry:submit_tx:v1beta 4378
 entry:submit_tx:v1alpha 4550
-entry:eval_tx:v1 26730
-entry:eval_tx:v1beta 26718
-entry:eval_tx:v1alpha 26718
+entry:eval_tx:v1 52718
+entry:eval_tx:v1beta 52690
+entry:eval_tx:v1alpha 52690
 entry:wait_for_tx:v1 13432
 entry:wait_for_tx:v1beta 13432
 entry:wait_for_tx:v1alpha 13432
@@ -1027,7 +1028,7 @@ entry:search_utxos:v1alpha 12840
 entry:read_tx:v1 171887
 entry:read_tx:v1beta 42113
 entry:read_tx:v1alpha 42113
-request_shape:signed 95092
+request_shape:signed 173024
 request_shape:draft 3266
 request_shape:reward_output_draft 3232
 request_shape:unsigned 1
@@ -1045,6 +1046,7 @@ mutation:change_sub_field@min_fee 115
 mutation:change_sub_field@apply_block 115
 mutation:change_sub_field@revalidate 28
 mutation:change_sub_field@read_accounts 85
+mutation:change_sub_field@read_ledger_state 115
 mutation:change_sub_field@script_by_hash 8
 mutation:change_sub_field@plutus_data 9
 mutation:change_sub_field@submit_tx:v1 37
@@ -1082,6 +1084,7 @@ mutation:drop_witness@min_fee 226
 mutation:drop_witness@apply_block 226
 mutation:drop_witness@revalidate 0
 mutation:drop_witness@read_accounts 20
+mutation:drop_witness@read_ledger_state 226
 mutation:drop_witness@script_by_hash 73
 mutation:drop_witness@plutus_data 50
 mutation:drop_witness@submit_tx:v1 55
@@ -1119,6 +1122,7 @@ mutation:duplicate_witness@min_fee 0
 mutation:duplicate_witness@apply_block 243
 mutation:duplicate_witness@revalidate 0
 mutation:duplicate_witness@read_accounts 26
+mutation:duplicate_witness@read_ledger_state 243
 mutation:duplicate_witness@script_by_hash 88
 mutation:duplicate_witness@plutus_data 51
 mutation:duplicate_witness@submit_tx:v1 88
@@ -1156,6 +1160,7 @@ mutation:flip_guard@min_fee 12
 mutation:flip_guard@apply_block 12
 mutation:flip_guard@revalidate 0
 mutation:flip_guard@read_accounts 0
+mutation:flip_guard@read_ledger_state 12
 mutation:flip_guard@script_by_hash 5
 mutation:flip_guard@plutus_data 0
 mutation:flip_guard@submit_tx:v1 5
@@ -1193,6 +1198,7 @@ mutation:move_validity_bound@min_fee 242
 mutation:move_validity_bound@apply_block 242
 mutation:move_validity_bound@revalidate 0
 mutation:move_validity_bound@read_accounts 31
+mutation:move_validity_bound@read_ledger_state 242
 mutation:move_validity_bound@script_by_hash 82
 mutation:move_validity_bound@plutus_data 60
 mutation:move_validity_bound@submit_tx:v1 85
@@ -1230,6 +1236,7 @@ mutation:remove_redeemer@min_fee 198
 mutation:remove_redeemer@apply_block 198
 mutation:remove_redeemer@revalidate 1
 mutation:remove_redeemer@read_accounts 37
+mutation:remove_redeemer@read_ledger_state 198
 mutation:remove_redeemer@script_by_hash 188
 mutation:remove_redeemer@plutus_data 154
 mutation:remove_redeemer@submit_tx:v1 130
@@ -1267,6 +1274,7 @@ mutation:reorder_set@min_fee 205
 mutation:reorder_set@apply_block 205
 mutation:reorder_set@revalidate 202
 mutation:reorder_set@read_accounts 89
+mutation:reorder_set@read_ledger_state 205
 mutation:reorder_set@script_by_hash 105
 mutation:reorder_set@plutus_data 91
 mutation:reorder_set@submit_tx:v1 43
@@ -1304,6 +1312,7 @@ mutation:swap_reference_script@min_fee 122
 mutation:swap_reference_script@apply_block 122
 mutation:swap_reference_script@revalidate 122
 mutation:swap_reference_script@read_accounts 0
+mutation:swap_reference_script@read_ledger_state 122
 mutation:swap_reference_script@script_by_hash 122
 mutation:swap_reference_script@plutus_data 2
 mutation:swap_reference_script@submit_tx:v1 42

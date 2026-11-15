@@ -71,6 +71,7 @@ named! {
         Utxo = "utxo",
         AsOutput = "as-output",
         Accounts = "accounts",
+        LedgerState = "ledger-state",
         Undo = "undo",
         Revalidate = "revalidate",
         Params = "params",
@@ -128,6 +129,7 @@ named! {
         Rollback = "rollback",
         Row = "row",
         Rule = "rule",
+        Table = "table",
         Tx = "tx",
         Units = "units",
         Unsupported = "unsupported",
@@ -198,6 +200,7 @@ named! {
         ApplyBlock = "apply_block",
         Revalidate = "revalidate",
         ReadAccounts = "read_accounts",
+        ReadLedgerState = "read_ledger_state",
         ScriptByHash = "script_by_hash",
         PlutusData = "plutus_data",
     }

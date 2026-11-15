@@ -82,8 +82,6 @@ impl fmt::Display for CostTallies {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::{
         judgement::RunVerdict,
@@ -144,12 +142,6 @@ mod tests {
         assert_eq!(merged, part(0));
     }
 
-    const ACCEPTED: LedgerOutcome = LedgerOutcome::Accepted {
-        consumed: Vec::new(),
-        produced: Vec::new(),
-        accounts_post: BTreeMap::new(),
-    };
-
     fn refused() -> LedgerOutcome {
         LedgerOutcome::Refused {
             failures: String::new(),
@@ -164,7 +156,12 @@ mod tests {
     fn an_equal_fee_passes_and_no_fee_compared_fails() {
         let mut t = CostTallies::default();
         assert!(!passes(&t));
-        t.add_fee(id("supp#1"), Some(7), Ok(7), &ACCEPTED);
+        t.add_fee(
+            id("supp#1"),
+            Some(7),
+            Ok(7),
+            &LedgerOutcome::accepted_empty(),
+        );
         t.skipped_cascade += 1;
         assert!(passes(&t), "{t}");
         assert_eq!(
@@ -209,12 +206,13 @@ mod tests {
     #[test]
     fn a_differing_fee_or_one_the_node_cannot_compute_disagrees() {
         let mut t = CostTallies::default();
-        t.add_fee(id("supp#1"), Some(7), Ok(8), &ACCEPTED);
+        let accepted = LedgerOutcome::accepted_empty();
+        t.add_fee(id("supp#1"), Some(7), Ok(8), &accepted);
         t.add_fee(
             id("supp#2"),
             Some(7),
             Err("no parameters".to_string()),
-            &ACCEPTED,
+            &accepted,
         );
         assert!(!passes(&t));
         assert_eq!(

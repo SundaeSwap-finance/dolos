@@ -41,6 +41,64 @@ index 365138a5..8a0a5252 100644
              match crate::pallas_extras::tx_scripts(tx)
                  .into_iter()
                  .find(|parts| parts.hash == script_hash)
+diff --git a/crates/cardano/src/model/accounts.rs b/crates/cardano/src/model/accounts.rs
+index b7e62bf5..005e8c01 100644
+--- a/crates/cardano/src/model/accounts.rs
++++ b/crates/cardano/src/model/accounts.rs
+@@ -448,7 +448,9 @@ impl dolos_core::EntityDelta for StakeRegistration {
+ 
+         entity.registered_at = Some(self.slot);
+         entity.deregistered_at = None;
+-        entity.deposit = Some(self.deposit);
++        if !pallas::crypto::oracle_plant("account-deposit-dropped") {
++            entity.deposit = Some(self.deposit);
++        }
+     }
+ 
+     fn undo(&self, entity: &mut Option<AccountState>) {
+@@ -680,7 +682,9 @@ impl dolos_core::EntityDelta for WithdrawalInc {
+ 
+         let stake = entity.stake.unwrap_live_mut();
+         self.prev_stake_live = Some(stake.clone());
+-        stake.withdrawals_sum = add!(stake.withdrawals_sum, self.amount);
++        if !pallas::crypto::oracle_plant("withdrawal-unapplied") {
++            stake.withdrawals_sum = add!(stake.withdrawals_sum, self.amount);
++        }
+     }
+ 
+     fn undo(&self, entity: &mut Option<Self::Entity>) {
+diff --git a/crates/cardano/src/model/dreps.rs b/crates/cardano/src/model/dreps.rs
+index d91af359..cb331e0b 100644
+--- a/crates/cardano/src/model/dreps.rs
++++ b/crates/cardano/src/model/dreps.rs
+@@ -310,7 +310,9 @@ impl dolos_core::EntityDelta for DRepUnRegistration {
+ 
+         // apply changes
+         entity.voting_power = 0;
+-        entity.unregistered_at = Some((self.slot, self.txorder));
++        if !pallas::crypto::oracle_plant("drep-unregistration-ignored") {
++            entity.unregistered_at = Some((self.slot, self.txorder));
++        }
+         entity.deposit = 0;
+     }
+ 
+diff --git a/crates/cardano/src/model/proposals.rs b/crates/cardano/src/model/proposals.rs
+index e7df64fd..068f9a9e 100644
+--- a/crates/cardano/src/model/proposals.rs
++++ b/crates/cardano/src/model/proposals.rs
+@@ -664,7 +664,11 @@ impl dolos_core::EntityDelta for NewProposalV2 {
+             idx: self.idx,
+             action: self.action.clone(),
+             reward_account: self.reward_account.clone(),
+-            deposit: self.deposit,
++            deposit: if pallas::crypto::oracle_plant("proposal-deposit-dropped") {
++                Some(0)
++            } else {
++                self.deposit
++            },
+             max_epoch,
+             // Unresolved until a boundary rules on it ([`ProposalResolved`]).
+             ratified_epoch: None,
 diff --git a/crates/cardano/src/pallas_extras.rs b/crates/cardano/src/pallas_extras.rs
 index c6860497..6c798fde 100644
 --- a/crates/cardano/src/pallas_extras.rs
@@ -61,10 +119,21 @@ index c6860497..6c798fde 100644
      block.block_body.transactions = MaybeIndefArray::Def(replacement);
  
 diff --git a/crates/cardano/src/utxoset.rs b/crates/cardano/src/utxoset.rs
-index 340a6ece..d8296f8f 100644
+index 340a6ece..bca7fc38 100644
 --- a/crates/cardano/src/utxoset.rs
 +++ b/crates/cardano/src/utxoset.rs
-@@ -165,7 +165,12 @@ fn apply_txs_lenient(
+@@ -154,7 +154,9 @@ fn apply_txs_lenient(
+                 match body {
+                     Some(body) => {
+                         spent_here.insert(stxi_ref.clone());
+-                        delta.consumed_utxo.insert(stxi_ref, body);
++                        if !pallas::crypto::oracle_plant("spent-utxo-kept") {
++                            delta.consumed_utxo.insert(stxi_ref, body);
++                        }
+                     }
+                     None => {
+                         stats.skipped.push(SkippedInput {
+@@ -165,7 +167,12 @@ fn apply_txs_lenient(
                  }
              }
  
@@ -78,7 +147,7 @@ index 340a6ece..d8296f8f 100644
                  let utxo_ref = TxoRef(tx_hash, idx as u32);
                  let body: Arc<EraCbor> = Arc::new(produced.into());
  
-@@ -262,7 +267,12 @@ fn apply_txs(
+@@ -262,7 +269,12 @@ fn apply_txs(
          for_each_applied_tx(tx, |tx| {
              let tx_hash = tx.hash();
  
@@ -92,6 +161,17 @@ index 340a6ece..d8296f8f 100644
                  let uxto_ref = TxoRef(tx_hash, idx as u32);
                  delta
                      .produced_utxo
+@@ -284,7 +296,9 @@ fn apply_txs(
+ 
+                 let stxi_body_arc = stxi_body.borrow_owner().clone();
+ 
+-                delta.consumed_utxo.insert(stxi_ref, stxi_body_arc);
++                if !pallas::crypto::oracle_plant("spent-utxo-kept") {
++                    delta.consumed_utxo.insert(stxi_ref, stxi_body_arc);
++                }
+             }
+ 
+             Ok(())
 diff --git a/crates/cardano/src/validate.rs b/crates/cardano/src/validate.rs
 index a5ea9daf..69c68004 100644
 --- a/crates/cardano/src/validate.rs
