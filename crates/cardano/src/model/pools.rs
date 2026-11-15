@@ -430,7 +430,6 @@ impl dolos_core::EntityDelta for PoolDeRegistration {
 
             // apply changes
             entity.retiring_epoch = Some(self.epoch);
-            entity.deposit = 0;
         }
     }
 
@@ -602,6 +601,22 @@ mod prop_tests {
             delta in any_pool_deregistration(),
         ) {
             assert_delta_roundtrip(entity, delta);
+        }
+
+        #[test]
+        fn a_retirement_schedules_the_epoch_and_keeps_the_deposit(
+            entity in any_pool_state(),
+            epoch in root::any_epoch(),
+        ) {
+            use dolos_core::EntityDelta as _;
+
+            let deposit = entity.deposit;
+            let mut retired = Some(entity.clone());
+            PoolDeRegistration::new(entity.operator, epoch).apply(&mut retired);
+            let retired = retired.expect("the pool stays in state until it is reaped");
+
+            prop_assert_eq!(retired.retiring_epoch, Some(epoch));
+            prop_assert_eq!(retired.deposit, deposit);
         }
 
         #[test]
