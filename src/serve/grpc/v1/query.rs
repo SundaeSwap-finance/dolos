@@ -13,8 +13,8 @@ use crate::prelude::*;
 use crate::serve::grpc::block_context::{BlockContext, BlockTxs, NoInputs};
 use crate::serve::grpc::block_refs::BlockRefData;
 use crate::serve::grpc::masking::apply_mask;
+use crate::serve::grpc::run_blocking;
 use crate::serve::ChainReads;
-use dolos_cardano::indexes::AsyncCardanoQueryExt;
 
 fn to_chain_point(data: &BlockRefData) -> u5c::query::ChainPoint {
     u5c::query::ChainPoint {
@@ -49,6 +49,37 @@ where
         let mapper = interop::Mapper::new(NoInputs);
 
         Self { domain, mapper }
+    }
+
+    /// The served form of each UTxO, and the ledger tip.
+    async fn map_utxos(
+        &self,
+        utxos: UtxoMap,
+    ) -> Result<(Vec<u5c::query::AnyUtxoData>, Option<u5c::query::ChainPoint>), Status> {
+        let block_refs =
+            crate::serve::grpc::block_refs::fetch_block_refs(&self.domain, utxos.keys()).await?;
+        let mapper = self.mapper.clone();
+
+        run_blocking(&self.domain, move |domain| {
+            let items = utxos
+                .iter()
+                .map(|(k, v)| {
+                    let block_ref = block_refs.get(&k.0).map(to_chain_point);
+                    into_u5c_utxo(k, v, &mapper, &domain, block_ref)
+                        .map_err(|e| Status::internal(e.to_string()))
+                })
+                .try_collect()?;
+
+            let cursor = domain
+                .state()
+                .read_cursor()
+                .map_err(|e| Status::internal(e.to_string()))?
+                .as_ref()
+                .map(|p| point_to_u5c(&domain, p));
+
+            Ok((items, cursor))
+        })
+        .await
     }
 }
 
@@ -788,7 +819,7 @@ fn map_era_summary(
     }
 }
 
-async fn into_u5c_utxo<S: Domain>(
+fn into_u5c_utxo<S: Domain>(
     txo: &TxoRef,
     body: &EraCbor,
     mapper: &interop::Mapper<NoInputs>,
@@ -797,14 +828,12 @@ async fn into_u5c_utxo<S: Domain>(
 ) -> Result<u5c::query::AnyUtxoData, Box<dyn std::error::Error>> {
     use pallas::ledger::primitives::conway::DatumOption;
 
-    let query = dolos_core::AsyncQueryFacade::new(domain.clone());
-
     let parsed_output = MultiEraOutput::try_from(body)?;
     let mut parsed = mapper.map_tx_output(&parsed_output, None);
 
     // If the output has a datum hash, try to fetch the datum value from storage
     if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
-        match query.get_datum(&datum_hash).await {
+        match domain.state().datum(&datum_hash) {
             Ok(Some(datum_bytes)) => {
                 // Decode the datum and update the parsed output
                 match pallas::codec::minicbor::decode::<
@@ -937,24 +966,27 @@ where
 
         info!("received new grpc query - read_params");
 
-        let tip = self
-            .domain
-            .state()
-            .read_cursor()
-            .map_err(into_status)?
-            .ok_or(Status::internal("Failed to find ledger tip"))?;
+        let mapper = self.mapper.clone();
+        let mut response = run_blocking(&self.domain, move |domain| {
+            let tip = domain
+                .state()
+                .read_cursor()
+                .map_err(into_status)?
+                .ok_or(Status::internal("Failed to find ledger tip"))?;
 
-        let pparams = dolos_cardano::load_effective_pparams::<D>(self.domain.state())
-            .map_err(|_| Status::internal("Failed to load current pparams"))?;
+            let pparams = dolos_cardano::load_effective_pparams::<D>(domain.state())
+                .map_err(|_| Status::internal("Failed to load current pparams"))?;
 
-        let params = map_live_params(&self.mapper, &pparams).map_err(into_status)?;
+            let params = map_live_params(&mapper, &pparams).map_err(into_status)?;
 
-        let mut response = u5c::query::ReadParamsResponse {
-            values: Some(u5c::query::AnyChainParams {
-                params: u5c::query::any_chain_params::Params::Cardano(params).into(),
-            }),
-            ledger_tip: Some(point_to_u5c(&self.domain, &tip)),
-        };
+            Ok(u5c::query::ReadParamsResponse {
+                values: Some(u5c::query::AnyChainParams {
+                    params: u5c::query::any_chain_params::Params::Cardano(params).into(),
+                }),
+                ledger_tip: Some(point_to_u5c(&domain, &tip)),
+            })
+        })
+        .await?;
 
         if let Some(mask) = message.field_mask {
             response = apply_mask(response, mask.paths)
@@ -989,29 +1021,12 @@ where
             .map(from_u5c_txoref)
             .try_collect()?;
 
-        let utxos = StateStore::get_utxos(self.domain.state(), keys)
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let utxos = run_blocking(&self.domain, move |domain| {
+            StateStore::get_utxos(domain.state(), keys).map_err(|e| Status::internal(e.to_string()))
+        })
+        .await?;
 
-        let block_refs =
-            crate::serve::grpc::block_refs::fetch_block_refs(&self.domain, utxos.keys()).await?;
-
-        let mut items = Vec::new();
-        for (k, v) in utxos.iter() {
-            let block_ref = block_refs.get(&k.0).map(to_chain_point);
-            items.push(
-                into_u5c_utxo(k, v, &self.mapper, &self.domain, block_ref)
-                    .await
-                    .map_err(|e| Status::internal(e.to_string()))?,
-            );
-        }
-
-        let cursor = self
-            .domain
-            .state()
-            .read_cursor()
-            .map_err(|e| Status::internal(e.to_string()))?
-            .as_ref()
-            .map(|p| point_to_u5c(&self.domain, p));
+        let (items, cursor) = self.map_utxos(utxos).await?;
 
         Ok(Response::new(u5c::query::ReadUtxosResponse {
             items,
@@ -1027,9 +1042,9 @@ where
 
         info!("received new grpc query - search_utxos");
 
-        let set = match message.predicate {
+        let pattern = match message.predicate {
             Some(x) => match x.r#match {
-                Some(x) => x.into_set(self.domain.state())?,
+                Some(x) => x,
                 _ => {
                     return Err(Status::invalid_argument(
                         "only 'match' predicate is supported by Dolos",
@@ -1043,29 +1058,15 @@ where
             }
         };
 
-        let utxos = StateStore::get_utxos(self.domain.state(), set.into_iter().collect_vec())
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let utxos = run_blocking(&self.domain, move |domain| {
+            let set = pattern.into_set(domain.state())?;
 
-        let block_refs =
-            crate::serve::grpc::block_refs::fetch_block_refs(&self.domain, utxos.keys()).await?;
+            StateStore::get_utxos(domain.state(), set.into_iter().collect_vec())
+                .map_err(|e| Status::internal(e.to_string()))
+        })
+        .await?;
 
-        let mut items = Vec::new();
-        for (k, v) in utxos.iter() {
-            let block_ref = block_refs.get(&k.0).map(to_chain_point);
-            items.push(
-                into_u5c_utxo(k, v, &self.mapper, &self.domain, block_ref)
-                    .await
-                    .map_err(|e| Status::internal(e.to_string()))?,
-            );
-        }
-
-        let cursor = self
-            .domain
-            .state()
-            .read_cursor()
-            .map_err(|e| Status::internal(e.to_string()))?
-            .as_ref()
-            .map(|p| point_to_u5c(&self.domain, p));
+        let (items, cursor) = self.map_utxos(utxos).await?;
 
         Ok(Response::new(u5c::query::SearchUtxosResponse {
             items,
@@ -1091,61 +1092,59 @@ where
             .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::not_found("tx hash not found"))?;
 
-        let located =
-            range.and_then(|range| dolos_core::tx_in_range(&block_bytes, &range, &tx_hash));
+        let mut response = run_blocking(&self.domain, move |domain| {
+            let located =
+                range.and_then(|range| dolos_core::tx_in_range(&block_bytes, &range, &tx_hash));
 
-        let (native_bytes, mapped, (slot, hash, height)) = match located {
-            Some((tx, _)) => {
-                let header = MultiEraHeader::decode_from_block(&block_bytes)
-                    .map_err(|e| Status::internal(format!("failed to decode header: {e}")))?;
-                let context = BlockContext::for_lone_tx(self.domain.clone(), &tx);
-                (
-                    tx.encode(),
-                    interop::Mapper::new(context).map_tx(&tx),
-                    (header.slot(), header.hash(), header.number()),
-                )
-            }
-            None => {
-                let block = MultiEraBlock::decode(&block_bytes)
-                    .map_err(|e| Status::internal(format!("failed to decode block: {e}")))?;
-                let txs = BlockTxs::of(&block);
-                let tx = last_including(txs.applied_hashes(), &tx_hash)
-                    .and_then(|index| txs.at(index))
-                    .ok_or_else(|| Status::not_found("tx hash not found"))?;
-                let context = BlockContext::for_tx(self.domain.clone(), &tx);
-                (
-                    tx.tx().encode(),
-                    interop::Mapper::new(context).map_tx(tx.tx()),
-                    (block.slot(), block.hash(), block.header().number()),
-                )
-            }
-        };
+            let (native_bytes, mapped, (slot, hash, height)) = match located {
+                Some((tx, _)) => {
+                    let header = MultiEraHeader::decode_from_block(&block_bytes)
+                        .map_err(|e| Status::internal(format!("failed to decode header: {e}")))?;
+                    let context = BlockContext::for_lone_tx(domain.clone(), &tx);
+                    (
+                        tx.encode(),
+                        interop::Mapper::new(context).map_tx(&tx),
+                        (header.slot(), header.hash(), header.number()),
+                    )
+                }
+                None => {
+                    let block = MultiEraBlock::decode(&block_bytes)
+                        .map_err(|e| Status::internal(format!("failed to decode block: {e}")))?;
+                    let txs = BlockTxs::of(&block);
+                    let tx = last_including(txs.applied_hashes(), &tx_hash)
+                        .and_then(|index| txs.at(index))
+                        .ok_or_else(|| Status::not_found("tx hash not found"))?;
+                    let context = BlockContext::for_tx(domain.clone(), &tx);
+                    (
+                        tx.tx().encode(),
+                        interop::Mapper::new(context).map_tx(tx.tx()),
+                        (block.slot(), block.hash(), block.header().number()),
+                    )
+                }
+            };
 
-        let cursor = self
-            .domain
-            .state()
-            .read_cursor()
-            .map_err(|e| Status::internal(e.to_string()))?
-            .as_ref()
-            .map(|p| point_to_u5c(&self.domain, p));
+            let cursor = domain
+                .state()
+                .read_cursor()
+                .map_err(|e| Status::internal(e.to_string()))?
+                .as_ref()
+                .map(|p| point_to_u5c(&domain, p));
 
-        let mut response = u5c::query::ReadTxResponse {
-            tx: Some(u5c::query::AnyChainTx {
-                native_bytes: native_bytes.into(),
-                block_ref: Some(u5c::query::ChainPoint {
-                    slot,
-                    hash: hash.to_vec().into(),
-                    height,
-                    timestamp: self
-                        .domain
-                        .slot_timestamp(slot)
-                        .map(|s| s * 1000)
-                        .unwrap_or(0),
+            Ok(u5c::query::ReadTxResponse {
+                tx: Some(u5c::query::AnyChainTx {
+                    native_bytes: native_bytes.into(),
+                    block_ref: Some(u5c::query::ChainPoint {
+                        slot,
+                        hash: hash.to_vec().into(),
+                        height,
+                        timestamp: domain.slot_timestamp(slot).map(|s| s * 1000).unwrap_or(0),
+                    }),
+                    chain: Some(u5c::query::any_chain_tx::Chain::Cardano(mapped)),
                 }),
-                chain: Some(u5c::query::any_chain_tx::Chain::Cardano(mapped)),
-            }),
-            ledger_tip: cursor,
-        };
+                ledger_tip: cursor,
+            })
+        })
+        .await?;
 
         if let Some(mask) = message.field_mask {
             response = apply_mask(response, mask.paths)
@@ -1189,26 +1188,29 @@ where
 
         info!("received new grpc query - read_era_summary");
 
-        let chain_summary = dolos_cardano::load_era_summary::<D>(self.domain.state())
-            .map_err(|e| Status::internal(format!("failed to load era summary: {e}")))?;
+        let mapper = self.mapper.clone();
+        let mut response = run_blocking(&self.domain, move |domain| {
+            let chain_summary = dolos_cardano::load_era_summary::<D>(domain.state())
+                .map_err(|e| Status::internal(format!("failed to load era summary: {e}")))?;
 
-        let active_pparams = dolos_cardano::load_effective_pparams::<D>(self.domain.state())
-            .map_err(|e| Status::internal(format!("failed to load current pparams: {e}")))?;
-        let active_protocol = active_pparams.protocol_major_or_default();
-        let active_params = self
-            .mapper
-            .map_pparams(dolos_cardano::utils::pparams_to_pallas(&active_pparams));
+            let active_pparams = dolos_cardano::load_effective_pparams::<D>(domain.state())
+                .map_err(|e| Status::internal(format!("failed to load current pparams: {e}")))?;
+            let active_protocol = active_pparams.protocol_major_or_default();
+            let active_params =
+                mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(&active_pparams));
 
-        let summaries = chain_summary
-            .iter_all()
-            .map(|era| map_era_summary(era, active_protocol, &active_params))
-            .collect();
+            let summaries = chain_summary
+                .iter_all()
+                .map(|era| map_era_summary(era, active_protocol, &active_params))
+                .collect();
 
-        let mut response = u5c::query::ReadEraSummaryResponse {
-            summary: Some(u5c::query::read_era_summary_response::Summary::Cardano(
-                u5c::cardano::EraSummaries { summaries },
-            )),
-        };
+            Ok(u5c::query::ReadEraSummaryResponse {
+                summary: Some(u5c::query::read_era_summary_response::Summary::Cardano(
+                    u5c::cardano::EraSummaries { summaries },
+                )),
+            })
+        })
+        .await?;
 
         if let Some(mask) = message.field_mask {
             response = apply_mask(response, mask.paths)
@@ -1238,40 +1240,43 @@ where
             return Err(Status::invalid_argument("missing state query"));
         };
 
-        let state = self.domain.state();
+        let mut response = run_blocking(&self.domain, move |domain| {
+            let state = domain.state();
 
-        let current_epoch = dolos_cardano::load_epoch::<D>(state)
-            .map_err(|e| Status::internal(format!("failed to load epoch: {e}")))?
-            .number;
+            let current_epoch = dolos_cardano::load_epoch::<D>(state)
+                .map_err(|e| Status::internal(format!("failed to load epoch: {e}")))?
+                .number;
 
-        let chain_summary = dolos_cardano::load_era_summary::<D>(state)
-            .map_err(|e| Status::internal(format!("failed to load era summary: {e}")))?;
+            let chain_summary = dolos_cardano::load_era_summary::<D>(state)
+                .map_err(|e| Status::internal(format!("failed to load era summary: {e}")))?;
 
-        // the distribution in force for an epoch is the snapshot taken at the
-        // end of the epoch two before it
-        let epoch = current_epoch.saturating_sub(2);
-        let protocol = chain_summary.era_for_epoch(epoch).protocol.into();
+            // the distribution in force for an epoch is the snapshot taken at
+            // the end of the epoch two before it
+            let epoch = current_epoch.saturating_sub(2);
+            let protocol = chain_summary.era_for_epoch(epoch).protocol.into();
 
-        let stakes = dolos_cardano::pool_stakes::load_pool_stakes::<D>(state, epoch, protocol)
-            .map_err(|e| Status::internal(format!("failed to load pool stakes: {e}")))?;
+            let stakes = dolos_cardano::pool_stakes::load_pool_stakes::<D>(state, epoch, protocol)
+                .map_err(|e| Status::internal(format!("failed to load pool stakes: {e}")))?;
 
-        let distribution = pool_distribution(&stakes, &query.pool_keyhashes);
+            let distribution = pool_distribution(&stakes, &query.pool_keyhashes);
 
-        let tip = state
-            .read_cursor()
-            .map_err(into_status)?
-            .ok_or(Status::internal("Failed to find ledger tip"))?;
+            let tip = state
+                .read_cursor()
+                .map_err(into_status)?
+                .ok_or(Status::internal("Failed to find ledger tip"))?;
 
-        let mut response = u5c::query::ReadStateResponse {
-            result: Some(u5c::query::AnyChainStateData {
-                result: Some(any_chain_state_data::Result::Cardano(
-                    u5c::cardano::StateData {
-                        result: Some(state_data::Result::StakePoolDistribution(distribution)),
-                    },
-                )),
-            }),
-            ledger_tip: Some(point_to_u5c(&self.domain, &tip)),
-        };
+            Ok(u5c::query::ReadStateResponse {
+                result: Some(u5c::query::AnyChainStateData {
+                    result: Some(any_chain_state_data::Result::Cardano(
+                        u5c::cardano::StateData {
+                            result: Some(state_data::Result::StakePoolDistribution(distribution)),
+                        },
+                    )),
+                }),
+                ledger_tip: Some(point_to_u5c(&domain, &tip)),
+            })
+        })
+        .await?;
 
         if let Some(mask) = message.field_mask {
             response = apply_mask(response, mask.paths)
@@ -2250,6 +2255,91 @@ mod tests {
             }
             _ => panic!("missing cardano era summaries"),
         }
+    }
+
+    #[tokio::test]
+    async fn every_handler_reads_the_stores_on_the_blocking_pool() {
+        use crate::serve::grpc::read_counting::ReadCountingDomain;
+        use u5c::cardano::{state_query, GetStakePoolDistribution};
+
+        let fixture = crate::tests::musashi::sub_transaction_block();
+        let domain = ReadCountingDomain::new(fixture.domain.clone());
+        let service = QueryServiceImpl::new(domain.clone());
+        let mut reads = Vec::new();
+
+        domain.take();
+        service
+            .read_params(Request::new(u5c::query::ReadParamsRequest::default()))
+            .await
+            .unwrap();
+        reads.push(("read_params", domain.take()));
+
+        service
+            .read_utxos(Request::new(u5c::query::ReadUtxosRequest {
+                keys: vec![u5c::query::TxoRef {
+                    hash: fixture.parent.to_vec().into(),
+                    index: 0,
+                }],
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        reads.push(("read_utxos", domain.take()));
+
+        let pattern = u5c::cardano::TxOutputPattern {
+            address: Some(u5c::cardano::AddressPattern {
+                exact_address: Some(vec![0x61; 29].into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        service
+            .search_utxos(Request::new(u5c::query::SearchUtxosRequest {
+                predicate: Some(u5c::query::UtxoPredicate {
+                    r#match: Some(u5c::query::AnyUtxoPattern {
+                        utxo_pattern: Some(UtxoPattern::Cardano(pattern)),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        reads.push(("search_utxos", domain.take()));
+
+        service
+            .read_tx(Request::new(u5c::query::ReadTxRequest {
+                hash: fixture.parent.to_vec().into(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        reads.push(("read_tx", domain.take()));
+
+        service
+            .read_era_summary(Request::new(u5c::query::ReadEraSummaryRequest::default()))
+            .await
+            .unwrap();
+        reads.push(("read_era_summary", domain.take()));
+
+        let query = state_query::Query::StakePoolDistribution(GetStakePoolDistribution::default());
+        service
+            .read_state(Request::new(state_request(Some(query))))
+            .await
+            .unwrap();
+        reads.push(("read_state", domain.take()));
+
+        assert_eq!(
+            reads,
+            [
+                ("read_params", (0, true)),
+                ("read_utxos", (0, true)),
+                ("search_utxos", (0, true)),
+                ("read_tx", (0, true)),
+                ("read_era_summary", (0, true)),
+                ("read_state", (0, true)),
+            ]
+        );
     }
 }
 

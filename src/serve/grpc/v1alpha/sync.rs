@@ -10,6 +10,7 @@ use tonic::{Request, Response, Status};
 use crate::prelude::*;
 use crate::serve::grpc::block_context::BlockContext;
 use crate::serve::grpc::masking::BlockMask;
+use crate::serve::grpc::run_blocking;
 use pallas::ledger::traverse::MultiEraBlock;
 
 const MAX_DUMP_HISTORY_ITEMS: u32 = 100;
@@ -169,7 +170,12 @@ where
                 return Err(Status::not_found(format!("Failed to find block: {br:?}")));
             };
 
-            out.push(raw_to_anychain(&self.domain, &body, mask));
+            out.push(
+                run_blocking(&self.domain, move |domain| {
+                    Ok(raw_to_anychain(&domain, &body, mask))
+                })
+                .await?,
+            );
         }
 
         let response = u5c::sync::FetchBlockResponse { block: out };
@@ -190,72 +196,72 @@ where
                 .unwrap_or_default(),
         );
 
-        let mut from = None;
+        run_blocking(&self.domain, move |domain| {
+            let mut from = None;
 
-        if let Some(ref br) = msg.start_token {
-            let mut slot: Option<u64> = None;
+            if let Some(ref br) = msg.start_token {
+                let mut slot: Option<u64> = None;
 
-            if !br.hash.is_empty() {
-                slot = self
-                    .domain
-                    .archive()
-                    .slot_by_block_hash(&br.hash)
-                    .map_err(|_| Status::internal("Failed to query chain service."))?;
-            }
-
-            if slot.is_none() && br.height != 0 {
-                slot = self
-                    .domain
-                    .archive()
-                    .slot_by_block_number(br.height)
-                    .map_err(|_| Status::internal("Failed to query chain service."))?;
-            }
-
-            if slot.is_none() && br.slot != 0 {
-                slot = Some(br.slot);
-            }
-
-            from = match slot {
-                Some(s) => Some(s),
-                None if !br.hash.is_empty() || br.height != 0 || br.slot != 0 => {
-                    return Err(Status::not_found(format!(
-                        "Failed to find block for start_token: {br:?}"
-                    )));
+                if !br.hash.is_empty() {
+                    slot = domain
+                        .archive()
+                        .slot_by_block_hash(&br.hash)
+                        .map_err(|_| Status::internal("Failed to query chain service."))?;
                 }
-                None => None,
+
+                if slot.is_none() && br.height != 0 {
+                    slot = domain
+                        .archive()
+                        .slot_by_block_number(br.height)
+                        .map_err(|_| Status::internal("Failed to query chain service."))?;
+                }
+
+                if slot.is_none() && br.slot != 0 {
+                    slot = Some(br.slot);
+                }
+
+                from = match slot {
+                    Some(s) => Some(s),
+                    None if !br.hash.is_empty() || br.height != 0 || br.slot != 0 => {
+                        return Err(Status::not_found(format!(
+                            "Failed to find block for start_token: {br:?}"
+                        )));
+                    }
+                    None => None,
+                };
+            }
+
+            if msg.max_items > MAX_DUMP_HISTORY_ITEMS {
+                return Err(Status::invalid_argument(format!(
+                    "max_items must be less than or equal to {MAX_DUMP_HISTORY_ITEMS}"
+                )));
+            }
+
+            let len = msg.max_items as usize;
+
+            let mut range = domain
+                .archive()
+                .get_range(from, None)
+                .map_err(|_| Status::internal("cant query archive"))?;
+
+            let items = range
+                .by_ref()
+                .take(len)
+                .map(|(_, body)| raw_to_anychain(&domain, &body, mask))
+                .collect();
+
+            let next_token = range
+                .next()
+                .and_then(|(_, body)| raw_to_blockref(&domain, &body));
+
+            let response = u5c::sync::DumpHistoryResponse {
+                block: items,
+                next_token,
             };
-        }
 
-        if msg.max_items > MAX_DUMP_HISTORY_ITEMS {
-            return Err(Status::invalid_argument(format!(
-                "max_items must be less than or equal to {MAX_DUMP_HISTORY_ITEMS}"
-            )));
-        }
-
-        let len = msg.max_items as usize;
-
-        let mut range = self
-            .domain
-            .archive()
-            .get_range(from, None)
-            .map_err(|_| Status::internal("cant query archive"))?;
-
-        let items = range
-            .by_ref()
-            .take(len)
-            .map(|(_, body)| raw_to_anychain(&self.domain, &body, mask))
-            .collect();
-
-        let next_token = range
-            .next()
-            .and_then(|(_, body)| raw_to_blockref(&self.domain, &body));
-
-        let response = u5c::sync::DumpHistoryResponse {
-            block: items,
-            next_token,
-        };
-
-        Ok(Response::new(response))
+            Ok(Response::new(response))
+        })
+        .await
     }
 
     async fn follow_tip(
@@ -283,6 +289,7 @@ where
             intersect.clone(),
             self.cancel.clone(),
         )
+        .await
         .map_err(|e| Status::internal(format!("failed to start chain stream: {e}")))?
         .ok_or_else(|| {
             Status::not_found(format!(
@@ -292,9 +299,15 @@ where
 
         let context = self.domain.clone();
 
-        let stream = stream.map(move |log| {
-            let log = log.map_err(|e| Status::internal(format!("chain stream failed: {e}")))?;
-            Ok(tip_event_to_response(&context, &log, mask))
+        let stream = stream.then(move |log| {
+            let context = context.clone();
+            async move {
+                let log = log.map_err(|e| Status::internal(format!("chain stream failed: {e}")))?;
+                run_blocking(&context, move |context| {
+                    Ok(tip_event_to_response(&context, &log, mask))
+                })
+                .await
+            }
         });
 
         Ok(Response::new(Box::pin(stream)))
@@ -304,23 +317,24 @@ where
         &self,
         _request: tonic::Request<u5c::sync::ReadTipRequest>,
     ) -> std::result::Result<tonic::Response<u5c::sync::ReadTipResponse>, tonic::Status> {
-        let (point, _) = self
-            .domain
-            .wal()
-            .find_tip()
-            .map_err(|e| Status::internal(format!("Unable to read WAL: {e:?}")))?
-            .ok_or(Status::internal("chain has no data."))?;
+        run_blocking(&self.domain, |domain| {
+            let (point, _) = domain
+                .wal()
+                .find_tip()
+                .map_err(|e| Status::internal(format!("Unable to read WAL: {e:?}")))?
+                .ok_or(Status::internal("chain has no data."))?;
 
-        let timestamp = self
-            .domain
-            .slot_timestamp(point.slot())
-            .map(|s| s * 1000)
-            .unwrap_or(0);
-        let response = u5c::sync::ReadTipResponse {
-            tip: Some(point_to_blockref(&point, timestamp)),
-        };
+            let timestamp = domain
+                .slot_timestamp(point.slot())
+                .map(|s| s * 1000)
+                .unwrap_or(0);
+            let response = u5c::sync::ReadTipResponse {
+                tip: Some(point_to_blockref(&point, timestamp)),
+            };
 
-        Ok(Response::new(response))
+            Ok(Response::new(response))
+        })
+        .await
     }
 }
 

@@ -11,6 +11,7 @@ use tonic::{Request, Response, Status};
 
 use crate::prelude::*;
 use crate::serve::grpc::block_context::BlockContext;
+use crate::serve::grpc::run_blocking;
 use crate::serve::grpc::stream::ChainStream;
 
 fn outputs_match_address(
@@ -407,8 +408,8 @@ fn roll_to_watch_response<C: ChainReads>(
     context: &C,
     log: &TipEvent,
     request: &u5c::watch::WatchTxRequest,
-) -> impl Stream<Item = u5c::watch::WatchTxResponse> {
-    let responses: Box<dyn Iterator<Item = u5c::watch::WatchTxResponse> + Send> = match log {
+) -> Box<dyn Iterator<Item = u5c::watch::WatchTxResponse> + Send> {
+    match log {
         TipEvent::Apply(_, block) => {
             let mut txs = block_to_txs(block, context, request).peekable();
             if txs.peek().is_none() {
@@ -431,9 +432,7 @@ fn roll_to_watch_response<C: ChainReads>(
         ),
         // TODO: shouldn't we have a u5c event for origin?
         TipEvent::Mark(..) => Box::new(std::iter::empty()),
-    };
-
-    tokio_stream::iter(responses)
+    }
 }
 
 pub struct WatchServiceImpl<D, C>
@@ -479,6 +478,7 @@ where
 
         let stream =
             ChainStream::start::<D, _>(self.domain.clone(), intersect.clone(), self.cancel.clone())
+                .await
                 .map_err(|e| Status::internal(format!("failed to start chain stream: {e}")))?
                 .ok_or_else(|| {
                     Status::not_found(format!(
@@ -487,16 +487,27 @@ where
                 })?;
 
         let domain = self.domain.clone();
+        let request = std::sync::Arc::new(inner_req);
 
-        let stream = stream.flat_map(move |log| match log {
-            Ok(log) => roll_to_watch_response(&domain, &log, &inner_req)
-                .map(Ok)
-                .left_stream(),
-            Err(error) => futures_util::stream::once(async move {
-                Err(Status::internal(format!("chain stream failed: {error}")))
+        let stream = stream
+            .then(move |log| {
+                let domain = domain.clone();
+                let request = request.clone();
+                async move {
+                    let log =
+                        log.map_err(|e| Status::internal(format!("chain stream failed: {e}")))?;
+                    run_blocking(&domain, move |domain| {
+                        Ok(roll_to_watch_response(&domain, &log, &request))
+                    })
+                    .await
+                }
             })
-            .right_stream(),
-        });
+            .flat_map(|responses| match responses {
+                Ok(responses) => tokio_stream::iter(responses.map(Ok)).left_stream(),
+                Err(status) => {
+                    futures_util::stream::once(async move { Err(status) }).right_stream()
+                }
+            });
 
         Ok(Response::new(Box::pin(stream)))
     }

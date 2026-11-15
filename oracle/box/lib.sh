@@ -510,7 +510,7 @@ full_commit() {
 }
 
 LOCK_POLL_SECONDS=${LOCK_POLL_SECONDS:-30}
-# The file of the box's one oracle run lock, since the candidate's name, its port and the build disk are the box's.
+# The file of the box's one oracle run lock, since the build disk is the box's.
 RUN_LOCK=${RUN_LOCK:-/run/lock/dolos-oracle.lock}
 
 # Takes the box lock, a flock on RUN_LOCK through fd 9 that the kernel drops once no process holds fd 9 open, kept across exec, waiting while another process holds it, and recording this process's pid in the file after reporting the pid a holder that exited left there.

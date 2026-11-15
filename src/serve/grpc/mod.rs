@@ -11,6 +11,8 @@ pub(crate) mod block_refs;
 mod convert;
 mod eval;
 mod masking;
+#[cfg(test)]
+mod read_counting;
 mod stream;
 mod v1;
 mod v1alpha;
@@ -55,6 +57,31 @@ fn apply_http2_tuning(mut server: Server, cfg: &GrpcConfig) -> Server {
 
 #[derive(Clone)]
 pub struct ContextAdapter<T: dolos_core::StateStore>(T);
+
+/// Runs `work` over a clone of `domain` on the blocking thread pool.
+async fn run_blocking<D, T>(
+    domain: &D,
+    work: impl FnOnce(D) -> Result<T, tonic::Status> + Send + 'static,
+) -> Result<T, tonic::Status>
+where
+    D: Domain,
+    T: Send + 'static,
+{
+    let domain = domain.clone();
+    on_blocking_pool(move || work(domain))
+        .await
+        .map_err(|e| tonic::Status::internal(e.to_string()))?
+}
+
+/// Runs `work` on the blocking thread pool and resumes its panic on the caller.
+async fn on_blocking_pool<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, tokio::task::JoinError> {
+    match tokio::task::spawn_blocking(work).await {
+        Err(ended) if ended.is_panic() => std::panic::resume_unwind(ended.into_panic()),
+        joined => joined,
+    }
+}
 
 pub struct Driver;
 
@@ -172,5 +199,32 @@ where
             .map_err(|e| ServeError::Internal(e.into()))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dolos_testing::toy_domain::ToyDomain;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn blocking_work_that_returns_answers_its_value() {
+        let domain = ToyDomain::new(None, None);
+
+        let answer = run_blocking(&domain, |_| Ok(7)).await;
+
+        assert_eq!(answer.unwrap(), 7);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "planted")]
+    async fn blocking_work_that_panics_panics_the_handler() {
+        let domain = ToyDomain::new(None, None);
+
+        let _ = run_blocking(&domain, |_| -> Result<(), tonic::Status> {
+            panic!("planted")
+        })
+        .await;
     }
 }
