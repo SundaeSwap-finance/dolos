@@ -42,6 +42,7 @@ pub mod point;
 pub mod state;
 pub mod submit;
 pub mod sync;
+pub mod undo;
 pub mod wal;
 pub mod work_unit;
 
@@ -625,6 +626,10 @@ pub trait ChainLogic: Sized + Send + Sync {
         genesis: &Genesis,
     ) -> Result<Self, ChainError>;
 
+    /// Rebuilds what the chain logic derives from the state, after a rollback
+    /// moved the state's cursor back.
+    fn reload<D: Domain>(&mut self, state: &D::State) -> Result<(), ChainError>;
+
     /// Check if the chain logic can receive a new block.
     ///
     /// Returns false if there is pending work that must be processed
@@ -831,7 +836,9 @@ pub trait Domain: Send + Sync + Clone + 'static {
                 .prune_history(max_slots, Some(Self::MAX_PRUNE_SLOTS_PER_HOUSEKEEPING))?;
         }
 
-        Ok(archive_pruned && wal_pruned)
+        let undo_pruned = undo::prune(self, Self::MAX_PRUNE_SLOTS_PER_HOUSEKEEPING)?;
+
+        Ok(archive_pruned && wal_pruned && undo_pruned)
     }
 
     /// Runs [`Self::housekeeping`] repeatedly until it reports no remaining

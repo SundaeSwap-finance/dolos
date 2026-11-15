@@ -25,11 +25,18 @@ use dolos_snapshot::{
     state_ns_for, LOG_KINDS, LOG_NAMESPACES, NAMESPACES, STATE_KINDS, UTXOS,
 };
 
-/// The state namespaces this profile carries are exactly `build_schema`'s, plus
-/// the UTxO set.
+/// The state namespaces this profile carries are exactly `build_schema`'s, less
+/// the rollback journal, plus the UTxO set.
+///
+/// The journal holds before-images for rollbacks to points before the snapshot,
+/// which a store restored from it has no wal to reach.
 #[test]
 fn namespace_registry_matches_build_schema() {
-    let schema: BTreeSet<Namespace> = build_schema().keys().copied().collect();
+    let schema: BTreeSet<Namespace> = build_schema()
+        .keys()
+        .copied()
+        .filter(|ns| *ns != dolos_core::undo::UNDO_NS)
+        .collect();
     let registry: BTreeSet<Namespace> = NAMESPACES.into_iter().collect();
 
     assert!(

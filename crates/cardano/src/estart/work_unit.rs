@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use dolos_core::{BlockSlot, Domain, DomainError, Genesis, WorkUnit};
+use dolos_core::{undo::Undo, BlockSlot, Domain, DomainError, Genesis, WorkUnit};
 use tracing::{debug, info};
 
 use crate::{
@@ -179,7 +179,8 @@ where
             .as_mut()
             .ok_or_else(|| DomainError::Internal("estart context not loaded".into()))?;
 
-        context.commit_shard::<D>(domain.state(), domain.archive(), ranges)?;
+        let undo = Undo::for_work(domain)?;
+        context.commit_shard::<D>(domain.state(), domain.archive(), ranges, undo)?;
         Ok(())
     }
 
@@ -198,7 +199,8 @@ where
 
         info!(epoch = context.starting_epoch_no(), "starting epoch");
 
-        context.commit_finalize::<D>(domain.state(), domain.archive(), self.slot)?;
+        let undo = Undo::for_work(domain)?;
+        context.commit_finalize::<D>(domain.state(), domain.archive(), self.slot, undo)?;
 
         // Replace the per-shard context with the finalize-phase
         // WorkContext so post-finalize introspection (e.g. `ended_state`

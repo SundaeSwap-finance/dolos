@@ -60,6 +60,23 @@ pub trait WalStore: Clone + Send + Sync + 'static {
         Ok(())
     }
 
+    /// Whether a rollback can return the state to this point from the entries
+    /// the wal holds.
+    fn reaches(&self, point: &ChainPoint) -> Result<bool, WalError> {
+        // A rollback undoes the entries the wal holds and stops at the one
+        // for `point`. Genesis writes an entry at origin and a wal that still
+        // begins there, or holds nothing at all, can reach it. A wal that
+        // begins anywhere else holds no entry for what the state below its
+        // first entry recorded.
+        match point {
+            ChainPoint::Origin => Ok(matches!(
+                self.find_start()?,
+                None | Some((ChainPoint::Origin, _))
+            )),
+            _ => self.contains_point(point),
+        }
+    }
+
     fn iter_all<'a>(&'a self) -> Result<Self::LogIterator<'a>, WalError> {
         self.iter_logs(None, None)
     }

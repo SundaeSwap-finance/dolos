@@ -10,8 +10,9 @@
 //! logs, and advances the cursor.
 
 use dolos_core::{
-    ArchiveStore, ArchiveWriter, BlockSlot, BrokenInvariant, ChainError, ChainPoint, Domain,
-    Entity, EntityDelta as _, EntityKey, LogKey, NsKey, StateStore, StateWriter, TemporalKey,
+    undo::{Undo, UndoArchiveWriter, UndoStateWriter},
+    ArchiveWriter, BlockSlot, BrokenInvariant, ChainError, ChainPoint, Domain, Entity,
+    EntityDelta as _, EntityKey, LogKey, NsKey, StateStore, StateWriter, TemporalKey,
 };
 use tracing::{debug, instrument, trace, warn};
 
@@ -79,7 +80,7 @@ impl super::WorkContext {
     pub(crate) fn stream_and_apply_namespace<D, E>(
         &mut self,
         state: &D::State,
-        writer: &<D::State as StateStore>::Writer,
+        writer: &UndoStateWriter<D::State>,
         range: Option<std::ops::Range<dolos_core::EntityKey>>,
     ) -> Result<(), ChainError>
     where
@@ -128,11 +129,12 @@ impl super::WorkContext {
         state: &D::State,
         archive: &D::Archive,
         ranges: Vec<std::ops::Range<EntityKey>>,
+        undo: Undo,
     ) -> Result<(), ChainError> {
         debug!("committing estart changes");
 
-        let writer = state.start_writer()?;
-        let archive_writer = archive.start_writer()?;
+        let writer = UndoStateWriter::start(state, undo)?;
+        let archive_writer = UndoArchiveWriter::start(archive, undo)?;
 
         // Stream accounts in this shard's ranges only (one per
         // StakeCredential variant). Each call drains the matching deltas
@@ -186,6 +188,7 @@ impl super::WorkContext {
         state: &D::State,
         archive: &D::Archive,
         slot: BlockSlot,
+        undo: Undo,
     ) -> Result<(), ChainError> {
         debug!("committing estart finalize changes");
 
@@ -214,8 +217,8 @@ impl super::WorkContext {
         let start_of_epoch = self.chain_summary.epoch_start(self.starting_epoch_no());
         let temporal_key = TemporalKey::from(&ChainPoint::Slot(start_of_epoch));
 
-        let writer = state.start_writer()?;
-        let archive_writer = archive.start_writer()?;
+        let writer = UndoStateWriter::start(state, undo)?;
+        let archive_writer = UndoArchiveWriter::start(archive, undo)?;
 
         // Skip AccountState — committed earlier by per-shard runs.
 

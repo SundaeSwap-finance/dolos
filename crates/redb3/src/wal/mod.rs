@@ -877,6 +877,8 @@ mod tests {
     struct TestEntity;
 
     impl Entity for TestEntity {
+        const NAMESPACES: &'static [Namespace] = &[];
+
         fn decode_entity(_: Namespace, _: &EntityValue) -> Result<Self, ChainError> {
             unimplemented!("not exercised in WAL versioning tests")
         }

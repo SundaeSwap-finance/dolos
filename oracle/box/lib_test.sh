@@ -699,7 +699,7 @@ records_of() {
 arms_pass='head=PASS control=CLEAN colret=CAUGHT'
 # Must not fire: a done run that passes writes last-done, with every passing word a done run prints. Must fire: a verdict word the pass rule does not name.
 expect done_passed "$(records_of "$arms_pass")" "exit=0 last-done=c"
-expect done_every_passing_word "$(records_of "$arms_pass ctx=HELD fix-arms=PASS value=passed-on-these-inputs")" \
+expect done_every_passing_word "$(records_of "$arms_pass ctx=HELD fix-arms=PASS value=passed-on-these-inputs n2n=passed-on-these-inputs")" \
   "exit=0 last-done=c"
 expect done_unnamed_word "$(records_of "$arms_pass coin=UNREACHED")" "exit=1 last-done=absent"
 
@@ -1646,6 +1646,11 @@ expect image_rule_held "$(build_name "$lib_test_work/image-a" "$lib_test_work/mi
 # Must run the image BUILD_IMAGE names, and must start no container when none is named.
 expect image_run_named "$(BUILD_IMAGE=named:1 run_image "$lib_test_work/image-a")" named:1
 expect image_run_unnamed "$(run_image "$lib_test_work/image-a" | sed 's/exit=[0-9]*/exit=N/') calls=$(grep -c . "$lib_test_work/image-a/docker.log")" "in-image exit=N calls=0"
+# Must hand the container the reads dir LIVE_DIR names, and must hand it none when LIVE_DIR is unset.
+BUILD_IMAGE=named:1 run_image "$lib_test_work/image-a" >/dev/null
+expect image_live_dir_unset "$(grep -c LIVE_DIR "$lib_test_work/image-a/docker.log")" 0
+BUILD_IMAGE=named:1 LIVE_DIR=/w/reads run_image "$lib_test_work/image-a" >/dev/null
+expect image_live_dir "$(grep -c 'LIVE_DIR=/w/reads' "$lib_test_work/image-a/docker.log")" 1
 
 # Commits to the git repo $lib_test_work/gen-src a harness whose generator is named gen-$1 and whose build-generator.sh logs each call to $lib_test_work/gen.log and makes that generator unless $2 is fail, and prints the commit.
 harness_gen() {

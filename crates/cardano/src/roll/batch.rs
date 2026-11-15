@@ -17,7 +17,7 @@ use crate::{
 use dolos_core::{
     ArchiveIndexDelta, ArchiveStore, ArchiveWriter as _, Block as _, BlockSlot, ChainError,
     ChainPoint, Domain, DomainError, EntityDelta, EntityMap, LogValue, NsKey, RawBlock, RawUtxoMap,
-    StateError, StateStore, StateWriter as _, TxoRef, UtxoIndexDelta, UtxoSetDelta, WalStore as _,
+    StateError, StateStore, StateWriter, TxoRef, UtxoIndexDelta, UtxoSetDelta, WalStore as _,
 };
 
 /// Container for entity deltas computed during block processing.
@@ -46,7 +46,7 @@ impl WorkDeltas {
     pub fn apply_singleton<E, S>(
         &mut self,
         state: &S,
-        writer: &S::Writer,
+        writer: &impl StateWriter,
     ) -> Result<Option<E>, ChainError>
     where
         E: SingletonEntity + Into<CardanoEntity>,

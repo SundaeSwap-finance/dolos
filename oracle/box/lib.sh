@@ -68,6 +68,8 @@ crate_test() {
     stored-decode-as-client) echo "-p dolos-cardano --lib" ;;
     evaluation-fault-as-client) echo "-p dolos-cardano --lib" ;;
     dijkstra-witnesses-refused) echo "-p dolos-trp --lib" ;;
+    n2n-magic-wrong | n2n-v16-four-fields) echo "-p dolos --lib" ;;
+    n2n-leios-minimum-above-node | n2n-fetched-tx-dropped) echo "-p dolos --lib" ;;
     *) return 1 ;;
   esac
 }
@@ -83,6 +85,10 @@ crate_test_source() {
     stored-decode-as-client) echo crates/cardano/src/validate.rs ;;
     evaluation-fault-as-client) echo crates/cardano/src/validate.rs ;;
     dijkstra-witnesses-refused) echo crates/trp/src/methods.rs ;;
+    n2n-magic-wrong | n2n-v16-four-fields)
+      printf '%s\n' src/serve/grpc/v1/ledger_oracle_tests/n2n.rs test_data/n2n/handshake.txt ;;
+    n2n-leios-minimum-above-node | n2n-fetched-tx-dropped)
+      printf '%s\n' src/serve/grpc/v1/ledger_oracle_tests/n2n.rs test_data/n2n/fetch.txt ;;
   esac
 }
 
@@ -97,6 +103,10 @@ crate_test_filter() {
     stored-decode-as-client) echo "validate::evaluation_tests::a_stored_output_that_fails_to_decode_is_a_server_fault validate::evaluation_tests::a_stored_output_of_an_unknown_era_is_a_server_fault --exact" ;;
     evaluation-fault-as-client) echo "validate::evaluation_tests::an_evaluation_the_server_cannot_build_is_a_server_fault --exact" ;;
     dijkstra-witnesses-refused) echo "methods::tests::a_dijkstra_submission_takes_its_witnesses --exact" ;;
+    n2n-magic-wrong | n2n-v16-four-fields)
+      echo "$ORACLE_TESTS::n2n::tests::the_node_accepts_the_proposal_at_the_leios_version --exact" ;;
+    n2n-leios-minimum-above-node | n2n-fetched-tx-dropped)
+      echo "$ORACLE_TESTS::n2n::tests::a_recorded_endorser_block_is_fetched_as_dolos_serves_it --exact" ;;
   esac
 }
 
@@ -439,6 +449,7 @@ passed() {
   for verdict in $1; do
     case $verdict in
       *=PASS | *=CLEAN | *=CAUGHT | *=HELD | value=passed-on-these-inputs | amaru=passed-on-these-inputs) ;;
+      n2n=passed-on-these-inputs) ;;
       *) return 1 ;;
     esac
   done

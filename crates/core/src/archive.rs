@@ -250,6 +250,8 @@ pub trait ArchiveWriter: Send + Sync + 'static {
         value: &EntityValue,
     ) -> Result<(), ArchiveError>;
 
+    fn delete_log(&self, ns: Namespace, key: &LogKey) -> Result<(), ArchiveError>;
+
     fn write_log_typed<E: Entity>(&self, key: &LogKey, entity: &E) -> Result<(), ArchiveError> {
         let (ns, raw) = E::encode_entity(entity);
 

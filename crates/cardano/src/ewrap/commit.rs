@@ -11,8 +11,9 @@
 //! archive.
 
 use dolos_core::{
-    ArchiveStore, ArchiveWriter, ChainError, ChainPoint, Domain, Entity, EntityDelta as _, LogKey,
-    NsKey, StateStore, StateWriter, TemporalKey,
+    undo::{Undo, UndoArchiveWriter, UndoStateWriter},
+    ArchiveWriter, ChainError, ChainPoint, Domain, Entity, EntityDelta as _, LogKey, NsKey,
+    StateStore, StateWriter, TemporalKey,
 };
 use tracing::{debug, instrument, trace, warn};
 
@@ -30,7 +31,7 @@ impl BoundaryWork {
     pub(crate) fn stream_and_apply_namespace<D, E>(
         &mut self,
         state: &D::State,
-        writer: &<D::State as StateStore>::Writer,
+        writer: &UndoStateWriter<D::State>,
         range: Option<std::ops::Range<dolos_core::EntityKey>>,
     ) -> Result<(), ChainError>
     where
@@ -73,11 +74,12 @@ impl BoundaryWork {
         state: &D::State,
         archive: &D::Archive,
         ranges: Vec<std::ops::Range<dolos_core::EntityKey>>,
+        undo: Undo,
     ) -> Result<(), ChainError> {
         debug!("committing ewrap changes");
 
-        let writer = state.start_writer()?;
-        let archive_writer = archive.start_writer()?;
+        let writer = UndoStateWriter::start(state, undo)?;
+        let archive_writer = UndoArchiveWriter::start(archive, undo)?;
 
         // Stream accounts in this shard's ranges only (one per StakeCredential
         // variant). Each call drains the matching deltas from `self.deltas`,
@@ -153,11 +155,12 @@ impl BoundaryWork {
         &mut self,
         state: &D::State,
         archive: &D::Archive,
+        undo: Undo,
     ) -> Result<(), ChainError> {
         debug!("committing ewrap changes");
 
-        let writer = state.start_writer()?;
-        let archive_writer = archive.start_writer()?;
+        let writer = UndoStateWriter::start(state, undo)?;
+        let archive_writer = UndoArchiveWriter::start(archive, undo)?;
 
         // Apply deltas to pools / dreps / proposals. The only `AssignRewards`
         // deltas Ewrap queues against accounts come from MIR processing

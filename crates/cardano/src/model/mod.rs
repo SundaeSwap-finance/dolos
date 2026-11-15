@@ -32,6 +32,8 @@ macro_rules! entity_boilerplate {
         }
 
         impl dolos_core::Entity for $type {
+            const NAMESPACES: &'static [dolos_core::Namespace] = &[$ns];
+
             fn decode_entity(
                 ns: dolos_core::Namespace,
                 value: &dolos_core::EntityValue,
@@ -133,6 +135,22 @@ variant_boilerplate!(GovState);
 variant_boilerplate!(AccountEpochLog);
 
 impl dolos_core::Entity for CardanoEntity {
+    const NAMESPACES: &'static [Namespace] = &[
+        EraSummary::NS,
+        AccountState::NS,
+        AssetState::NS,
+        PoolState::NS,
+        EpochState::NS,
+        DRepState::NS,
+        ProposalState::NS,
+        StakeLog::NS,
+        DatumState::NS,
+        PendingRewardState::NS,
+        PendingMirState::NS,
+        GovState::NS,
+        AccountEpochLog::NS,
+    ];
+
     fn decode_entity(ns: Namespace, value: &EntityValue) -> Result<Self, ChainError> {
         match ns {
             EraSummary::NS => EraSummary::decode_entity(ns, value).map(Into::into),
@@ -173,19 +191,12 @@ impl dolos_core::Entity for CardanoEntity {
 
 pub fn build_schema() -> StateSchema {
     let mut schema = StateSchema::default();
-    schema.insert(EraSummary::NS, NamespaceType::KeyValue);
-    schema.insert(AccountState::NS, NamespaceType::KeyValue);
-    schema.insert(AssetState::NS, NamespaceType::KeyValue);
-    schema.insert(PoolState::NS, NamespaceType::KeyValue);
-    schema.insert(EpochState::NS, NamespaceType::KeyValue);
-    schema.insert(DRepState::NS, NamespaceType::KeyValue);
-    schema.insert(ProposalState::NS, NamespaceType::KeyValue);
-    schema.insert(StakeLog::NS, NamespaceType::KeyValue);
-    schema.insert(AccountEpochLog::NS, NamespaceType::KeyValue);
-    schema.insert(DatumState::NS, NamespaceType::KeyValue);
-    schema.insert(PendingRewardState::NS, NamespaceType::KeyValue);
-    schema.insert(PendingMirState::NS, NamespaceType::KeyValue);
-    schema.insert(GovState::NS, NamespaceType::KeyValue);
+
+    for ns in <CardanoEntity as dolos_core::Entity>::NAMESPACES {
+        schema.insert(ns, NamespaceType::KeyValue);
+    }
+
+    schema.insert(dolos_core::undo::UNDO_NS, NamespaceType::KeyValue);
     schema
 }
 
