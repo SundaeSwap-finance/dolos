@@ -141,7 +141,6 @@ fn param_update_to_pparamset(update: &MultiEraParamUpdate) -> Result<PParamsSet,
         key_deposit => KeyDeposit,
         pool_deposit => PoolDeposit,
         desired_number_of_stake_pools => DesiredNumberOfStakePools,
-        ada_per_utxo_byte => MinUtxoValue,
         min_pool_cost => MinPoolCost,
         expansion_rate => ExpansionRate,
         treasury_growth_rate => TreasuryGrowthRate,
@@ -767,6 +766,28 @@ mod dijkstra_governance_tests {
         assert_eq!(
             recorded.get(PParamKind::MaxEndorserBlockTxsSize),
             Some(&PParamValue::MaxEndorserBlockTxsSize(1500000))
+        );
+    }
+
+    /// A proposal of the coins per UTxO byte records that parameter alone.
+    #[test]
+    fn a_coins_per_utxo_byte_update_records_that_parameter_alone() {
+        let value = minicbor::to_vec(4310u64).unwrap();
+        let dijkstra = parameter_change(dijkstra_update(17, &value));
+        let conway = pallas::ledger::primitives::conway::GovAction::ParameterChange(
+            None,
+            Box::new(conway_update(17, &value)),
+            None,
+        );
+        let expected = PParamsSet::default().with(PParamValue::AdaPerUtxoByte(4310));
+
+        assert_eq!(
+            recorded_set(&MultiEraGovAction::from_dijkstra(&dijkstra)),
+            expected
+        );
+        assert_eq!(
+            recorded_set(&MultiEraGovAction::from_conway(&conway)),
+            expected
         );
     }
 
