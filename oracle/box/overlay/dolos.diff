@@ -634,10 +634,10 @@ index 19e3aaa6..0f6d727f 100644
              original_cbor,
          });
 diff --git a/src/serve/grpc/v1alpha/watch.rs b/src/serve/grpc/v1alpha/watch.rs
-index a91e15ca..bfadf66f 100644
+index cff967dd..8ed9a5ea 100644
 --- a/src/serve/grpc/v1alpha/watch.rs
 +++ b/src/serve/grpc/v1alpha/watch.rs
-@@ -415,7 +415,11 @@ fn block_to_txs<C: ChainReads>(
+@@ -412,7 +412,11 @@ pub(super) fn block_to_txs<C: ChainReads>(
              .tx
              .then_some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
          block: (mask.block != BlockMask::none()).then(|| u5c::watch::AnyChainBlock {
@@ -710,10 +710,10 @@ index c2fa5a49..1ab08846 100644
              None
          },
 diff --git a/src/serve/grpc/v1beta/watch.rs b/src/serve/grpc/v1beta/watch.rs
-index bb88c43f..0f6439fd 100644
+index 16858e49..6070fbbd 100644
 --- a/src/serve/grpc/v1beta/watch.rs
 +++ b/src/serve/grpc/v1beta/watch.rs
-@@ -407,7 +407,11 @@ fn block_to_txs<C: ChainReads>(
+@@ -404,7 +404,11 @@ pub(super) fn block_to_txs<C: ChainReads>(
              .tx
              .then_some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
          block: (mask.block != BlockMask::none()).then(|| u5c::watch::AnyChainBlock {

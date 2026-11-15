@@ -17,33 +17,30 @@ use crate::serve::grpc::predicate;
 use crate::serve::grpc::run_blocking;
 use crate::serve::grpc::stream::ChainStream;
 
+fn matches_address(pattern: &u5c::cardano::AddressPattern, address: &bytes::Bytes) -> bool {
+    let exact_matches = criterion(&pattern.exact_address).is_none_or(|exact| address == exact);
+
+    let delegation_matches = criterion(&pattern.delegation_part).is_none_or(|delegation| {
+        match Address::from_bytes(address).unwrap() {
+            Address::Shelley(s) => s.delegation().to_vec().eq(delegation),
+            _ => false,
+        }
+    });
+    let payment_matches = criterion(&pattern.payment_part).is_none_or(|payment| {
+        match Address::from_bytes(address).unwrap() {
+            Address::Shelley(s) => s.payment().to_vec().eq(payment),
+            _ => false,
+        }
+    });
+
+    exact_matches && delegation_matches && payment_matches
+}
+
 fn outputs_match_address(
     pattern: &u5c::cardano::AddressPattern,
     outputs: &[u5c::cardano::TxOutput],
 ) -> bool {
-    let exact_matches = criterion(&pattern.exact_address)
-        .is_none_or(|exact| outputs.iter().any(|o| o.address == *exact));
-
-    let delegation_matches = criterion(&pattern.delegation_part).is_none_or(|delegation| {
-        outputs.iter().any(|o| {
-            let addr = Address::from_bytes(&o.address).unwrap();
-            match addr {
-                Address::Shelley(s) => s.delegation().to_vec().eq(delegation),
-                _ => false,
-            }
-        })
-    });
-    let payment_matches = criterion(&pattern.payment_part).is_none_or(|payment| {
-        outputs.iter().any(|o| {
-            let addr = Address::from_bytes(&o.address).unwrap();
-            match addr {
-                Address::Shelley(s) => s.payment().to_vec().eq(payment),
-                _ => false,
-            }
-        })
-    });
-
-    exact_matches && delegation_matches && payment_matches
+    outputs.iter().any(|o| matches_address(pattern, &o.address))
 }
 
 fn outputs_match_asset(
@@ -72,17 +69,17 @@ fn matches_asset(
 
 fn matches_output(
     pattern: &u5c::cardano::TxOutputPattern,
-    outputs: &[u5c::cardano::TxOutput],
+    output: &u5c::cardano::TxOutput,
 ) -> bool {
-    let address_match = pattern
-        .address
-        .as_ref()
-        .is_none_or(|addr_pattern| outputs_match_address(addr_pattern, outputs));
+    let u5c::cardano::TxOutputPattern { address, asset } = pattern;
 
-    let asset_match = pattern
-        .asset
+    let address_match = address
         .as_ref()
-        .is_none_or(|asset_pattern| outputs_match_asset(asset_pattern, outputs));
+        .is_none_or(|addr_pattern| matches_address(addr_pattern, &output.address));
+
+    let asset_match = asset
+        .as_ref()
+        .is_none_or(|asset_pattern| matches_asset(asset_pattern, &output.assets));
 
     address_match && asset_match
 }
@@ -302,7 +299,7 @@ fn matches_cardano_pattern(tx_pattern: &u5c::cardano::TxPattern, tx: &u5c::carda
     let consumes_match = tx_pattern
         .consumes
         .as_ref()
-        .is_none_or(|out_pattern| matches_output(out_pattern, &inputs));
+        .is_none_or(|out_pattern| inputs.iter().any(|x| matches_output(out_pattern, x)));
 
     let mints_asset_match = tx_pattern
         .mints_asset
@@ -316,7 +313,7 @@ fn matches_cardano_pattern(tx_pattern: &u5c::cardano::TxPattern, tx: &u5c::carda
     let produces_match = tx_pattern
         .produces
         .as_ref()
-        .is_none_or(|out_pattern| matches_output(out_pattern, outputs));
+        .is_none_or(|out_pattern| outputs.iter().any(|x| matches_output(out_pattern, x)));
 
     let has_certificate_match = tx_pattern
         .has_certificate
@@ -370,7 +367,7 @@ pub(super) fn apply_predicate(predicate: &u5c::watch::TxPredicate, tx: &u5c::car
 
 /// The transactions of a block the request admits, each built when read with
 /// the parts its mask selects, the block mapped once and its bytes shared.
-fn block_to_txs<C: ChainReads>(
+pub(super) fn block_to_txs<C: ChainReads>(
     block: &RawBlock,
     context: &C,
     request: &u5c::watch::WatchTxRequest,

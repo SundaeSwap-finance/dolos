@@ -645,18 +645,21 @@ async fn watch_mempool_answers_only_the_transactions_its_predicate_admits() {
     }
 }
 
-/// A mempool transaction that mints `beta` and spends the first output of
-/// `parent`.
-fn spending_first_output_of(parent: &MempoolTx) -> MempoolTx {
+/// A mempool transaction that mints `beta` and spends the outputs of `parent`
+/// numbered `indices`.
+fn spending(parent: &MempoolTx, indices: &[u64]) -> MempoolTx {
     let minted = minting_txs().remove(1);
     let decoded = MultiEraTx::decode_for_era(Era::Conway, minted.payload().cbor()).unwrap();
     let mut tx = decoded.as_conway().unwrap().clone();
     let mut body = (*tx.transaction_body).clone();
-    body.inputs = vec![pallas::ledger::primitives::conway::TransactionInput {
-        transaction_id: parent.hash(),
-        index: 0,
-    }]
-    .into();
+    body.inputs = indices
+        .iter()
+        .map(|&index| pallas::ledger::primitives::conway::TransactionInput {
+            transaction_id: parent.hash(),
+            index,
+        })
+        .collect::<Vec<_>>()
+        .into();
     tx.transaction_body = body.into();
     let bytes = minicbor::to_vec(&tx).unwrap();
     let hash = MultiEraTx::decode_for_era(Era::Conway, &bytes)
@@ -697,7 +700,7 @@ fn consumes_from(address: Vec<u8>) -> TxPredicate {
 #[tokio::test]
 async fn watch_mempool_matches_an_input_that_spends_a_pending_output() {
     let parent = minting_txs().remove(0);
-    let child = spending_first_output_of(&parent);
+    let child = spending(&parent, &[0]);
     let spent = first_output_address(&parent);
     let elsewhere = vec![0x61; 29];
     assert_ne!(spent, elsewhere);
