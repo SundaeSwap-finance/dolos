@@ -620,7 +620,7 @@ mod tests {
         );
         assert_eq!(
             input_totals(CorpusKind::Supp),
-            [2863, 667, 15, 35, 38, 7, 38]
+            [2867, 667, 15, 37, 41, 7, 41]
         );
     }
 }

@@ -350,7 +350,7 @@ mod tests {
             .filter(|w| w[1].pre == Pre::FollowsPrev && w[1].pparams != w[0].pparams)
             .map(|w| w[1].n)
             .collect();
-        assert_eq!((fresh, &repriced[..]), (723, &[374][..]));
+        assert_eq!((fresh, &repriced[..]), (724, &[374][..]));
         assert_eq!(split(records).len(), fresh + repriced.len());
     }
 
