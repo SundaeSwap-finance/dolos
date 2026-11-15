@@ -626,6 +626,10 @@ pub trait ChainLogic: Sized + Send + Sync {
         genesis: &Genesis,
     ) -> Result<Self, ChainError>;
 
+    /// Rebuilds what the chain logic derives from the state, after a rollback
+    /// moved the state's cursor back.
+    fn reload<D: Domain>(&mut self, state: &D::State) -> Result<(), ChainError>;
+
     /// Check if the chain logic can receive a new block.
     ///
     /// Returns false if there is pending work that must be processed

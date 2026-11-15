@@ -310,3 +310,34 @@ fn a_restarted_replay_after_a_rollback_across_an_epoch_boundary_reaches_the_same
 
     assert_eq!(Store::read(&domain).differences(&at_tip), BTreeMap::new());
 }
+
+/// The must-not case for a follower that keeps running. The undone blocks sit
+/// in one epoch, so the replay runs no epoch work.
+#[test]
+fn a_live_replay_after_a_rollback_inside_an_epoch_reaches_the_same_tip() {
+    let (domain, _) = domain();
+    let blocks = empty_blocks(&[100, EPOCH_ONE, EPOCH_ONE + 1, EPOCH_ONE + 2], 10);
+    let (before, ahead) = blocks.split_at(2);
+
+    let (_, at_tip, _) = there_and_back(&domain, before, ahead);
+
+    roll(&domain, ahead);
+
+    assert_eq!(Store::read(&domain).differences(&at_tip), BTreeMap::new());
+}
+
+/// A follower that keeps running after the rollback, as a live one does when
+/// its peer switches forks, replays the undone blocks to the tip it held
+/// before.
+#[test]
+fn a_live_replay_after_a_rollback_across_an_epoch_boundary_reaches_the_same_tip() {
+    let (domain, _) = domain();
+    let blocks = empty_blocks(&[100, EPOCH_ONE - 1, EPOCH_ONE, EPOCH_ONE + 1], 10);
+    let (before, ahead) = blocks.split_at(2);
+
+    let (_, at_tip, _) = there_and_back(&domain, before, ahead);
+
+    roll(&domain, ahead);
+
+    assert_eq!(Store::read(&domain).differences(&at_tip), BTreeMap::new());
+}

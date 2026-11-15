@@ -48,8 +48,11 @@ pub(crate) enum WorkBuffer {
 }
 
 impl WorkBuffer {
-    pub fn new_from_cursor(cursor: ChainPoint) -> Self {
-        Self::Restart(cursor)
+    pub fn new_from_cursor(cursor: Option<ChainPoint>) -> Self {
+        match cursor {
+            Some(cursor) => Self::Restart(cursor),
+            None => Self::Empty,
+        }
     }
 
     pub fn last_point_seen(&self) -> ChainPoint {

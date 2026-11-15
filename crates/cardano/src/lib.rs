@@ -320,12 +320,7 @@ impl dolos_core::ChainLogic for CardanoLogic {
         // expect the singleton to exist.
         migrate::ensure_gov_singleton::<D>(state)?;
 
-        let cursor = state.read_cursor()?;
-
-        let work = match cursor {
-            Some(cursor) => WorkBuffer::new_from_cursor(cursor),
-            None => WorkBuffer::Empty,
-        };
+        let work = WorkBuffer::new_from_cursor(state.read_cursor()?);
 
         // Crash-recovery diagnostics for a boundary interrupted by a prior
         // crash. The two progress fields are NOT mutually exclusive: under
@@ -395,6 +390,14 @@ impl dolos_core::ChainLogic for CardanoLogic {
             needs_cache_refresh: false,
             unconfirmed: Default::default(),
         })
+    }
+
+    fn reload<D: Domain>(&mut self, state: &D::State) -> Result<(), ChainError> {
+        self.work = Some(WorkBuffer::new_from_cursor(state.read_cursor()?));
+        self.refresh_cache::<D>(state)?;
+        self.needs_cache_refresh = false;
+
+        Ok(())
     }
 
     fn can_receive_block(&self) -> bool {

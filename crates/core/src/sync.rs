@@ -111,6 +111,8 @@ impl<D: Domain> SyncExt for D {
 
     #[instrument(skip_all, fields(rollback_to = %to))]
     fn rollback(&self, to: &ChainPoint) -> Result<(), DomainError> {
+        let mut chain = self.write_chain();
+
         if !self.wal().reaches(to)? {
             return Err(DomainError::RollbackTargetNotInWal(to.clone()));
         }
@@ -193,7 +195,8 @@ impl<D: Domain> SyncExt for D {
 
         self.wal().truncate_front(to)?;
 
-        revalidate_mempool(self, &self.read_chain());
+        chain.reload::<Self>(self.state())?;
+        revalidate_mempool(self, &chain);
 
         Ok(())
     }
