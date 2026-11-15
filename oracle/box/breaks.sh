@@ -54,6 +54,8 @@ run_crate_test() {
 overlay=
 # The switches of overlay/ whose hunks did not apply.
 overlay_unplanted=
+# The regen verdict of overlay/ once both of its diffs are planted.
+overlay_regen=
 # Builds the judge and each switched crate test ARMS selects once, the joint crate tests in the judge's cargo invocation, from the overlay trees, which hold the scratch tree and the pinned pallas with overlay/ applied, and copies them to $OUT/bin, setting overlay to built or to the verdict of every switched arm when it fails.
 build_overlay() {
   case $overlay in
@@ -70,6 +72,10 @@ build_overlay() {
     return 1
   fi
   sed -n 's/^REGEN /OVERLAY regen /p' "$OUT/overlay.plant"
+  overlay_regen=$(regen_verdict "$OUT/overlay.plant" overlay/pallas.diff overlay/dolos.diff)
+  if [ "$overlay_regen" != PASS ]; then
+    echo "OVERLAY $overlay_regen log=$OUT/overlay.plant"
+  fi
   overlay_unplanted=$(echo $unplanted)
   if [ -n "$overlay_unplanted" ]; then
     echo "OVERLAY UNPLANTED switches=\"$overlay_unplanted\" log=$OUT/overlay.plant"
@@ -397,6 +403,9 @@ for arm in $ARMS; do
 done
 judge_batch
 reset_scratch
+if [ -n "$overlay_regen" ]; then
+  verdicts="$verdicts overlay-regen=${overlay_regen%% *}"
+fi
 served_check "$verdicts"
 verdicts=" $checked"
 

@@ -440,6 +440,23 @@ plant_tree() {
   clone_at "$plant_at" "$ROOT/$PLANT" "$plant_state" >&2 || return 2
 }
 
+# Prints PASS when the plant log $1 says git writes each diff after it as committed, else STALE and the diffs it does not say that of.
+regen_verdict() {
+  regen_log=$1
+  shift
+  regen_stale=
+  for regen_diff; do
+    if ! grep -q -x -F "REGEN diff=$regen_diff same" "$regen_log"; then
+      regen_stale="${regen_stale:+$regen_stale,}$regen_diff"
+    fi
+  done
+  if [ -n "$regen_stale" ]; then
+    echo "STALE diffs=$regen_stale"
+  else
+    echo PASS
+  fi
+}
+
 # Whether a verdict list holds a passing head and every verdict in it names a passing word.
 passed() {
   case " $1 " in

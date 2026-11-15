@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, the overlay build's target dir, which arms an overlay switches, when two test logs differ, an encoding arm's verdict, an arm's verdict from its run, the log run_into_log writes of a run that writes to both outputs, what an arm served against its row of served.txt, the switches an overlay plant leaves out, the files a planted tree writes and whether git writes each diff as committed, the free space floor, the record a passing done run writes, the box lock, how many switched arms are judged at once, the pallas pin, the scratch pallas checkout, when the box tests are due, when the value leg is due, a value arm's verdict, what the value leg hands the harness tier and which of its steps it reruns, the value control's verdict, the amaru pin, the amaru leg's verdicts, the build image's name by the harness's image scripts, the image in-image.sh runs and the endorser block endorser_fixture.py reads from each LeiosDb layout.
+# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, the overlay build's target dir, which arms an overlay switches, when two test logs differ, an encoding arm's verdict, an arm's verdict from its run, the log run_into_log writes of a run that writes to both outputs, what an arm served against its row of served.txt, the switches an overlay plant leaves out, the files a planted tree writes and whether git writes each diff as committed, the overlay's regen verdict, the free space floor, the record a passing done run writes, the box lock, how many switched arms are judged at once, the pallas pin, the scratch pallas checkout, when the box tests are due, when the value leg is due, a value arm's verdict, what the value leg hands the harness tier and which of its steps it reruns, the value control's verdict, the amaru pin, the amaru leg's verdicts, the build image's name by the harness's image scripts, the image in-image.sh runs and the endorser block endorser_fixture.py reads from each LeiosDb layout.
 # Usage: lib_test.sh <empty work dir>
 set -eu
 lib_test_work=$(cd "$1" && pwd)
@@ -655,6 +655,34 @@ tree_stamp
 # Must say git does not write a diff as committed when its bytes differ from what git writes for the same change.
 expect tree_regen_differs "$(tree_plant "$H/tree/a-long.diff")" \
   "exit=0  diff=tree/a-long.diff differs kept=Cargo.toml, written=a.rs,b.rs, switched=a.rs /w/scratch/pallas-x/pallas-validate"
+
+# The regen verdict of the plant log $1 for the diffs after it.
+regen_of() {
+  (
+    ROOT=$T HERE=$H
+    . "$lib_test_lib"
+    regen_verdict "$@"
+  )
+}
+printf '%s\n' 'REGEN diff=tree/a.diff same' 'REGEN diff=tree/b.diff same' >"$T/regen-same"
+printf '%s\n' 'REGEN diff=tree/a.diff same' 'REGEN diff=tree/b.diff differs' >"$T/regen-differs"
+printf '%s\n' 'REGEN diff=tree/a.diff same' >"$T/regen-absent"
+printf '%s\n' 'REGEN diff=tree/a.diff same' 'REGEN diff=tree/b.diff.old same' >"$T/regen-other"
+# Must not fire: a log saying git writes every diff as committed.
+expect regen_same "$(regen_of "$T/regen-same" tree/a.diff tree/b.diff)" "PASS"
+# Must fire: a diff git does not write as committed.
+expect regen_differs "$(regen_of "$T/regen-differs" tree/a.diff tree/b.diff)" "STALE diffs=tree/b.diff"
+# Must fire: a diff the log holds no line for.
+expect regen_absent "$(regen_of "$T/regen-absent" tree/a.diff tree/b.diff)" "STALE diffs=tree/b.diff"
+# Must fire: a line for another diff whose name starts with the diff's.
+expect regen_other "$(regen_of "$T/regen-other" tree/a.diff tree/b.diff)" "STALE diffs=tree/b.diff"
+tree_stamp
+# Must not fire on the log plant_tree writes for a diff git writes as committed.
+expect regen_tree_same "$(tree_plant "$H/tree/a.diff" >/dev/null && regen_of "$T/plant.err" tree/a.diff)" "PASS"
+tree_stamp
+# Must fire on the log plant_tree writes for a diff git does not write as committed.
+expect regen_tree_differs "$(tree_plant "$H/tree/a-long.diff" >/dev/null && regen_of "$T/plant.err" tree/a-long.diff)" \
+  "STALE diffs=tree/a-long.diff"
 
 # The free gibibytes of a filesystem holding $1 bytes free and require_free's verdict with a floor of $2, with a df that answers -B1 in bytes and -BG in gibibytes rounded up.
 free_of() {
