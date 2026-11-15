@@ -26,6 +26,7 @@ fn evaluation(
 ) -> crate::serve::grpc::eval::TxEvaluation<u5c::cardano::Redeemer> {
     crate::serve::grpc::eval::TxEvaluation {
         report,
+        min_fee: None,
         redeemers: vec![],
     }
 }
@@ -35,6 +36,24 @@ fn tx_eval_to_u5c(
     eval: Result<crate::serve::grpc::eval::TxEvaluation<u5c::cardano::Redeemer>, DomainError>,
 ) -> u5c::cardano::TxEval {
     super::tx_eval_to_u5c(eval, Clone::clone)
+}
+
+#[test]
+fn the_fee_is_the_minimum_fee_and_unset_without_one() {
+    use u5c::cardano::{big_int, BigInt};
+    let unpriced = tx_eval_to_u5c(Ok(evaluation(vec![entry(RedeemerTag::Spend, 0, true)])));
+    let mut priced = evaluation(vec![entry(RedeemerTag::Spend, 0, true)]);
+    priced.min_fee = Some(165413);
+
+    let priced = tx_eval_to_u5c(Ok(priced));
+
+    assert_eq!(unpriced.fee, None);
+    assert_eq!(
+        priced.fee,
+        Some(BigInt {
+            big_int: Some(big_int::BigInt::Int(165413)),
+        })
+    );
 }
 
 #[test]

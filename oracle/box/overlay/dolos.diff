@@ -406,7 +406,7 @@ index 6a010719..b24b47e5 100644
          let resolved = if refs.is_empty() {
              Some(UtxoMap::new())
 diff --git a/src/serve/grpc/v1/query.rs b/src/serve/grpc/v1/query.rs
-index b3a5af22..6236592f 100644
+index d41af2a1..8c4a7eea 100644
 --- a/src/serve/grpc/v1/query.rs
 +++ b/src/serve/grpc/v1/query.rs
 @@ -801,6 +801,9 @@ async fn into_u5c_utxo<S: Domain>(
@@ -420,10 +420,22 @@ index b3a5af22..6236592f 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index 2a336734..5c19597d 100644
+index e460fd9a..f24a9546 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
-@@ -115,6 +115,9 @@ fn tx_eval_to_u5c<R>(
+@@ -84,7 +84,10 @@ fn tx_eval_to_u5c<R>(
+                 memory: acc.memory.checked_add(eval.units.mem)?,
+             })
+         }),
+-        fee: evaluation.min_fee.and_then(super::query::u64_to_bigint),
++        fee: evaluation
++            .min_fee
++            .filter(|_| !pallas::crypto::oracle_plant("eval-fee-unset"))
++            .and_then(super::query::u64_to_bigint),
+         ..Default::default()
+     };
+     if result.ex_units.is_none() {
+@@ -116,6 +119,9 @@ fn tx_eval_to_u5c<R>(
              MultiEraRedeemerTag::Reward => RedeemerPurpose::Reward,
              MultiEraRedeemerTag::Vote => RedeemerPurpose::Vote,
              MultiEraRedeemerTag::Propose => RedeemerPurpose::Propose,
@@ -433,7 +445,7 @@ index 2a336734..5c19597d 100644
              MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
              other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
          };
-@@ -131,11 +134,15 @@ fn tx_eval_to_u5c<R>(
+@@ -132,11 +138,15 @@ fn tx_eval_to_u5c<R>(
                  entry
                      .failure_message
                      .as_deref()
@@ -450,7 +462,7 @@ index 2a336734..5c19597d 100644
          let (payload, original_cbor) = held
              .map(|r| (r.payload, r.original_cbor))
              .unwrap_or_default();
-@@ -150,6 +157,9 @@ fn tx_eval_to_u5c<R>(
+@@ -151,6 +161,9 @@ fn tx_eval_to_u5c<R>(
              original_cbor,
          });
      }
@@ -461,10 +473,10 @@ index 2a336734..5c19597d 100644
  }
  
 diff --git a/src/serve/grpc/v1alpha/submit.rs b/src/serve/grpc/v1alpha/submit.rs
-index 0ca0b589..76fd814e 100644
+index d0abfc88..0e8f4f6c 100644
 --- a/src/serve/grpc/v1alpha/submit.rs
 +++ b/src/serve/grpc/v1alpha/submit.rs
-@@ -142,9 +142,16 @@ fn tx_eval_to_u5c<R>(
+@@ -143,9 +143,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
              payload,
              index: entry.index,
@@ -502,10 +514,10 @@ index b3f07291..d4ed3362 100644
                  .clone()
                  .map(u5c::watch::any_chain_block::Chain::Cardano),
 diff --git a/src/serve/grpc/v1beta/submit.rs b/src/serve/grpc/v1beta/submit.rs
-index 2a5d8ff0..294a4ca4 100644
+index cc73fa5b..6e7f3c30 100644
 --- a/src/serve/grpc/v1beta/submit.rs
 +++ b/src/serve/grpc/v1beta/submit.rs
-@@ -142,9 +142,16 @@ fn tx_eval_to_u5c<R>(
+@@ -143,9 +143,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
              payload,
              index: entry.index,
@@ -525,7 +537,7 @@ index 2a5d8ff0..294a4ca4 100644
              }),
              original_cbor,
          });
-@@ -188,7 +195,11 @@ where
+@@ -189,7 +196,11 @@ where
  
          info!(tx.hash = %hash, "accepted grpc transaction into mempool");
          Ok(Response::new(SubmitTxResponse {

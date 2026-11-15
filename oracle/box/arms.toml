@@ -61,6 +61,7 @@ fixes = [
   { subject = "fix(cardano): class an evaluation fault as server", arm = "evaluation-fault-as-client" },
   { subject = "fix(trp): apply witnesses to Dijkstra txs", arm = "dijkstra-witnesses-refused" },
   { subject = "fix(grpc): fill EvalTx redeemer data", arm = "eval-redeemer-data-unset" },
+  { subject = "fix(grpc): report the EvalTx minimum fee", arm = "eval-fee-unset" },
 ]
 
 [pallas]
@@ -259,3 +260,4 @@ eval-payload-changed = ["judge=eval-oracle entry=eval_tx:v1 answer:row ledger:fa
 eval-phase-one = ["judge=eval-tx demand:refuse error_layer:phase_one"]
 eval-row-dropped = ["judge=eval-oracle entry=eval_tx:v1 answer:row ledger:ran dolos:none"]
 eval-redeemer-data-unset = ["judge=eval-oracle entry=eval_tx:v1 answer:payload"]
+eval-fee-unset = ["judge=eval-oracle entry=eval_tx:v1 answer:fee"]

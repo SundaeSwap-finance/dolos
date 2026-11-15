@@ -258,7 +258,7 @@ fn from_u5c_txoref(txo: u5c::query::TxoRef) -> Result<TxoRef, Status> {
     Ok(TxoRef(hash, txo.index))
 }
 
-fn u64_to_bigint(value: u64) -> Option<u5c::cardano::BigInt> {
+pub(super) fn u64_to_bigint(value: u64) -> Option<u5c::cardano::BigInt> {
     if value <= i64::MAX as u64 {
         Some(u5c::cardano::BigInt {
             big_int: Some(u5c::cardano::big_int::BigInt::Int(value as i64)),

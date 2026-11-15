@@ -83,6 +83,7 @@ fn tx_eval_to_u5c<R>(
                 memory: acc.memory.checked_add(eval.units.mem)?,
             })
         }),
+        fee: evaluation.min_fee.and_then(super::query::u64_to_bigint),
         ..Default::default()
     };
     if result.ex_units.is_none() {

@@ -1,12 +1,13 @@
-use dolos_core::mempool::MultiEraEvalReport;
+use dolos_core::{mempool::MultiEraEvalReport, MempoolAwareUtxoStore};
 use pallas::ledger::traverse::{MultiEraRedeemer, MultiEraRedeemerTag, MultiEraTx};
 
 use crate::prelude::*;
 
-/// A transaction's script evaluation with each of the transaction's redeemers
-/// under its tag and index.
+/// A transaction's script evaluation and minimum fee, with each of the
+/// transaction's redeemers under its tag and index.
 pub(super) struct TxEvaluation<R> {
     pub report: MultiEraEvalReport,
+    pub min_fee: Option<u64>,
     pub redeemers: Vec<(MultiEraRedeemerTag, u32, R)>,
 }
 
@@ -20,15 +21,16 @@ impl<R> TxEvaluation<R> {
     }
 }
 
-/// Estimates a submitted transaction's script costs using ledger and mempool
-/// inputs, and gives them with the transaction's redeemers to `answer`.
+/// Estimates a submitted transaction's script costs and minimum fee using
+/// ledger and mempool inputs, and gives them with the transaction's redeemers
+/// to `answer`.
 pub(super) fn evaluate_tx<D: Domain, T>(
     domain: &D,
     chain: &D::Chain,
     cbor: &[u8],
     answer: impl FnOnce(Result<TxEvaluation<MultiEraRedeemer<'_>>, DomainError>) -> T,
 ) -> T {
-    let (report, tx) = match estimate(domain, chain, cbor) {
+    let (report, min_fee, tx) = match estimate(domain, chain, cbor) {
         Ok(estimated) => estimated,
         Err(e) => return answer(Err(e)),
     };
@@ -37,19 +39,25 @@ pub(super) fn evaluate_tx<D: Domain, T>(
         .into_iter()
         .map(|r| (r.multi_era_tag(), r.index(), r))
         .collect();
-    answer(Ok(TxEvaluation { report, redeemers }))
+    answer(Ok(TxEvaluation {
+        report,
+        min_fee,
+        redeemers,
+    }))
 }
 
-/// A submitted transaction's script costs and the transaction decoded in the
-/// era of the active parameters.
+/// A submitted transaction's script costs, its minimum fee and the transaction
+/// decoded in the era of the active parameters.
 fn estimate<'a, D: Domain>(
     domain: &D,
     chain: &D::Chain,
     cbor: &'a [u8],
-) -> Result<(MultiEraEvalReport, MultiEraTx<'a>), DomainError> {
+) -> Result<(MultiEraEvalReport, Option<u64>, MultiEraTx<'a>), DomainError> {
     let report = domain.estimate_tx(chain, cbor)?;
+    let utxos = MempoolAwareUtxoStore::<D>::new(domain.state(), domain.mempool());
+    let min_fee = dolos_cardano::validate::min_fee::<D>(cbor, &utxos)?;
     let active = dolos_cardano::load_effective_pparams::<D>(domain.state())?;
     let era = dolos_cardano::validate::submission_era(active.ensure_protocol_version()?)?;
     let tx = dolos_cardano::validate::decode_submission(era, cbor)?;
-    Ok((report, tx))
+    Ok((report, min_fee, tx))
 }
