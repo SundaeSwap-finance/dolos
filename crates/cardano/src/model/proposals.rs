@@ -105,8 +105,9 @@ pub enum GovPurpose {
 /// proposal. The last entry is the effective vote (last vote wins); keeping
 /// the full history is what makes as-of reads possible at epoch boundaries,
 /// where the tally must use the votes as of the previous boundary even if the
-/// voter re-voted since.
-pub type VoteHistory = Vec<(BlockSlot, Vote)>;
+/// voter re-voted since. An entry of `None` is the removal of the voter's
+/// vote, which the ledger makes when a DRep unregisters.
+pub type VoteHistory = Vec<(BlockSlot, Option<Vote>)>;
 
 #[derive(Debug, Encode, Decode, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProposalState {
@@ -227,7 +228,7 @@ pub(crate) mod testing {
     }
 
     pub fn any_vote_history() -> impl Strategy<Value = VoteHistory> {
-        prop::collection::vec((root::any_slot(), root::any_vote()), 0..3)
+        prop::collection::vec((root::any_slot(), prop::option::of(root::any_vote())), 0..3)
     }
 
     prop_compose! {
@@ -286,7 +287,7 @@ pub fn votes_as_of<K: Ord + Clone>(
                 .iter()
                 .rev()
                 .find(|(at, _)| *at <= slot)
-                .map(|(_, vote)| (voter.clone(), vote.clone()))
+                .and_then(|(_, vote)| Some((voter.clone(), vote.clone()?)))
         })
         .collect()
 }
@@ -755,7 +756,7 @@ impl dolos_core::EntityDelta for VoteCast {
         };
 
         let (created, history) = state.vote_history_mut(&self.voter);
-        history.push((self.slot, self.vote.clone()));
+        history.push((self.slot, Some(self.vote.clone())));
 
         self.applied = true;
         self.created_entry = created;
@@ -771,6 +772,65 @@ impl dolos_core::EntityDelta for VoteCast {
         };
 
         state.vote_history_pop(&self.voter, self.created_entry);
+    }
+}
+
+/// The removal of an unregistered DRep's vote on one proposal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DRepVotesRemoved {
+    pub(crate) proposal: EntityKey,
+    pub(crate) drep: StakeCredential,
+    pub(crate) slot: BlockSlot,
+
+    // undo
+    pub(crate) applied: bool,
+}
+
+impl DRepVotesRemoved {
+    pub fn new(proposal: EntityKey, drep: StakeCredential, slot: BlockSlot) -> Self {
+        Self {
+            proposal,
+            drep,
+            slot,
+            applied: false,
+        }
+    }
+}
+
+impl dolos_core::EntityDelta for DRepVotesRemoved {
+    type Entity = ProposalState;
+
+    fn key(&self) -> NsKey {
+        NsKey::from((ProposalState::NS, self.proposal.clone()))
+    }
+
+    fn apply(&mut self, entity: &mut Option<ProposalState>) {
+        let history = entity
+            .as_mut()
+            .and_then(|state| state.drep_votes.get_mut(&self.drep));
+
+        self.applied = false;
+
+        if let Some(history) = history {
+            if matches!(history.last(), Some((_, Some(_)))) {
+                history.push((self.slot, None));
+                self.applied = true;
+            }
+        }
+    }
+
+    fn undo(&self, entity: &mut Option<ProposalState>) {
+        if !self.applied {
+            return;
+        }
+
+        let history = entity
+            .as_mut()
+            .and_then(|state| state.drep_votes.get_mut(&self.drep));
+
+        if let Some(history) = history {
+            history.pop();
+        }
     }
 }
 
@@ -1001,15 +1061,15 @@ mod compat_tests {
 
         state.cc_votes.insert(
             StakeCredential::AddrKeyhash([5u8; 28].into()),
-            vec![(100, Vote::Yes), (200, Vote::No)],
+            vec![(100, Some(Vote::Yes)), (200, Some(Vote::No))],
         );
         state.drep_votes.insert(
             StakeCredential::ScriptHash([6u8; 28].into()),
-            vec![(150, Vote::Abstain)],
+            vec![(150, Some(Vote::Abstain)), (170, None)],
         );
         state
             .spo_votes
-            .insert([7u8; 28].into(), vec![(160, Vote::Yes)]);
+            .insert([7u8; 28].into(), vec![(160, Some(Vote::Yes))]);
 
         let bytes = minicbor::to_vec(&state).unwrap();
         let decoded: ProposalState = minicbor::decode(&bytes).unwrap();
@@ -1141,11 +1201,43 @@ mod prop_tests {
         ) {
             assert_delta_roundtrip(Some(entity), delta);
         }
+
+        #[test]
+        fn drep_votes_removed_roundtrip(
+            (entity, delta) in any_proposal_state().prop_flat_map(with_drep_votes_removed),
+        ) {
+            assert_delta_roundtrip(Some(entity), delta);
+        }
+
+        #[test]
+        fn drep_votes_removed_serde_roundtrip(
+            (entity, delta) in any_proposal_state().prop_flat_map(with_drep_votes_removed),
+        ) {
+            root::assert_delta_serde_roundtrip(Some(entity), delta);
+        }
+    }
+
+    /// A proposal and a removal aimed at it, of a DRep that voted on it
+    /// whenever any did.
+    fn with_drep_votes_removed(
+        state: ProposalState,
+    ) -> impl Strategy<Value = (ProposalState, DRepVotesRemoved)> {
+        let voters: Vec<StakeCredential> = state.drep_votes.keys().cloned().collect();
+        let drep = if voters.is_empty() {
+            root::any_stake_credential().boxed()
+        } else {
+            prop::sample::select(voters).boxed()
+        };
+        let key = state.key();
+        let delta = (drep, root::any_slot())
+            .prop_map(move |(drep, slot)| DRepVotesRemoved::new(key.clone(), drep, slot));
+        (Just(state), delta)
     }
 
     /// A slot-ordered history, as the roll pipeline appends them.
     fn any_ordered_history() -> impl Strategy<Value = VoteHistory> {
-        prop::collection::vec((root::any_slot(), root::any_vote()), 0..6).prop_map(|mut entries| {
+        let entry = (root::any_slot(), prop::option::of(root::any_vote()));
+        prop::collection::vec(entry, 0..6).prop_map(|mut entries| {
             entries.sort_by_key(|(slot, _)| *slot);
             entries
         })
@@ -1170,7 +1262,7 @@ mod prop_tests {
             let expected = history
                 .iter()
                 .rfind(|(slot, _)| *slot <= cutoff)
-                .map(|(_, vote)| vote.clone());
+                .and_then(|(_, vote)| vote.clone());
 
             prop_assert_eq!(
                 resolved.get(&StakeCredential::AddrKeyhash([5u8; 28].into())).cloned(),
@@ -1184,7 +1276,7 @@ mod prop_tests {
         fn votes_after_boundary_are_invisible(
             history in any_ordered_history(),
             cutoff in root::any_slot(),
-            later in prop::collection::vec((1u64..1_000u64, root::any_vote()), 1..4),
+            later in prop::collection::vec((1u64..1_000u64, prop::option::of(root::any_vote())), 1..4),
         ) {
             let key = StakeCredential::AddrKeyhash([5u8; 28].into());
 
@@ -1241,13 +1333,94 @@ mod prop_tests {
             .unwrap();
 
         // Append-only history: both votes retained, last one effective.
-        assert_eq!(history, &vec![(100, Vote::No), (200, Vote::Yes)]);
+        assert_eq!(
+            history,
+            &vec![(100, Some(Vote::No)), (200, Some(Vote::Yes))]
+        );
 
         second.undo(&mut entity);
         first.undo(&mut entity);
 
         let state = entity.as_ref().unwrap();
         assert!(state.drep_votes.is_empty());
+    }
+
+    /// A proposal holding a DRep's vote and a committee vote under the same
+    /// credential.
+    fn voted_proposal() -> (Option<ProposalState>, StakeCredential) {
+        let credential = StakeCredential::AddrKeyhash([5u8; 28].into());
+        let mut state = ProposalState {
+            slot: 10,
+            tx: [1u8; 32].into(),
+            idx: 0,
+            action: ProposalAction::Info,
+            max_epoch: None,
+            ratified_epoch: None,
+            canceled_epoch: None,
+            deposit: None,
+            reward_account: None,
+            proposed_in: Some(1),
+            parent: None,
+            purpose: None,
+            anchor: None,
+            cc_votes: Default::default(),
+            drep_votes: Default::default(),
+            spo_votes: Default::default(),
+        };
+        state
+            .drep_votes
+            .insert(credential.clone(), vec![(100, Some(Vote::Yes))]);
+        state
+            .cc_votes
+            .insert(credential.clone(), vec![(100, Some(Vote::No))]);
+        (Some(state), credential)
+    }
+
+    #[test]
+    fn a_removed_drep_vote_is_held_before_its_slot_and_absent_after() {
+        use dolos_core::EntityDelta as _;
+
+        let (mut entity, drep) = voted_proposal();
+        let key = entity.as_ref().unwrap().key();
+        let mut removal = DRepVotesRemoved::new(key, drep.clone(), 200);
+        removal.apply(&mut entity);
+
+        let state = entity.as_ref().unwrap();
+        assert_eq!(state.drep_votes_as_of(150).get(&drep), Some(&Vote::Yes));
+        assert_eq!(state.drep_votes_as_of(200).get(&drep), None);
+        assert_eq!(state.cc_votes_as_of(200).get(&drep), Some(&Vote::No));
+
+        removal.undo(&mut entity);
+        assert_eq!(entity, voted_proposal().0);
+    }
+
+    /// The must-not case. A removal for a DRep with no vote on the proposal,
+    /// or whose vote was already removed, leaves the proposal unchanged.
+    #[test]
+    fn a_removal_without_a_vote_to_remove_changes_nothing() {
+        use dolos_core::EntityDelta as _;
+
+        let (mut entity, _) = voted_proposal();
+        let key = entity.as_ref().unwrap().key();
+        let other = StakeCredential::ScriptHash([6u8; 28].into());
+        DRepVotesRemoved::new(key.clone(), other, 200).apply(&mut entity);
+        assert_eq!(entity, voted_proposal().0);
+
+        let (_, drep) = voted_proposal();
+        DRepVotesRemoved::new(key.clone(), drep.clone(), 200).apply(&mut entity);
+        let removed = entity.clone();
+        let mut again = DRepVotesRemoved::new(key, drep, 300);
+        again.apply(&mut entity);
+        again.undo(&mut entity);
+        assert_eq!(entity, removed);
+    }
+
+    #[test]
+    fn a_history_stored_before_removals_decodes_as_votes() {
+        let stored: Vec<(BlockSlot, Vote)> = vec![(100, Vote::Yes), (200, Vote::No)];
+        let bytes = minicbor::to_vec(&stored).unwrap();
+        let decoded: VoteHistory = minicbor::decode(&bytes).unwrap();
+        assert_eq!(decoded, vec![(100, Some(Vote::Yes)), (200, Some(Vote::No))]);
     }
 }
 

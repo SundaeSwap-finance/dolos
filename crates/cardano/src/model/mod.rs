@@ -267,6 +267,7 @@ pub enum CardanoDelta {
     ProposalResolved(Box<ProposalResolved>),
     GovDistrBoundaryCredit(Box<GovDistrBoundaryCredit>),
     DirectDeposit(Box<DirectDeposit>),
+    DRepVotesRemoved(Box<DRepVotesRemoved>),
 }
 
 impl CardanoDelta {
@@ -372,6 +373,7 @@ delta_from!(GovDistrRotate);
 delta_from!(GovDistrBoundaryCredit);
 delta_from!(ProposalResolved);
 delta_from!(DirectDeposit);
+delta_from!(DRepVotesRemoved);
 
 #[allow(deprecated)]
 impl dolos_core::EntityDelta for CardanoDelta {
@@ -437,6 +439,7 @@ impl dolos_core::EntityDelta for CardanoDelta {
             Self::ProposalDepositRefund(x) => x.key(),
             Self::TreasuryWithdrawal(x) => x.key(),
             Self::DirectDeposit(x) => x.key(),
+            Self::DRepVotesRemoved(x) => x.key(),
             Self::EnqueueMir(x) => x.key(),
             Self::DequeueMir(x) => x.key(),
             Self::DatumRefIncrement(x) => x.key(),
@@ -507,6 +510,7 @@ impl dolos_core::EntityDelta for CardanoDelta {
             Self::ProposalDepositRefund(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::TreasuryWithdrawal(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::DirectDeposit(x) => Self::downcast_apply(x.as_mut(), entity),
+            Self::DRepVotesRemoved(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::EnqueueMir(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::DequeueMir(x) => Self::downcast_apply(x.as_mut(), entity),
             Self::DatumRefIncrement(x) => Self::downcast_apply(x.as_mut(), entity),
@@ -577,6 +581,7 @@ impl dolos_core::EntityDelta for CardanoDelta {
             Self::ProposalDepositRefund(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::TreasuryWithdrawal(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::DirectDeposit(x) => Self::downcast_undo(x.as_ref(), entity),
+            Self::DRepVotesRemoved(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::EnqueueMir(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::DequeueMir(x) => Self::downcast_undo(x.as_ref(), entity),
             Self::DatumRefIncrement(x) => Self::downcast_undo(x.as_ref(), entity),

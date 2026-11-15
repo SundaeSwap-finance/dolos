@@ -521,9 +521,9 @@ pub fn pool_state() -> PoolState {
 
 fn vote_history(seed: u8) -> VoteHistory {
     vec![
-        (400_000u64 + seed as u64, Vote::Yes),
-        (500_000u64 + seed as u64, Vote::No),
-        (600_000u64 + seed as u64, Vote::Abstain),
+        (400_000u64 + seed as u64, Some(Vote::Yes)),
+        (500_000u64 + seed as u64, Some(Vote::No)),
+        (600_000u64 + seed as u64, Some(Vote::Abstain)),
     ]
 }
 

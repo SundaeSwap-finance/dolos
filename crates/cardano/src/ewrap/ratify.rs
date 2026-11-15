@@ -1731,7 +1731,7 @@ mod tests {
 
         state
             .drep_votes
-            .insert(cred(1), vec![(100, Vote::No), (200, Vote::Yes)]);
+            .insert(cred(1), vec![(100, Some(Vote::No)), (200, Some(Vote::Yes))]);
 
         assert_eq!(state.drep_votes_as_of(150).get(&cred(1)), Some(&Vote::No));
         assert_eq!(state.drep_votes_as_of(250).get(&cred(1)), Some(&Vote::Yes));

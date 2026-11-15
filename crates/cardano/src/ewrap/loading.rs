@@ -2754,10 +2754,10 @@ mod ratification_tests {
             anchor: None,
             cc_votes: votes
                 .clone()
-                .map(|vote| BTreeMap::from([(hot(), vec![(1u64, vote)])]))
+                .map(|vote| BTreeMap::from([(hot(), vec![(1u64, Some(vote))])]))
                 .unwrap_or_default(),
             drep_votes: votes
-                .map(|vote| BTreeMap::from([(drep_cred(), vec![(1u64, vote)])]))
+                .map(|vote| BTreeMap::from([(drep_cred(), vec![(1u64, Some(vote))])]))
                 .unwrap_or_default(),
             spo_votes: Default::default(),
         }

@@ -1,21 +1,25 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use dolos_core::{ChainError, Genesis, TxoRef};
+use dolos_core::{ChainError, EntityKey, Genesis, TxOrder, TxoRef};
 use pallas::{
     codec::utils::Bytes,
     ledger::{
-        primitives::{conway::GovActionId, Epoch, ExUnitPrices, RationalNumber},
+        primitives::{
+            conway::{GovActionId, Voter},
+            Epoch, ExUnitPrices, RationalNumber, StakeCredential,
+        },
         traverse::{
-            governance::ParamRead, MultiEraBlock, MultiEraGovAction, MultiEraGovActionKind,
-            MultiEraParamUpdate, MultiEraProposal, MultiEraTx, MultiEraUpdate,
+            governance::ParamRead, MultiEraBlock, MultiEraCert, MultiEraGovAction,
+            MultiEraGovActionKind, MultiEraParamUpdate, MultiEraProposal, MultiEraTx,
+            MultiEraUpdate,
         },
     },
 };
 
 use super::WorkDeltas;
 use crate::{
-    owned::OwnedMultiEraOutput, pallas_extras, roll::BlockVisitor, GovPurpose, NewProposalV2,
-    PParamValue, PParamsSet, ProposalAction, VoteCast,
+    owned::OwnedMultiEraOutput, pallas_extras, roll::BlockVisitor, CardanoDelta, DRepVotesRemoved,
+    GovPurpose, NewProposalV2, PParamValue, PParamsSet, ProposalAction, ProposalState, VoteCast,
 };
 
 macro_rules! map_shared_pparam {
@@ -381,13 +385,82 @@ fn parse_gov_action(
     Ok((action, parent, purpose))
 }
 
+/// The proposals holding a vote of each DRep that a batch unregisters.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DRepVotesHeld(BTreeMap<StakeCredential, BTreeSet<EntityKey>>);
+
+impl DRepVotesHeld {
+    /// The proposals live in `epoch` whose last entry for a DRep named is a
+    /// vote.
+    pub fn new(
+        dreps: impl IntoIterator<Item = StakeCredential>,
+        proposals: impl IntoIterator<Item = (EntityKey, ProposalState)>,
+        epoch: Epoch,
+    ) -> Self {
+        let mut held: BTreeMap<_, BTreeSet<_>> = dreps
+            .into_iter()
+            .map(|drep| (drep, BTreeSet::new()))
+            .collect();
+
+        if held.is_empty() {
+            return Self(held);
+        }
+
+        for (key, proposal) in proposals {
+            if !proposal.is_unresolved_at_close(epoch) {
+                continue;
+            }
+
+            for (drep, keys) in held.iter_mut() {
+                let voted = proposal
+                    .drep_votes
+                    .get(drep)
+                    .and_then(|history| history.last())
+                    .is_some_and(|(_, vote)| vote.is_some());
+
+                if voted {
+                    keys.insert(key.clone());
+                }
+            }
+        }
+
+        Self(held)
+    }
+
+    fn record_vote(&mut self, drep: StakeCredential, proposal: EntityKey) {
+        if let Some(keys) = self.0.get_mut(&drep) {
+            keys.insert(proposal);
+        }
+    }
+
+    fn take_votes(&mut self, drep: &StakeCredential) -> BTreeSet<EntityKey> {
+        self.0.get_mut(drep).map(std::mem::take).unwrap_or_default()
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ProposalVisitor {
     validity_period: Option<u64>,
     current_epoch: Option<Epoch>,
     network_magic: Option<u32>,
     protocol: Option<u16>,
-    pending_votes: Vec<VoteCast>,
+    votes_held: DRepVotesHeld,
+    pending_votes: Vec<CardanoDelta>,
+}
+
+impl ProposalVisitor {
+    pub fn new(votes_held: DRepVotesHeld) -> Self {
+        Self {
+            votes_held,
+            ..Default::default()
+        }
+    }
+
+    /// The votes held after this block, which the next block's visitor starts
+    /// from.
+    pub fn take_votes_held(&mut self) -> DRepVotesHeld {
+        std::mem::take(&mut self.votes_held)
+    }
 }
 
 impl BlockVisitor for ProposalVisitor {
@@ -427,15 +500,55 @@ impl BlockVisitor for ProposalVisitor {
         };
 
         for (voter, votes) in voting_procedures.iter() {
+            let drep = match voter {
+                Voter::DRepKey(hash) => Some(StakeCredential::AddrKeyhash(*hash)),
+                Voter::DRepScript(hash) => Some(StakeCredential::ScriptHash(*hash)),
+                _ => None,
+            };
+
             for (gov_action_id, procedure) in votes.iter() {
-                self.pending_votes.push(VoteCast::new(
-                    gov_action_id.transaction_id,
-                    gov_action_id.action_index,
-                    voter.clone(),
-                    procedure.vote.clone(),
-                    block.slot(),
-                ));
+                if let Some(drep) = &drep {
+                    self.votes_held.record_vote(
+                        drep.clone(),
+                        ProposalState::build_entity_key(
+                            gov_action_id.transaction_id,
+                            gov_action_id.action_index,
+                        ),
+                    );
+                }
+
+                self.pending_votes.push(
+                    VoteCast::new(
+                        gov_action_id.transaction_id,
+                        gov_action_id.action_index,
+                        voter.clone(),
+                        procedure.vote.clone(),
+                        block.slot(),
+                    )
+                    .into(),
+                );
             }
+        }
+
+        Ok(())
+    }
+
+    fn visit_cert(
+        &mut self,
+        _: &mut WorkDeltas,
+        block: &MultiEraBlock,
+        _: &MultiEraTx,
+        _: &TxOrder,
+        cert: &MultiEraCert,
+    ) -> Result<(), ChainError> {
+        let Some(unregistration) = pallas_extras::cert_as_drep_unregistration(cert) else {
+            return Ok(());
+        };
+
+        for proposal in self.votes_held.take_votes(&unregistration.cred) {
+            self.pending_votes.push(
+                DRepVotesRemoved::new(proposal, unregistration.cred.clone(), block.slot()).into(),
+            );
         }
 
         Ok(())
@@ -506,7 +619,8 @@ impl BlockVisitor for ProposalVisitor {
         // Votes buffered during `visit_tx` are emitted at block flush so a
         // vote targeting a proposal submitted in the same block (legal in
         // Conway, even within the same tx) lands *after* that proposal's
-        // `NewProposalV2` in the per-entity delta ordering.
+        // `NewProposalV2` in the per-entity delta ordering. A vote removal
+        // comes after the votes cast before it.
         for vote in self.pending_votes.drain(..) {
             deltas.add_for_entity(vote);
         }

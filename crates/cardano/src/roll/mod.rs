@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use dolos_core::{
     ChainError, Domain, EntityKey, Genesis, InvariantViolation, StateError, StateStore as _,
@@ -7,7 +10,7 @@ use dolos_core::{
 use pallas::{
     codec::utils::KeepRaw,
     ledger::{
-        primitives::{Epoch, PlutusData},
+        primitives::{Epoch, PlutusData, StakeCredential},
         traverse::{
             MultiEraBlock, MultiEraCert, MultiEraInput, MultiEraOutput, MultiEraPolicyAssets,
             MultiEraProposal, MultiEraRedeemer, MultiEraTx, MultiEraUpdate,
@@ -19,9 +22,9 @@ use tracing::{debug, instrument, warn};
 use crate::{
     load_effective_pparams, load_gov,
     owned::OwnedMultiEraOutput,
-    pallas_extras::{for_each_applied_tx, tx_direct_deposits},
-    roll::proposals::ProposalVisitor,
-    utxoset, Cache, DRepState, FixedNamespace as _, PParamsSet,
+    pallas_extras::{cert_as_drep_unregistration, for_each_applied_tx, tx_direct_deposits},
+    roll::proposals::{DRepVotesHeld, ProposalVisitor},
+    utxoset, Cache, DRepState, FixedNamespace as _, PParamsSet, ProposalState,
 };
 
 // Sub-modules
@@ -265,6 +268,7 @@ impl<'a> DeltaBuilder<'a> {
         work: &'a mut WorkBlock,
         utxos: &'a HashMap<TxoRef, OwnedMultiEraOutput>,
         dormancy: DormancyContext,
+        votes_held: DRepVotesHeld,
         consumed: Option<std::collections::HashSet<TxoRef>>,
     ) -> Self {
         Self {
@@ -283,8 +287,14 @@ impl<'a> DeltaBuilder<'a> {
             epoch_state: Default::default(),
             pool_state: Default::default(),
             tx_logs: Default::default(),
-            proposal_logs: Default::default(),
+            proposal_logs: ProposalVisitor::new(votes_held),
         }
+    }
+
+    /// The DRep votes held after this block's deltas, which `compute_delta`
+    /// passes to the next block's builder.
+    pub fn take_votes_held(&mut self) -> DRepVotesHeld {
+        self.proposal_logs.take_votes_held()
     }
 
     /// The dormancy context after this block's deltas — a release inside
@@ -741,6 +751,27 @@ impl<'a> DeltaBuilder<'a> {
     }
 }
 
+/// The DRep credentials the valid transactions of a block unregister.
+fn drep_unregistrations(block: &MultiEraBlock) -> Vec<StakeCredential> {
+    let mut dreps = vec![];
+
+    for tx in block.txs().iter() {
+        let Ok(()) = for_each_applied_tx(tx, |tx| {
+            if tx.is_valid() {
+                for cert in tx.certs() {
+                    if let Some(unregistration) = cert_as_drep_unregistration(&cert) {
+                        dreps.push(unregistration.cred);
+                    }
+                }
+            }
+
+            Ok::<_, std::convert::Infallible>(())
+        });
+    }
+
+    dreps
+}
+
 #[instrument(name = "roll", skip_all)]
 pub(crate) fn compute_delta<D: Domain>(
     genesis: Arc<Genesis>,
@@ -784,6 +815,22 @@ pub(crate) fn compute_delta<D: Domain>(
 
         dormancy.drep_keys = Arc::new(keys);
     }
+
+    let mut unregistered = BTreeSet::new();
+
+    for block in batch.blocks.iter() {
+        unregistered.extend(drep_unregistrations(block.decoded().view()));
+    }
+
+    let mut votes_held = if unregistered.is_empty() {
+        DRepVotesHeld::default()
+    } else {
+        let proposals = state
+            .iter_entities_typed::<ProposalState>(ProposalState::NS, None)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        DRepVotesHeld::new(unregistered, proposals, epoch)
+    };
 
     let lenient = batch.lenient_apply;
 
@@ -847,12 +894,14 @@ pub(crate) fn compute_delta<D: Domain>(
             block,
             &batch.utxos_decoded,
             std::mem::take(&mut dormancy),
+            std::mem::take(&mut votes_held),
             consumed,
         );
 
         builder.crawl()?;
 
         dormancy = builder.take_dormancy();
+        votes_held = builder.take_votes_held();
 
         // TODO: we treat the UTxO set differently due to tech-debt. We should
         // migrate this into the entity system. (#1042)
@@ -1297,6 +1346,14 @@ mod tests {
     }
 
     fn crawl_block(block: OwnedMultiEraBlock, protocol: u16) -> WorkDeltas {
+        crawl_block_holding(block, protocol, DRepVotesHeld::default())
+    }
+
+    fn crawl_block_holding(
+        block: OwnedMultiEraBlock,
+        protocol: u16,
+        votes_held: DRepVotesHeld,
+    ) -> WorkDeltas {
         let mut work = WorkBlock::new(block);
 
         let genesis = Arc::new(crate::load_test_genesis("preview"));
@@ -1312,6 +1369,7 @@ mod tests {
             &mut work,
             &utxos,
             DormancyContext::default(),
+            votes_held,
             None,
         );
 
@@ -1801,5 +1859,205 @@ mod tests {
         let deltas = crawl_block(block, 12);
 
         assert!(registration_keys(&deltas)[&7] > unregistration_key(&deltas));
+    }
+
+    /// The DRep that votes in the governance fixture.
+    fn voting_drep() -> StakeCredential {
+        StakeCredential::AddrKeyhash(dijkstra_fixture::voter_hash())
+    }
+
+    fn voted_proposal_key() -> EntityKey {
+        let id = dijkstra_fixture::voted_proposal();
+        ProposalState::build_entity_key(id.transaction_id, id.action_index)
+    }
+
+    /// The proposal, DRep and slot of each vote removal the crawl records.
+    fn removals(deltas: &WorkDeltas) -> Vec<(EntityKey, StakeCredential, u64)> {
+        deltas
+            .entities
+            .values()
+            .flatten()
+            .filter_map(|delta| match delta {
+                CardanoDelta::DRepVotesRemoved(x) => {
+                    Some((x.proposal.clone(), x.drep.clone(), x.slot))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn held_for(drep: StakeCredential, proposals: Vec<EntityKey>) -> DRepVotesHeld {
+        let proposals = proposals.into_iter().map(|key| {
+            let mut proposal = proposal_state();
+            proposal
+                .drep_votes
+                .insert(drep.clone(), vec![(SLOT - 1, Some(Vote::Yes))]);
+            (key, proposal)
+        });
+
+        DRepVotesHeld::new([drep.clone()], proposals.collect::<Vec<_>>(), EPOCH)
+    }
+
+    fn proposal_state() -> ProposalState {
+        ProposalState {
+            slot: 10,
+            tx: [1u8; 32].into(),
+            idx: 0,
+            action: crate::ProposalAction::Info,
+            max_epoch: None,
+            ratified_epoch: None,
+            canceled_epoch: None,
+            deposit: None,
+            reward_account: None,
+            proposed_in: Some(1),
+            parent: None,
+            purpose: None,
+            anchor: None,
+            cc_votes: Default::default(),
+            drep_votes: Default::default(),
+            spo_votes: Default::default(),
+        }
+    }
+
+    fn governance_body() -> pallas::ledger::primitives::dijkstra::TransactionBody<'static> {
+        dijkstra_fixture::body_with_governance(
+            pallas::ledger::primitives::dijkstra::GovAction::Information,
+        )
+    }
+
+    /// The must-fire case. The ledger removes the votes of a DRep that
+    /// unregisters, so a vote cast earlier in the block is removed after it
+    /// is recorded.
+    #[test]
+    fn a_vote_cast_before_the_unregistration_is_removed() {
+        use dijkstra_fixture::{block_of, body_with_certs, SLOT};
+
+        let block = block_of(vec![
+            (governance_body(), true),
+            (body_with_certs(vec![unregister(0x66)], vec![]), true),
+        ]);
+
+        let deltas = crawl_block_holding(block, 12, held_for(voting_drep(), vec![]));
+
+        assert_eq!(
+            removals(&deltas),
+            vec![(voted_proposal_key(), voting_drep(), SLOT)]
+        );
+
+        let group = &deltas.entities[&NsKey::from((ProposalState::NS, voted_proposal_key()))];
+        assert!(matches!(
+            group.last(),
+            Some(CardanoDelta::DRepVotesRemoved(_))
+        ));
+    }
+
+    /// A vote the state already holds is removed by the unregistration.
+    #[test]
+    fn a_vote_held_in_state_is_removed() {
+        use dijkstra_fixture::{block, body_with_certs, SLOT};
+
+        let held = EntityKey::from([9u8; 32].as_slice());
+        let block = block(body_with_certs(vec![unregister(0x66)], vec![]), true);
+
+        let deltas = crawl_block_holding(block, 12, held_for(voting_drep(), vec![held.clone()]));
+
+        assert_eq!(removals(&deltas), vec![(held, voting_drep(), SLOT)]);
+    }
+
+    /// The must-not case. Another DRep's unregistration leaves the vote.
+    #[test]
+    fn another_dreps_unregistration_removes_no_vote() {
+        use dijkstra_fixture::{block_of, body_with_certs};
+
+        let block = block_of(vec![
+            (governance_body(), true),
+            (body_with_certs(vec![unregister(0x67)], vec![]), true),
+        ]);
+
+        let deltas = crawl_block_holding(block, 12, held_for(drep(0x67), vec![]));
+
+        assert_eq!(removals(&deltas), vec![]);
+    }
+
+    /// The must-not case. A vote cast after the unregistration stays.
+    #[test]
+    fn a_vote_cast_after_the_unregistration_stays() {
+        use dijkstra_fixture::{block_of, body_with_certs};
+
+        let block = block_of(vec![
+            (body_with_certs(vec![unregister(0x66)], vec![]), true),
+            (governance_body(), true),
+        ]);
+
+        let deltas = crawl_block_holding(block, 12, held_for(voting_drep(), vec![]));
+
+        assert_eq!(removals(&deltas), vec![]);
+    }
+
+    /// The must-not case. An invalid transaction's unregistration is not
+    /// applied, so it removes no vote and the batch scan does not name it.
+    #[test]
+    fn an_invalid_unregistration_removes_no_vote() {
+        use dijkstra_fixture::{block, body_with_certs};
+
+        let held = EntityKey::from([9u8; 32].as_slice());
+        let invalid = block(body_with_certs(vec![unregister(0x66)], vec![]), false);
+
+        assert_eq!(drep_unregistrations(invalid.view()), vec![]);
+
+        let deltas = crawl_block_holding(invalid, 12, held_for(voting_drep(), vec![held]));
+
+        assert_eq!(removals(&deltas), vec![]);
+    }
+
+    /// The batch scan names the DRep a sub transaction unregisters.
+    #[test]
+    fn the_batch_scan_names_a_sub_transaction_unregistration() {
+        use dijkstra_fixture::{block, body_with_certs, sub_transaction_with_certs};
+
+        let block = block(
+            body_with_certs(
+                vec![],
+                vec![sub_transaction_with_certs(vec![unregister(0x66)])],
+            ),
+            true,
+        );
+
+        assert_eq!(drep_unregistrations(block.view()), vec![voting_drep()]);
+    }
+
+    /// Only a live proposal whose last entry for the DRep is a vote is held.
+    #[test]
+    fn the_held_votes_are_the_live_proposals_the_drep_last_voted_on() {
+        let key = |byte: u8| EntityKey::from([byte; 32].as_slice());
+        let with_history = |history: Vec<(u64, Option<Vote>)>| {
+            let mut proposal = proposal_state();
+            proposal.drep_votes.insert(voting_drep(), history);
+            proposal
+        };
+
+        let voted = with_history(vec![(1, Some(Vote::No))]);
+        let removed = with_history(vec![(1, Some(Vote::No)), (2, None)]);
+        let resolved = ProposalState {
+            canceled_epoch: Some(EPOCH),
+            ..with_history(vec![(1, Some(Vote::No))])
+        };
+        let mut other = proposal_state();
+        other
+            .drep_votes
+            .insert(drep(0x67), vec![(1, Some(Vote::No))]);
+
+        let held = DRepVotesHeld::new(
+            [voting_drep()],
+            vec![
+                (key(1), voted),
+                (key(2), removed),
+                (key(3), resolved),
+                (key(4), other),
+            ],
+            EPOCH,
+        );
+
+        assert_eq!(held, held_for(voting_drep(), vec![key(1)]));
     }
 }

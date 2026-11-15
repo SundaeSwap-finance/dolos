@@ -227,7 +227,7 @@ fn proposal_states(gov: &Gov, slot: u64) -> Vec<(EntityKey, ProposalState)> {
         .map(|p| {
             let procedure = &p.proposal_procedure;
             let (action, parent) = proposal_action(&procedure.gov_action);
-            let history = |v: &state::Vote| vec![(slot, vote(*v))];
+            let history = |v: &state::Vote| vec![(slot, Some(vote(*v)))];
             let state = ProposalState {
                 slot,
                 tx: p.action_id.tx_id.0.into(),
