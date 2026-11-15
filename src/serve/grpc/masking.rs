@@ -82,38 +82,96 @@ impl BlockMask {
         }
     }
 
+    /// A mask that selects no representation.
+    pub const fn none() -> Self {
+        Self {
+            native_bytes: false,
+            chain: false,
+        }
+    }
+
     /// Interprets a `FieldMask`'s paths against `AnyChainBlock`.
     ///
     /// An absent or empty mask (the caller passes `&[]`) selects everything, so
     /// existing clients that send no mask are unaffected. Paths are matched
-    /// leniently: a leading `block.` segment (referring to the repeated `block`
-    /// field in the response message) is tolerated, as is a bare leaf name.
+    /// leniently: a leading `block.`, `apply.` or `undo.` segment (the response
+    /// field that holds the block) is tolerated, as is a bare leaf name.
     /// Recognized leaves are `native_bytes` and the parsed chain
-    /// (`cardano`/`chain`). Selecting the whole `block` field keeps both.
+    /// (`cardano`/`chain`). Selecting the whole field that holds the block
+    /// keeps both.
     pub fn from_paths(paths: &[String]) -> Self {
         if paths.is_empty() {
             return Self::all();
         }
 
-        let mut mask = Self {
-            native_bytes: false,
-            chain: false,
-        };
+        let mut mask = Self::none();
 
         for path in paths {
-            // Tolerate the response-relative `block.` prefix.
-            let field = path.strip_prefix("block.").unwrap_or(path);
+            // Tolerate the response-relative prefix.
+            let field = strip_action(path);
+            let field = field.strip_prefix("block.").unwrap_or(field);
             // Only the first segment matters for deciding what to populate.
             match field.split('.').next().unwrap_or("") {
                 "native_bytes" => mask.native_bytes = true,
                 "cardano" | "chain" => mask.chain = true,
                 // The whole block (or an unrecognized empty path) keeps both.
-                "" | "block" => return Self::all(),
+                "" | "block" | "apply" | "undo" => return Self::all(),
                 _ => {}
             }
         }
 
         mask
+    }
+}
+
+/// The path below a leading `apply.` or `undo.` segment, or the path itself.
+fn strip_action(path: &str) -> &str {
+    path.strip_prefix("apply.")
+        .or_else(|| path.strip_prefix("undo."))
+        .unwrap_or(path)
+}
+
+/// The parts of a watched `AnyChainTx` a `FieldMask` selects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TxMask {
+    /// Whether the answer holds the mapped transaction.
+    pub tx: bool,
+    /// The representations of the enclosing block the answer holds, where none
+    /// omits the block.
+    pub block: BlockMask,
+}
+
+impl TxMask {
+    /// Interprets a `FieldMask`'s paths against `AnyChainTx`, read under the
+    /// `apply` or `undo` action of the response or from the transaction itself.
+    pub fn from_paths(paths: &[String]) -> Self {
+        if paths.is_empty() {
+            return Self {
+                tx: true,
+                block: BlockMask::all(),
+            };
+        }
+
+        let mut tx = false;
+        let mut block_paths = Vec::new();
+
+        for path in paths {
+            let field = strip_action(path);
+            match field.split('.').next().unwrap_or("") {
+                "cardano" | "chain" => tx = true,
+                "block" => block_paths.push(field.to_string()),
+                "" | "apply" | "undo" => return Self::from_paths(&[]),
+                _ => {}
+            }
+        }
+
+        let block = if block_paths.is_empty() {
+            BlockMask::none()
+        } else {
+            BlockMask::from_paths(&block_paths)
+        };
+
+        Self { tx, block }
     }
 }
 
@@ -152,6 +210,79 @@ mod tests {
         // Multiple paths accumulate.
         let both = BlockMask::from_paths(&["native_bytes".to_string(), "cardano".to_string()]);
         assert!(both.native_bytes && both.chain);
+    }
+
+    /// A path names a field of the response, so a follow answer's block is
+    /// reached through its `apply` or `undo` action.
+    #[test]
+    fn block_mask_reads_paths_under_an_action() {
+        let paths = |p: &str| vec![p.to_string()];
+        assert_eq!(
+            BlockMask::from_paths(&paths("apply.native_bytes")),
+            BlockMask {
+                native_bytes: true,
+                chain: false
+            }
+        );
+        assert_eq!(
+            BlockMask::from_paths(&paths("undo.cardano.header")),
+            BlockMask {
+                native_bytes: false,
+                chain: true
+            }
+        );
+        assert_eq!(BlockMask::from_paths(&paths("apply")), BlockMask::all());
+        assert_eq!(
+            BlockMask::from_paths(&paths("tip")),
+            BlockMask {
+                native_bytes: false,
+                chain: false
+            }
+        );
+    }
+
+    #[test]
+    fn tx_mask_from_paths_semantics() {
+        let mask =
+            |ps: &[&str]| TxMask::from_paths(&ps.iter().map(|p| p.to_string()).collect::<Vec<_>>());
+        let everything = TxMask {
+            tx: true,
+            block: BlockMask::all(),
+        };
+
+        assert_eq!(mask(&[]), everything);
+        assert_eq!(mask(&["apply"]), everything);
+        assert_eq!(
+            mask(&["apply.cardano.hash"]),
+            TxMask {
+                tx: true,
+                block: BlockMask::none()
+            }
+        );
+        assert_eq!(
+            mask(&["undo.block.native_bytes"]),
+            TxMask {
+                tx: false,
+                block: BlockMask {
+                    native_bytes: true,
+                    chain: false
+                }
+            }
+        );
+        assert_eq!(
+            mask(&["cardano", "block"]),
+            TxMask {
+                tx: true,
+                block: BlockMask::all()
+            }
+        );
+        assert_eq!(
+            mask(&["idle.slot"]),
+            TxMask {
+                tx: false,
+                block: BlockMask::none()
+            }
+        );
     }
 
     #[derive(Deserialize, Serialize, Default, Debug, PartialEq, Clone)]

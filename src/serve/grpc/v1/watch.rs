@@ -12,6 +12,7 @@ use tonic::{Request, Response, Status};
 use super::criterion;
 use crate::prelude::*;
 use crate::serve::grpc::block_context::BlockContext;
+use crate::serve::grpc::masking::{BlockMask, TxMask};
 use crate::serve::grpc::run_blocking;
 use crate::serve::grpc::stream::ChainStream;
 
@@ -367,14 +368,24 @@ fn apply_predicate(predicate: &u5c::watch::TxPredicate, tx: &u5c::cardano::Tx) -
     tx_matches && !not_clause && and_clause && or_clause
 }
 
-/// The transactions of a block the request admits, each built when read, with
-/// the block mapped once and its bytes shared.
+/// The transactions of a block the request admits, each built when read with
+/// the parts its mask selects, the block mapped once and its bytes shared.
 fn block_to_txs<C: ChainReads>(
     block: &RawBlock,
     context: &C,
     request: &u5c::watch::WatchTxRequest,
 ) -> impl Iterator<Item = u5c::watch::AnyChainTx> + Send + 'static {
-    let native_bytes = bytes::Bytes::copy_from_slice(block.as_slice());
+    let mask = TxMask::from_paths(
+        request
+            .field_mask
+            .as_ref()
+            .map(|m| m.paths.as_slice())
+            .unwrap_or_default(),
+    );
+    let native_bytes = mask
+        .block
+        .native_bytes
+        .then(|| bytes::Bytes::copy_from_slice(block.as_slice()));
     let block = MultiEraBlock::decode(block).unwrap();
     let mapper = interop::Mapper::new(BlockContext::new(context.clone(), &block));
 
@@ -389,12 +400,14 @@ fn block_to_txs<C: ChainReads>(
                 .is_none_or(|predicate| apply_predicate(predicate, tx))
         })
         .collect();
-    let mapped = (!txs.is_empty()).then(|| mapper.map_block(&block));
+    let mapped = (!txs.is_empty() && mask.block.chain).then(|| mapper.map_block(&block));
 
     txs.into_iter().map(move |x| u5c::watch::AnyChainTx {
-        chain: Some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
-        block: Some(u5c::watch::AnyChainBlock {
-            native_bytes: native_bytes.clone(),
+        chain: mask
+            .tx
+            .then_some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
+        block: (mask.block != BlockMask::none()).then(|| u5c::watch::AnyChainBlock {
+            native_bytes: native_bytes.clone().unwrap_or_default(),
             chain: mapped
                 .clone()
                 .map(u5c::watch::any_chain_block::Chain::Cardano),
@@ -566,6 +579,61 @@ mod tests {
             .collect();
         assert!(served.iter().all(|b| b.as_ref() == raw.as_slice()));
         assert!(served.iter().all(|b| b.as_ptr() == served[0].as_ptr()));
+    }
+
+    fn masked(paths: &[&str]) -> u5c::watch::WatchTxRequest {
+        let mut request = u5c::watch::WatchTxRequest {
+            field_mask: Some(Default::default()),
+            ..Default::default()
+        };
+        request.field_mask.as_mut().unwrap().paths = paths.iter().map(|p| p.to_string()).collect();
+        request
+    }
+
+    /// Each answer holds the parts of the transaction and its block the mask
+    /// names, and every part when the request has no mask.
+    #[test]
+    fn each_answer_holds_what_the_mask_names() {
+        let (blocks, _, _) = dolos_testing::synthetic::build_synthetic_blocks(
+            dolos_testing::synthetic::SyntheticBlockConfig {
+                block_count: 1,
+                txs_per_block: 3,
+                ..Default::default()
+            },
+        );
+        let raw = blocks[0].clone();
+        let context = dolos_testing::toy_domain::ToyDomain::new(None, None);
+
+        let unmasked: Vec<_> =
+            block_to_txs(&raw, &context, &u5c::watch::WatchTxRequest::default()).collect();
+        assert_eq!(unmasked.len(), 3);
+        for tx in &unmasked {
+            let block = tx
+                .block
+                .as_ref()
+                .expect("an unmasked answer holds its block");
+            assert_eq!(block.native_bytes.as_ref(), raw.as_slice());
+            assert!(block.chain.is_some());
+            assert!(tx.chain.is_some());
+        }
+
+        let tx_only: Vec<_> =
+            block_to_txs(&raw, &context, &masked(&["apply.cardano.hash"])).collect();
+        assert_eq!(tx_only.len(), 3);
+        for tx in &tx_only {
+            assert_eq!(tx.block, None);
+            assert!(tx.chain.is_some());
+        }
+
+        let bytes_only: Vec<_> =
+            block_to_txs(&raw, &context, &masked(&["apply.block.native_bytes"])).collect();
+        assert_eq!(bytes_only.len(), 3);
+        for tx in &bytes_only {
+            let block = tx.block.as_ref().expect("the mask names the block's bytes");
+            assert_eq!(block.native_bytes.as_ref(), raw.as_slice());
+            assert_eq!(block.chain, None);
+            assert_eq!(tx.chain, None);
+        }
     }
 
     fn decoded_tx() -> u5c::cardano::Tx {
