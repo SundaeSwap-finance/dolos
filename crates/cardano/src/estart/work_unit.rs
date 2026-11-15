@@ -192,7 +192,6 @@ where
         debug!(slot = self.slot, "loading estart finalize work context");
 
         let lenient = domain.sync_config().leios_lenient_apply;
-        crate::pots::set_lenient_apply(lenient);
 
         let mut context =
             WorkContext::load_finalize::<D>(domain.state(), self.genesis.clone(), lenient)?;
