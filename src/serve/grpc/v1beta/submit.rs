@@ -12,7 +12,7 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, info};
 
 use crate::prelude::*;
-use crate::serve::grpc::block_context::{BlockContext, NoInputs};
+use crate::serve::grpc::block_context::{BlockContext, NoInputs, WithUnconfirmed};
 use crate::serve::grpc::eval::{evaluate_tx, TxEvaluation};
 use crate::serve::grpc::masking::MempoolTxMask;
 use crate::serve::grpc::run_blocking;
@@ -72,9 +72,9 @@ fn watch_predicate(predicate: TxPredicate) -> u5c::watch::TxPredicate {
 
 /// The answer to a mempool change the predicate admits, holding the parts the
 /// mask selects.
-fn event_to_watch_mempool_response<C: ChainReads>(
+fn event_to_watch_mempool_response<D: Domain + ChainReads>(
     event: MempoolEvent,
-    context: &C,
+    context: &WithUnconfirmed<D>,
     predicate: Option<&u5c::watch::TxPredicate>,
     mask: MempoolTxMask,
 ) -> Result<Option<WatchMempoolResponse>, Status> {
@@ -141,12 +141,17 @@ fn watch_mempool_answers<D: Domain + ChainReads>(
             let predicate = predicate.clone();
             async move {
                 if !reads_stores {
-                    return event_to_watch_mempool_response(event, &domain, None, mask);
+                    return event_to_watch_mempool_response(
+                        event,
+                        &WithUnconfirmed(domain),
+                        None,
+                        mask,
+                    );
                 }
                 run_blocking(&domain, move |domain| {
                     event_to_watch_mempool_response(
                         event,
-                        &domain,
+                        &WithUnconfirmed(domain),
                         predicate.as_ref().as_ref(),
                         mask,
                     )

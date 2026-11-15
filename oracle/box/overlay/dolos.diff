@@ -507,10 +507,10 @@ index 541f6ba4..700721ee 100644
          if let Some(output) = outputs.get(&(r.1 as usize)) {
              result.insert(r, (era, output.encode()));
 diff --git a/src/serve/grpc/block_context.rs b/src/serve/grpc/block_context.rs
-index 6a010719..b24b47e5 100644
+index baaafdbe..11640ba6 100644
 --- a/src/serve/grpc/block_context.rs
 +++ b/src/serve/grpc/block_context.rs
-@@ -137,10 +137,18 @@ impl<'b> TxOfBlock<'_, 'b> {
+@@ -165,10 +165,18 @@ impl<'b> TxOfBlock<'_, 'b> {
  fn made_among(block: &BlockTxs<'_>, named: &HashSet<TxoRef>) -> UtxoMap {
      let makers: HashSet<_> = named.iter().map(|(hash, _)| *hash).collect();
      let mut made = UtxoMap::new();
@@ -530,7 +530,7 @@ index 6a010719..b24b47e5 100644
          for (i, output) in tx.produces() {
              let made_ref = (applied.hash, i as u32);
              if named.contains(&made_ref) {
-@@ -198,9 +206,11 @@ impl<C: ChainReads> BlockContext<C> {
+@@ -226,9 +234,11 @@ impl<C: ChainReads> BlockContext<C> {
          let made = block
              .map(|block| made_among(block, &named))
              .unwrap_or_default();
@@ -543,10 +543,10 @@ index 6a010719..b24b47e5 100644
          let resolved = if refs.is_empty() {
              Some(UtxoMap::new())
 diff --git a/src/serve/grpc/v1/query.rs b/src/serve/grpc/v1/query.rs
-index 927eb5af..571f1cb6 100644
+index e5795963..2bb3a5b6 100644
 --- a/src/serve/grpc/v1/query.rs
 +++ b/src/serve/grpc/v1/query.rs
-@@ -830,6 +830,9 @@ fn into_u5c_utxo<S: Domain>(
+@@ -864,6 +864,9 @@ fn into_u5c_utxo<S: Domain>(
  
      let parsed_output = MultiEraOutput::try_from(body)?;
      let mut parsed = mapper.map_tx_output(&parsed_output, None);
@@ -557,10 +557,10 @@ index 927eb5af..571f1cb6 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index 8db62728..e5b4f0b6 100644
+index e3b4b775..e4604c77 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
-@@ -188,7 +188,10 @@ fn tx_eval_to_u5c<R>(
+@@ -193,7 +193,10 @@ fn tx_eval_to_u5c<R>(
                  memory: acc.memory.checked_add(eval.units.mem)?,
              })
          }),
@@ -572,7 +572,7 @@ index 8db62728..e5b4f0b6 100644
          ..Default::default()
      };
      if result.ex_units.is_none() {
-@@ -220,6 +223,9 @@ fn tx_eval_to_u5c<R>(
+@@ -225,6 +228,9 @@ fn tx_eval_to_u5c<R>(
              MultiEraRedeemerTag::Reward => RedeemerPurpose::Reward,
              MultiEraRedeemerTag::Vote => RedeemerPurpose::Vote,
              MultiEraRedeemerTag::Propose => RedeemerPurpose::Propose,
@@ -582,7 +582,7 @@ index 8db62728..e5b4f0b6 100644
              MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
              other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
          };
-@@ -236,11 +242,15 @@ fn tx_eval_to_u5c<R>(
+@@ -241,11 +247,15 @@ fn tx_eval_to_u5c<R>(
                  entry
                      .failure_message
                      .as_deref()
@@ -599,7 +599,7 @@ index 8db62728..e5b4f0b6 100644
          let (payload, original_cbor) = held
              .map(|r| (r.payload, r.original_cbor))
              .unwrap_or_default();
-@@ -255,6 +265,9 @@ fn tx_eval_to_u5c<R>(
+@@ -260,6 +270,9 @@ fn tx_eval_to_u5c<R>(
              original_cbor,
          });
      }
@@ -610,10 +610,10 @@ index 8db62728..e5b4f0b6 100644
  }
  
 diff --git a/src/serve/grpc/v1alpha/submit.rs b/src/serve/grpc/v1alpha/submit.rs
-index 42ba1a3d..a0733da0 100644
+index 8dd06804..eaa20cf1 100644
 --- a/src/serve/grpc/v1alpha/submit.rs
 +++ b/src/serve/grpc/v1alpha/submit.rs
-@@ -247,9 +247,16 @@ fn tx_eval_to_u5c<R>(
+@@ -252,9 +252,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
              payload,
              index: entry.index,
@@ -651,10 +651,10 @@ index 6931eeea..5e79848e 100644
                  .clone()
                  .map(u5c::watch::any_chain_block::Chain::Cardano),
 diff --git a/src/serve/grpc/v1beta/submit.rs b/src/serve/grpc/v1beta/submit.rs
-index 621f48e1..fdd14598 100644
+index cfbbde5e..e4e3348a 100644
 --- a/src/serve/grpc/v1beta/submit.rs
 +++ b/src/serve/grpc/v1beta/submit.rs
-@@ -247,9 +247,16 @@ fn tx_eval_to_u5c<R>(
+@@ -252,9 +252,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
              payload,
              index: entry.index,
@@ -674,7 +674,7 @@ index 621f48e1..fdd14598 100644
              }),
              original_cbor,
          });
-@@ -295,7 +302,11 @@ where
+@@ -300,7 +307,11 @@ where
  
          info!(tx.hash = %hash, "accepted grpc transaction into mempool");
          Ok(Response::new(SubmitTxResponse {
