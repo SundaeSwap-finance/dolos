@@ -97,8 +97,9 @@ fn parsed_differing(
     datums: Datums<'_>,
 ) -> Vec<OutputField> {
     match parsed {
-        Some(parsed) => output::differing(ledger, parsed, datums)
-            .unwrap_or_else(|e| panic!("OUTPUT {id} {e}")),
+        Some(parsed) => {
+            output::differing(ledger, parsed, datums).unwrap_or_else(|e| panic!("OUTPUT {id} {e}"))
+        }
         None => vec![OutputField::ParsedState],
     }
 }

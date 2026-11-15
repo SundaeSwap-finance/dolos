@@ -734,7 +734,11 @@ mod tests {
         let only_other = [other.clone()];
         let cases = [
             ("unresolved, none carried", &unresolved, UNWITNESSED),
-            ("unresolved, another carried", &unresolved, Datums::Witnessed(&only_other)),
+            (
+                "unresolved, another carried",
+                &unresolved,
+                Datums::Witnessed(&only_other),
+            ),
             ("resolved, carried", &resolved, Datums::Witnessed(&carried)),
             ("unresolved, stored", &unresolved, Datums::Stored),
             ("resolved, stored", &resolved, Datums::Stored),
@@ -758,13 +762,29 @@ mod tests {
         let other_bytes = served_with(&bytes, &other, &other);
         let carried = [other.clone(), datum.clone()];
         let cases = [
-            ("unresolved, carried", &unresolved, Datums::Witnessed(&carried)),
+            (
+                "unresolved, carried",
+                &unresolved,
+                Datums::Witnessed(&carried),
+            ),
             ("resolved, none carried", &resolved, UNWITNESSED),
-            ("bytes only, carried", &bytes_only, Datums::Witnessed(&carried)),
+            (
+                "bytes only, carried",
+                &bytes_only,
+                Datums::Witnessed(&carried),
+            ),
             ("bytes only, stored", &bytes_only, Datums::Stored),
-            ("another value, carried", &other_value, Datums::Witnessed(&carried)),
+            (
+                "another value, carried",
+                &other_value,
+                Datums::Witnessed(&carried),
+            ),
             ("another value, stored", &other_value, Datums::Stored),
-            ("another datum, carried", &other_bytes, Datums::Witnessed(&carried)),
+            (
+                "another datum, carried",
+                &other_bytes,
+                Datums::Witnessed(&carried),
+            ),
             ("another datum, stored", &other_bytes, Datums::Stored),
         ];
         let agreeing: Vec<_> = cases
