@@ -14,6 +14,19 @@ index b01b8971..b175c21d 100644
          .with(Val::ProtocolVersion(version.clone().into()))
          .with(Val::EpochLength(epoch_length as u64))
          .with(Val::SlotLength(slot_length as u64))
+diff --git a/crates/cardano/src/genesis/staking.rs b/crates/cardano/src/genesis/staking.rs
+index 2c57b910..7ef931bd 100644
+--- a/crates/cardano/src/genesis/staking.rs
++++ b/crates/cardano/src/genesis/staking.rs
+@@ -44,7 +44,7 @@ fn parse_pool(dto: &ConfigPool) -> PoolState {
+         // without a transaction, so no pot was ever debited for it and the
+         // deposit recorded below is zero. Flagging it as new would add an
+         // obligation with no source and the boundary would create ada.
+-        is_new: false,
++        is_new: pallas::crypto::oracle_plant("genesis-pool-deposit-created"),
+         is_retired: false,
+         blocks_minted: 0,
+         params: PoolParams {
 diff --git a/crates/cardano/src/indexes/query.rs b/crates/cardano/src/indexes/query.rs
 index c7b3141e..0d5ce3ff 100644
 --- a/crates/cardano/src/indexes/query.rs
@@ -149,6 +162,22 @@ index 1fa24a15..9f8c1d75 100644
              for (hash, bytes) in top {
                  self.witness_datums
                      .entry(*hash)
+diff --git a/crates/cardano/src/roll/mod.rs b/crates/cardano/src/roll/mod.rs
+index b79815a3..972df2d2 100644
+--- a/crates/cardano/src/roll/mod.rs
++++ b/crates/cardano/src/roll/mod.rs
+@@ -502,6 +502,11 @@ impl<'a> DeltaBuilder<'a> {
+                     }
+ 
+                     for cert in tx.certs() {
++                        if tx.era() == pallas::ledger::traverse::Era::Dijkstra
++                            && pallas::crypto::oracle_plant("dijkstra-certificates-dropped")
++                        {
++                            continue;
++                        }
+                         self.account_state
+                             .visit_cert(&mut deltas, block, tx, &order, &cert)?;
+                         self.asset_state
 diff --git a/crates/cardano/src/roll/proposals.rs b/crates/cardano/src/roll/proposals.rs
 index 67cc8e65..184c81b4 100644
 --- a/crates/cardano/src/roll/proposals.rs

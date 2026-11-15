@@ -70,6 +70,7 @@ crate_test() {
     dijkstra-witnesses-refused) echo "-p dolos-trp --lib" ;;
     n2n-magic-wrong | n2n-v16-four-fields) echo "-p dolos --lib" ;;
     n2n-leios-minimum-above-node | n2n-fetched-tx-dropped) echo "-p dolos --lib" ;;
+    dijkstra-certificates-dropped | genesis-pool-deposit-created) echo "-p dolos --lib" ;;
     *) return 1 ;;
   esac
 }
@@ -89,6 +90,10 @@ crate_test_source() {
       printf '%s\n' src/serve/grpc/v1/ledger_oracle_tests/n2n.rs test_data/n2n/handshake.txt ;;
     n2n-leios-minimum-above-node | n2n-fetched-tx-dropped)
       printf '%s\n' src/serve/grpc/v1/ledger_oracle_tests/n2n.rs test_data/n2n/fetch.txt ;;
+    dijkstra-certificates-dropped | genesis-pool-deposit-created)
+      printf '%s\n' src/serve/grpc/v1/ledger_oracle_tests/replay.rs crates/ledger-oracle-judge/src/replay.rs \
+        test_data/ledger-oracle/replay-blocks.cbor.gz test_data/ledger-oracle/replay-checkpoints.json \
+        test_data/ledger-oracle/replay-known.txt ;;
   esac
 }
 
@@ -107,6 +112,8 @@ crate_test_filter() {
       echo "$ORACLE_TESTS::n2n::tests::the_node_accepts_the_proposal_at_the_leios_version --exact" ;;
     n2n-leios-minimum-above-node | n2n-fetched-tx-dropped)
       echo "$ORACLE_TESTS::n2n::tests::a_recorded_endorser_block_is_fetched_as_dolos_serves_it --exact" ;;
+    dijkstra-certificates-dropped | genesis-pool-deposit-created)
+      echo "$ORACLE_TESTS::replay::replayed_state_at_each_epoch_start_is_the_ledgers --exact" ;;
   esac
 }
 
@@ -722,7 +729,8 @@ pin - adopts pallas commits listed under pallas
 lint - no behaviour change
 tooling - scripts outside Dolos
 relay - the relay to the node, which no judge drives
-follower - chain following, epoch state and the mempool across blocks, judged by the live leg and not by an arm
+mempool - the mempool across blocks, which the replay judge does not drive
+unreached why a chain following path the replay judge's stored stretch does not take, its why naming what the stretch lacks
 network - node to node mini protocols, judged by the live leg
 conway - Conway and earlier era paths, which Musashi transactions no longer reach
 uncalled why a function no Dolos path calls, so no oracle input reaches it, its why naming the search that finds no caller
