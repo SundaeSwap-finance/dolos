@@ -243,28 +243,33 @@ impl LedgerTx {
 
 /// The fee, witness and auxiliary scripts, committee thresholds, Dijkstra
 /// parameter keys and output datums a ReadTx version maps for a transaction,
-/// with no fee or keys in a message that has no field for them, and no output
-/// datums from a version that maps a sub transaction without its top level
-/// transaction.
+/// with no fee or keys in a message that has no field for them.
 struct MappedTx {
     fee: Option<WireFee>,
     scripts: Vec<ScriptKey>,
     aux_scripts: Vec<ScriptKey>,
     quorum: Vec<MappedQuorum>,
     dijkstra_keys: Option<Vec<DijkstraKeys>>,
-    output_datums: Option<Vec<MappedDatum>>,
+    output_datums: Vec<MappedDatum>,
+}
+
+/// The datum hash and bytes a transaction message maps for each output, with
+/// the bytes the expression after `$datum` reads from the output's datum.
+macro_rules! output_datums {
+    ($tx:expr, |$datum:ident| $bytes:expr) => {{
+        let datums = $tx.outputs.iter().map(|output| {
+            let $datum = output.datum.as_ref()?;
+            Some(($datum.hash.to_vec(), $bytes))
+        });
+        datums.collect::<Vec<MappedDatum>>()
+    }};
 }
 
 /// The datum hash and bytes a v1 transaction message maps for each output.
 fn v1_output_datums(
     tx: &pallas::interop::utxorpc::v1::spec::cardano::TxCommon,
 ) -> Vec<MappedDatum> {
-    let datums = tx.outputs.iter().map(|output| {
-        let datum = output.datum.as_ref()?;
-        let bytes = datum.original_cbor.as_ref().map(|b| b.to_vec());
-        Some((datum.hash.to_vec(), bytes))
-    });
-    datums.collect()
+    output_datums!(tx, |datum| datum.original_cbor.as_ref().map(|b| b.to_vec()))
 }
 
 /// The Dijkstra parameter keys each proposal of a v1 transaction message
@@ -473,17 +478,16 @@ fn differing(ledger: &LedgerTx, mapped: &MappedTx) -> Vec<(Field, String, String
             differing.push((Field::DijkstraKeys, l, m));
         }
     }
-    if let Some(datums) = &mapped.output_datums {
-        let ledger = ledger.hash_datums.iter();
-        let ledger = ledger.map(|(i, hash, bytes)| (*i, &hash[..], bytes.as_ref()));
-        let mapped = ledger.clone().map(|(i, _, _)| match datums.get(i) {
-            Some(Some((hash, bytes))) => (i, &hash[..], bytes.as_ref()),
-            _ => (i, &[][..], None),
-        });
-        if !ledger.clone().eq(mapped.clone()) {
-            let (l, m) = (show_datums(ledger), show_datums(mapped));
-            differing.push((Field::OutputDatums, l, m));
-        }
+    let datums = &mapped.output_datums;
+    let ledger = ledger.hash_datums.iter();
+    let ledger = ledger.map(|(i, hash, bytes)| (*i, &hash[..], bytes.as_ref()));
+    let mapped = ledger.clone().map(|(i, _, _)| match datums.get(i) {
+        Some(Some((hash, bytes))) => (i, &hash[..], bytes.as_ref()),
+        _ => (i, &[][..], None),
+    });
+    if !ledger.clone().eq(mapped.clone()) {
+        let (l, m) = (show_datums(ledger), show_datums(mapped));
+        differing.push((Field::OutputDatums, l, m));
     }
     differing
 }
@@ -571,7 +575,7 @@ pub(super) fn compare(
                     match &tx.common {
                         Some(common) => {
                             let keys = Some(v1_dijkstra_keys(common));
-                            let datums = Some(v1_output_datums(common));
+                            let datums = v1_output_datums(common);
                             Answer::Mapped(mapped!(v1, common, Some(fee), keys, datums))
                         }
                         None => Answer::Absent,
@@ -582,7 +586,7 @@ pub(super) fn compare(
                     match sub {
                         Some(common) => {
                             let keys = Some(v1_dijkstra_keys(common));
-                            let datums = Some(v1_output_datums(common));
+                            let datums = v1_output_datums(common);
                             Answer::Mapped(mapped!(v1, common, None, keys, datums))
                         }
                         None => Answer::Absent,
@@ -596,13 +600,19 @@ pub(super) fn compare(
             let served = read_tx!(v1beta, read, hash);
             let answer = served.then(|tx| {
                 let fee = wire_fee!(v1beta, tx.fee.clone());
-                Answer::Mapped(mapped!(v1beta, tx, Some(fee), None, None))
+                let datums = output_datums!(tx, |datum| {
+                    datum.original_cbor.as_ref().map(|b| b.to_vec())
+                });
+                Answer::Mapped(mapped!(v1beta, tx, Some(fee), None, datums))
             });
             add(tally, id, Version::V1beta, name, ledger, answer);
             let served = read_tx!(v1alpha, read, hash);
             let answer = served.then(|tx| {
                 let fee = wire_fee!(v1alpha, tx.fee.clone());
-                Answer::Mapped(mapped!(v1alpha, tx, Some(fee), None, None))
+                let datums = output_datums!(tx, |datum| {
+                    Some(datum.original_cbor.to_vec()).filter(|b| !b.is_empty())
+                });
+                Answer::Mapped(mapped!(v1alpha, tx, Some(fee), None, datums))
             });
             add(tally, id, Version::V1alpha, name, ledger, answer);
         }
@@ -654,12 +664,12 @@ fn mapped(fee: Option<WireFee>) -> MappedTx {
         aux_scripts: ledger.aux_scripts,
         quorum: vec![Quorum::Other, Quorum::Other],
         dijkstra_keys: Some(ledger.dijkstra_keys),
-        output_datums: Some(vec![
+        output_datums: vec![
             Some((vec![7; 32], Some(vec![0x07]))),
             Some((vec![5; 32], Some(vec![0x18, 0x2b]))),
             Some((vec![6; 32], None)),
             None,
-        ]),
+        ],
     }
 }
 
@@ -708,21 +718,21 @@ fn a_dropped_auxiliary_script_or_dijkstra_key_differs() {
 #[test]
 fn hash_datums_mapped_as_the_ledger_resolves_them_agree() {
     assert_eq!(fields(&ledger(None), &mapped(None)), Vec::<Field>::new());
-    let mut unmapped = mapped(None);
-    unmapped.output_datums = None;
-    assert_eq!(fields(&ledger(None), &unmapped), Vec::<Field>::new());
 }
 
 #[test]
 fn a_hash_datum_mapped_otherwise_than_the_ledger_resolves_it_differs() {
     let ledger = ledger(None);
     let mut dropped = mapped(None);
-    dropped.output_datums.as_mut().unwrap()[1] = Some((vec![5; 32], None));
+    dropped.output_datums[1] = Some((vec![5; 32], None));
     assert_eq!(fields(&ledger, &dropped), [Field::OutputDatums]);
     let mut invented = mapped(None);
-    invented.output_datums.as_mut().unwrap()[2] = Some((vec![6; 32], Some(vec![0x00])));
+    invented.output_datums[2] = Some((vec![6; 32], Some(vec![0x00])));
     assert_eq!(fields(&ledger, &invented), [Field::OutputDatums]);
     let mut short = mapped(None);
-    short.output_datums.as_mut().unwrap().truncate(2);
+    short.output_datums.truncate(2);
     assert_eq!(fields(&ledger, &short), [Field::OutputDatums]);
+    let mut unmapped = mapped(None);
+    unmapped.output_datums.clear();
+    assert_eq!(fields(&ledger, &unmapped), [Field::OutputDatums]);
 }

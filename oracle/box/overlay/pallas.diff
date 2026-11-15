@@ -314,10 +314,10 @@ index c03c073d..cb0ce2f0 100644
                  .collect(),
              account_balance_intervals: tx
 diff --git a/pallas-utxorpc/src/v1alpha/mod.rs b/pallas-utxorpc/src/v1alpha/mod.rs
-index bf15fa19..78f51cbf 100644
+index 9c709872..a7bce49d 100644
 --- a/pallas-utxorpc/src/v1alpha/mod.rs
 +++ b/pallas-utxorpc/src/v1alpha/mod.rs
-@@ -91,10 +91,14 @@ impl<C: LedgerContext> Mapper<C> {
+@@ -100,10 +100,14 @@ impl<C: LedgerContext> Mapper<C> {
                  u5c::Datum {
                      hash: x.to_vec().into(),
                      payload: witnessed.map(|d| self.map_plutus_datum(d)),
@@ -336,7 +336,15 @@ index bf15fa19..78f51cbf 100644
                  }
              }
          })
-@@ -229,7 +233,11 @@ impl<C: LedgerContext> Mapper<C> {
+@@ -189,6 +193,7 @@ impl<C: LedgerContext> Mapper<C> {
+             ctx.get_utxos(to_resolve.as_slice())
+         });
+         // The ledger accepts the datum for a sub transaction's output hash from the top level witnesses too.
++        let top = top.filter(|_| !pallas_crypto::oracle_plant("sub-output-datum-top-unmapped-before-v1"));
+         let datums: Vec<_> = std::iter::once(tx).chain(top).collect();
+ 
+         u5c::Tx {
+@@ -266,7 +271,11 @@ impl<C: LedgerContext> Mapper<C> {
                  total_collateral: u64_to_bigint(tx.total_collateral().unwrap_or_default()),
              }
              .into(),
@@ -350,10 +358,18 @@ index bf15fa19..78f51cbf 100644
                  start: tx.validity_start().unwrap_or_default(),
                  ttl: tx.ttl().unwrap_or_default(),
 diff --git a/pallas-utxorpc/src/v1beta/mod.rs b/pallas-utxorpc/src/v1beta/mod.rs
-index 7b53d8a8..bfab0dc5 100644
+index d93738f8..e37cb5da 100644
 --- a/pallas-utxorpc/src/v1beta/mod.rs
 +++ b/pallas-utxorpc/src/v1beta/mod.rs
-@@ -132,7 +132,11 @@ impl<C: LedgerContext> Mapper<C> {
+@@ -70,6 +70,7 @@ impl<C: LedgerContext> Mapper<C> {
+             ctx.get_utxos(to_resolve.as_slice())
+         });
+         // The ledger accepts the datum for a sub transaction's output hash from the top level witnesses too.
++        let top = top.filter(|_| !pallas_crypto::oracle_plant("sub-output-datum-top-unmapped-before-v1"));
+         let datums: Vec<_> = std::iter::once(tx).chain(top).collect();
+ 
+         u5c::Tx {
+@@ -149,7 +150,11 @@ impl<C: LedgerContext> Mapper<C> {
                  total_collateral: u64_to_bigint(tx.total_collateral().unwrap_or_default()),
              }
              .into(),

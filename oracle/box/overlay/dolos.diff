@@ -507,10 +507,10 @@ index 541f6ba4..700721ee 100644
          if let Some(output) = outputs.get(&(r.1 as usize)) {
              result.insert(r, (era, output.encode()));
 diff --git a/src/serve/grpc/block_context.rs b/src/serve/grpc/block_context.rs
-index baaafdbe..11640ba6 100644
+index 75809d92..2ebba81f 100644
 --- a/src/serve/grpc/block_context.rs
 +++ b/src/serve/grpc/block_context.rs
-@@ -165,10 +165,18 @@ impl<'b> TxOfBlock<'_, 'b> {
+@@ -179,10 +179,18 @@ impl<'b> TxOfBlock<'_, 'b> {
  fn made_among(block: &BlockTxs<'_>, named: &HashSet<TxoRef>) -> UtxoMap {
      let makers: HashSet<_> = named.iter().map(|(hash, _)| *hash).collect();
      let mut made = UtxoMap::new();
@@ -530,7 +530,7 @@ index baaafdbe..11640ba6 100644
          for (i, output) in tx.produces() {
              let made_ref = (applied.hash, i as u32);
              if named.contains(&made_ref) {
-@@ -226,9 +234,11 @@ impl<C: ChainReads> BlockContext<C> {
+@@ -240,9 +248,11 @@ impl<C: ChainReads> BlockContext<C> {
          let made = block
              .map(|block| made_among(block, &named))
              .unwrap_or_default();

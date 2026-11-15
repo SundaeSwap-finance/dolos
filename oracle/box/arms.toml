@@ -68,6 +68,7 @@ fixes = [
   { subject = "fix(cardano): charge a reaped pool the new deposit", exclude = "follower" },
   { subject = "fix(cardano): keep a sub output datum from the top", arm = "sub-output-top-datum-dropped" },
   { subject = "fix(cardano): accept a sub datum the top witnesses", exclude = "pin" },
+  { subject = "fix(grpc): read a sub transaction with its top", arm = "sub-output-datum-top-unmapped-before-v1" },
 ]
 
 [pallas]
@@ -152,6 +153,7 @@ fixes = [
   { subject = "fix(utxorpc): serve a witnessed datum's bytes", arm = "hash-datum-bytes-dropped" },
   { subject = "fix(utxorpc): map a sub output datum from the top", arm = "sub-output-datum-top-unmapped" },
   { subject = "fix(validate): match the ledger's top datum set", arm = "top-witnessed-sub-datum-refused" },
+  { subject = "fix(utxorpc): map a sub with its top at v1beta", arm = "sub-output-datum-top-unmapped-before-v1" },
 ]
 
 [catches]
@@ -286,3 +288,4 @@ n2n-fetched-tx-dropped = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests
 sub-output-top-datum-dropped = ["judge=datum entry=read_utxos:v1 bytes:ledger_only"]
 sub-output-datum-top-unmapped = ["judge=served-tx layer:v1 tx:sub field:output_datums"]
 top-witnessed-sub-datum-refused = ["judge=validation failure:disagree"]
+sub-output-datum-top-unmapped-before-v1 = ["judge=served-tx layer:v1beta tx:sub field:output_datums", "judge=served-tx layer:v1alpha tx:sub field:output_datums"]

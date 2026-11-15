@@ -80,6 +80,7 @@ struct AppliedTx {
 pub(super) struct TxOfBlock<'t, 'b> {
     block: &'t BlockTxs<'b>,
     tx: Cow<'t, MultiEraTx<'b>>,
+    top: Option<&'t MultiEraTx<'b>>,
 }
 
 impl<'b> BlockTxs<'b> {
@@ -139,6 +140,7 @@ impl<'b> BlockTxs<'b> {
         self.txs.get(index).map(|tx| TxOfBlock {
             block: self,
             tx: Cow::Borrowed(tx),
+            top: None,
         })
     }
 
@@ -146,9 +148,15 @@ impl<'b> BlockTxs<'b> {
     /// included.
     pub(super) fn applied(&self, hash: &[u8]) -> Option<TxOfBlock<'_, 'b>> {
         let applied = self.applied.iter().find(|x| x.hash.as_slice() == hash)?;
-        self.tx_at(applied).map(|tx| TxOfBlock {
+        let tx = self.tx_at(applied)?;
+        let top = match tx {
+            MultiEraTx::DijkstraSub(..) => self.txs.get(applied.index),
+            _ => None,
+        };
+        Some(TxOfBlock {
             block: self,
             tx: Cow::Owned(tx),
+            top,
         })
     }
 }
@@ -157,6 +165,12 @@ impl<'b> TxOfBlock<'_, 'b> {
     /// The transaction.
     pub(super) fn tx(&self) -> &MultiEraTx<'b> {
         &self.tx
+    }
+
+    /// The top level transaction that lists the transaction, when it is a sub
+    /// transaction.
+    pub(super) fn top(&self) -> Option<&MultiEraTx<'b>> {
+        self.top
     }
 }
 
@@ -461,6 +475,33 @@ mod made_in_block_tests {
         let (asked, served) = resolve_one(&sub);
         assert_eq!(asked, outside);
         assert_eq!(served, inside);
+    }
+
+    #[test]
+    fn a_top_level_transaction_found_by_its_hash_holds_no_top_level_transaction() {
+        let (raw, made) = spends_its_own_sub_output();
+        let block = MultiEraBlock::decode(&raw).unwrap();
+        let txs = BlockTxs::of(&block);
+        let carrier = top_level_where(&txs, |tx| named_with_subs(tx).contains(&made));
+
+        let found = txs.applied(carrier.tx().hash().as_slice()).unwrap();
+
+        assert_eq!(found.tx().hash(), carrier.tx().hash());
+        assert!(found.top().is_none());
+        assert!(carrier.top().is_none());
+    }
+
+    #[test]
+    fn a_sub_transaction_found_by_its_hash_holds_the_top_level_transaction_listing_it() {
+        let (raw, made) = spends_its_own_sub_output();
+        let block = MultiEraBlock::decode(&raw).unwrap();
+        let txs = BlockTxs::of(&block);
+        let lists = |tx: &MultiEraTx<'_>| tx.sub_transactions().iter().any(|s| s.hash() == made.0);
+        let lister = top_level_where(&txs, lists);
+
+        let sub = txs.applied(made.0.as_slice()).unwrap();
+
+        assert_eq!(sub.top().map(|top| top.hash()), Some(lister.tx().hash()));
     }
 
     #[test]

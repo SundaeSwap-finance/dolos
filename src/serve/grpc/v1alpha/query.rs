@@ -1069,6 +1069,7 @@ where
                 .ok_or_else(|| Status::not_found("tx hash not found"))?;
 
             let native_bytes = tx.tx().encode().into();
+            let mapper = interop::Mapper::new(BlockContext::for_tx(domain.clone(), &tx));
 
             let cursor = domain
                 .state()
@@ -1089,10 +1090,10 @@ where
                             .map(|s| s * 1000)
                             .unwrap_or(0),
                     }),
-                    chain: Some(u5c::query::any_chain_tx::Chain::Cardano(
-                        interop::Mapper::new(BlockContext::for_tx(domain.clone(), &tx))
-                            .map_tx(tx.tx()),
-                    )),
+                    chain: Some(u5c::query::any_chain_tx::Chain::Cardano(match tx.top() {
+                        Some(top) => mapper.map_sub_tx(tx.tx(), top),
+                        None => mapper.map_tx(tx.tx()),
+                    })),
                 }),
                 ledger_tip: cursor,
             })
