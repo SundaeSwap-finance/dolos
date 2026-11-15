@@ -87,6 +87,7 @@ named! {
         Endorser = "endorser",
         Mutation = "mutation",
         DijkstraField = "dijkstra-field",
+        Replay = "replay",
     }
 }
 

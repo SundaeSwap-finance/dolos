@@ -10,6 +10,7 @@ mod missing_script_or_redeemer;
 mod n2n;
 mod output;
 mod params;
+mod replay;
 mod seed;
 mod serve;
 mod served_tx;
@@ -1050,7 +1051,7 @@ fn compare_served_datums(
 }
 
 /// The registered accounts Dolos holds, in the fields the ledger also holds.
-fn dolos_accounts(domain: &DomainAdapter) -> BTreeMap<Credential, Account> {
+pub(super) fn dolos_accounts(domain: &DomainAdapter) -> BTreeMap<Credential, Account> {
     let entities = domain
         .state()
         .iter_entities_typed::<AccountState>(AccountState::NS, None)
@@ -2242,6 +2243,9 @@ async fn ledger_oracle() {
     let endorsed = endorser::judge(&cases).await;
     println!("{}", endorsed.line());
     endorsed.report(cases.len(), &mut verdicts);
+    let replayed = replay::judge();
+    println!("{}", replayed.line());
+    replayed.report(&replay::known(), &mut verdicts);
     for line in mutations.report(&mut verdicts) {
         println!("{line}");
     }

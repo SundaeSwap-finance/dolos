@@ -16,6 +16,7 @@ pub mod parallel;
 pub mod params;
 pub mod record;
 pub mod refusal;
+pub mod replay;
 pub mod row;
 pub mod rules;
 pub mod run;

@@ -1,0 +1,1534 @@
+[
+ {
+  "epoch": 1,
+  "hash": "e1cf320b2ad8c6212f35544c7bc661240a11ce6eebfd291193b117dae4e3a372",
+  "slot": 21602,
+  "state": {
+   "accounts": {
+    "keyHash-17d6e5dbc905918d1e16b0b2df27029391ac73f13966cf183b8051a9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-2138e8159d43e6942d5709f4a581d061816ab15753549e8b9347ee53": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b"
+    },
+    "keyHash-229c1ef7ee70091be326d0ffc140d054a028864bd4a860aafd3a1b25": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-590c24dac4f9d84365cba09b87010125bb965687a0b7a51f298ba8e9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b"
+    },
+    "keyHash-68da84881e8de70c5ea759e61bc5a09fde2447896c1b25d3bbac22ef": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": "drep-keyHash-da388496cca1dc6418e33fe706639873469d8b1e423d056e47736aca",
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-871e0f1463ce9a02930167e4687b12be4c93c769ebf950711bc32e04": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b"
+    },
+    "keyHash-8a009a544ac7486956941decc05efb793d339d479095cb9569f6543b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-e4cbf4a93681ee9f253fa89b1e9362c9427eafb52d02463c712beee2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b"
+    }
+   },
+   "dreps": {
+    "keyHash-da388496cca1dc6418e33fe706639873469d8b1e423d056e47736aca": {
+     "deposit": 500000000,
+     "expiry": 20
+    }
+   },
+   "pools": {
+    "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b": {
+     "deposit": 500000000,
+     "retiring": null
+    },
+    "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414": {
+     "deposit": 500000000,
+     "retiring": null
+    },
+    "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b": {
+     "deposit": 500000000,
+     "retiring": null
+    }
+   },
+   "pots": {
+    "deposited": 2016000000,
+    "fees": 2540764,
+    "reserves": 14999999100000000,
+    "treasury": 500000000
+   }
+  }
+ },
+ {
+  "epoch": 2,
+  "hash": "0222a50ba6195bfae8e0fd9b8655fdaa578cfbfc0c1450d82e0cb53b53d51e7d",
+  "slot": 43208,
+  "state": {
+   "accounts": {
+    "keyHash-17d6e5dbc905918d1e16b0b2df27029391ac73f13966cf183b8051a9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-2138e8159d43e6942d5709f4a581d061816ab15753549e8b9347ee53": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b"
+    },
+    "keyHash-229c1ef7ee70091be326d0ffc140d054a028864bd4a860aafd3a1b25": {
+     "balance": 830769,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-590c24dac4f9d84365cba09b87010125bb965687a0b7a51f298ba8e9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b"
+    },
+    "keyHash-68da84881e8de70c5ea759e61bc5a09fde2447896c1b25d3bbac22ef": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": "drep-keyHash-da388496cca1dc6418e33fe706639873469d8b1e423d056e47736aca",
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-871e0f1463ce9a02930167e4687b12be4c93c769ebf950711bc32e04": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b"
+    },
+    "keyHash-8a009a544ac7486956941decc05efb793d339d479095cb9569f6543b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-e4cbf4a93681ee9f253fa89b1e9362c9427eafb52d02463c712beee2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b"
+    }
+   },
+   "dreps": {
+    "keyHash-da388496cca1dc6418e33fe706639873469d8b1e423d056e47736aca": {
+     "deposit": 500000000,
+     "expiry": 20
+    }
+   },
+   "pools": {
+    "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b": {
+     "deposit": 500000000,
+     "retiring": null
+    },
+    "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414": {
+     "deposit": 500000000,
+     "retiring": null
+    },
+    "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b": {
+     "deposit": 500000000,
+     "retiring": null
+    }
+   },
+   "pots": {
+    "deposited": 2016000000,
+    "fees": 0,
+    "reserves": 14990999101741843,
+    "treasury": 9000499968152
+   }
+  }
+ },
+ {
+  "epoch": 3,
+  "hash": "e83a631d2f7d4b24dd65c79e69d1a6ad56b73d255d6edcf68b3b5e29e4e995f2",
+  "slot": 64836,
+  "state": {
+   "accounts": {
+    "keyHash-00bc89c65c1e24c9f655ef37b3c628326d1a5431bfbfe1c02abf4a87": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-0183b44e0e18b17d2bcf1d0cbc967636077064554e50e2e08bf9a305": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-03e1144557fc93bd0243846a9f33ee373260238ec7ca711daec4bcaf": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-0d574dae8cd3ba2f29cfa618d23dc6ae53cd73aebaa697d75d311855": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-0d7637d7e4e65fa7521fda9cc5643c9a1ace62a2841383dbe0a52b1f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-0eb262a3fabb19afa938719cebcef01c7ae3378f979a3a3a30553d35": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-1321aa2a3e8c406ced024cc262c2bbbce8e8b9480f67c95569da26d1": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-14a73d451e22ea3e6fd4b26c4bab5b247ec592353209e1d6a0bb6950": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-1731d0dac6015104c0cf6a27648a707ec19d93c71801d17c88e1759b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-17d6e5dbc905918d1e16b0b2df27029391ac73f13966cf183b8051a9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-181b37264f467e2d881cec040b8bd92728f18049b16bc4fa3d9945ba": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-184aae9d8ed603d37aaed2eeccaf9d8784591491bf9ac337e09aae57": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-1c940ff9a54f2fad921142e01c4e0864c51110b5d6f7e3874264da75": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-1efdceed7a7d0aae4cea44a9b7c6f7826e707b1a817316758b95caed": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-2138e8159d43e6942d5709f4a581d061816ab15753549e8b9347ee53": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b"
+    },
+    "keyHash-218ff655a058cb55d0f5bd3757c1691ee8e49e8dcca537c0b0ef6301": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-21a611ae3120e3ebf3b7928f37944cf7a280ad6c259f12c3914ccabb": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-229c1ef7ee70091be326d0ffc140d054a028864bd4a860aafd3a1b25": {
+     "balance": 1637734,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-261031b38a093fbed29db88164b204027599eb4de992a701943b3297": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-27ec6323e21a4df5c10f15e4bcb56df9cfd9c13856457106ae4cbab2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-2b0677562c0115ad8c765ed6e944ba012fdb8fae4fbdbc986807d4b2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-2e0a97fd1dd73a4e44989248c3768102ed1decdda04e7b13317e00c9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-2ebf434a201f05df9577ae7668a2c5bc037dfb7f57e4af2ff642a368": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-325771fc9920879dff3581724e5d2db8b610100c68bc87820b323841": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-334b4c27f9a24f6263086570273c996b0027dedfea0b2db0b77a5d8a": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-34d608dbf838dfb6d9a5903712d4b58c26cac122ed159fdfad7e5501": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-37bed833b2468693776dc8c523a3dbd2912980288bee1b3ac17978e2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-3878aa99f44e29ac104c41ab5bb844c3b61cef9fa888b8f95e9901c8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-3d0e30f02b1bf8638b4c24873e87e7f3e4dc4dcada321541b032f945": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-3e8e496e66c6d21cd3e9824c6935dec47ce06fcbda03d4ae306c1035": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-402ce9d1ffc62169c19c07e9d75e830296d243e6d476ff9de1a9512e": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-405381ac0377d13eb7bf6d9ad622a2c8c83c9309e4499508b92d76f5": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-405600694994748702a7668d4122a24a241ddf125698997493884deb": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-422f97c529830aeba65a7ec1db84fe3b0072a454d2c9b7c79246739c": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-42c10f42cac6e653bbd50987034449dab1873255155d4b49e59b8f85": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-435b398536d47b52718c8923fda8a35d697e360229de8a7f6ba8b23f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-4d6bd0fb0ef8ccbc03fc47a18dbd2dee68f6edbbc5eae637cccbb967": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-51bc6e9a1bcc3661b68d29cb6cd788b43119d20d458b64d4977a69d4": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-54f5f814a344c4174c74892ee753a9b06881be59f64643a4ed969a82": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-55f96075141b78720c2c2966dcc509ff87ce068429a0751c9df31f0d": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-56bc2e54f4ab0aa0e6f600478c8213c54e13d2b3bd6b06a08a302c6a": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-57d0b57e8fa4f1e736a138caac4130531e42d0a00d789addd0c2743e": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-590c24dac4f9d84365cba09b87010125bb965687a0b7a51f298ba8e9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b"
+    },
+    "keyHash-5dd80de95febdb7a1f64c87521220ea3866d010b5481801d3e22ddee": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-61a065d4edc048b33e25497b34bac9eb70115f1c39975b2f53e9aa89": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-63778baa8aa6698bf31d803b9c08c8e3fd9a1019985bcb2973d5964f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-64995ccbd3489dfb26515fb19c17b1a5217f274e066a3535c36ab521": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-68da84881e8de70c5ea759e61bc5a09fde2447896c1b25d3bbac22ef": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": "drep-keyHash-da388496cca1dc6418e33fe706639873469d8b1e423d056e47736aca",
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-696a097d0ce06d6a4571c2afc9e7f10965f4f00cf3ee227018b33227": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-6b033ababb88b99874cc9d7c88909353b9bcf8db95598e750fee17cf": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-6be2d03cd87e0354cb0efafcf01f24867cf97413dd0f0608f4809585": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-6ff26400367b6dcf9591f5fef3c2efeac2b7466495c77646a92ca527": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-729357d890b6882610b3187a4b52baf4c0086387586665e5f7a0ddca": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-72eb9de4752b495befff8ae9e4b454878cb6dd07aac6fdad0f826c24": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-7506dad32e5c50de632be3ca4535ab73e8637bedc1eac4e045bc9ac5": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-76941f1b9bce9e97692f3ce9f14397ef85ab4ade7ee2b83e118b2b14": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-78ee8dd4bf7d19257eb8961d8a2affd075fe6ef1893ffd7c128a2ce9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-7f59ab5ac656b95a360cef8a49809d939aac23410ef5c688b893f089": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-83f22f088d18e3bd93c16807d586034db517d73252a54823a312ca52": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-86257add5acbfaa99c6502b00a4d4115748e2a54f0e1e2b645954e7f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-871e0f1463ce9a02930167e4687b12be4c93c769ebf950711bc32e04": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b"
+    },
+    "keyHash-89d4e7db18b8d3c02629ebf9f16df9c6552131f817b868e288b0dc1c": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-8a009a544ac7486956941decc05efb793d339d479095cb9569f6543b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-8f9a2359373dee73cf7a6d3ca0f7ff036276782982d2c738a15018f6": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-90d86418521d57cdf216a77adf09e693caef4b7642faa0aaae41dd30": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-927b513254a443f82ec1586f18a236427ce96ac4681165eca067465f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-966e16bbe6710ddc286cd5f95d845d16c9171205f9527571d26430d2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-96e21365fdf371569391aee15643f7ced0d131bb39275efde707c33c": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-99295d9e2c6457c42477cbc43aa76301187b45cce23124ef3c57de75": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-995224f5bbc6120908ec54be529beff98fe2786ff7814c64963615e8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a102149f898d88832888c3fe23af5e7620b1ba937f2e0c2a790cbb01": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a4b7932c54801e1844420860ccf9fce2b87c70961954afe3ba42c24b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a4f73e6d962f5c9f3e0ec39dc97f0bf84028cd6e7a796875f48815ae": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a53cb9d910fcd45f85714f85b698659b0b1c3c4da2cddffbfab57755": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a6de081931240da45569fbc68f77a030c12ed9f2e8d278a7d547d795": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-ac5bebf24aa2f933ef1bf702ad0d29bfbca76b3ec96f79d0d866a536": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-acf276f7c26384732cfdc53e60d44312bd929ee70483caaef2002cf0": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-af9452897cba9eb604437fcab87d8ccd734234d0a194d83b762039e5": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-afc03a1b7231073add568a7e0217edd96064ac647a5b332160afd569": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-b15f55881339637a8039ca475349cf8e1ae341fd4686fb783da719cf": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-bb82d5e0dcaed406a31fdbc62f652e4221c0806d514707f4d45d8578": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-bd476b658b3a57a4dd552c107ae08c2a0005009fb60b45f5ac886a0e": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-bfbfa7efce22ccf82d161852682b7cf95ad35a9b00ddf60181223677": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-c0a6232450e72a4ce5547325bbba65e738dd152ae7e68ddaced61c59": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-c43f85e6b125c0fe58b256ff551aebf02e15e36f71a34882a3ee9732": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-cbd4555289e9883d90b819264a6e2059a45c7c11ca32001ebac428d9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-cdca56140d4ab658bd263247c0c3f2026e7d56c56427cf704a2142c8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-ce44440bec494f5fab3ff433b776a64ee1b10ca15c0d6178132fb433": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-cef629ea63d1faeaf6e1915b48b6c2d7db26d0e8fd969e781ff47ab4": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-d15fb7f01d972191eacc56825e78874e41b2245d31a4990afd92ed77": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-d19be84fdfce15e5ea5adcb0e2fdc505a5722e0a12791954018c80da": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-d7e01c6333532e20b13d9dc8bc2f75f1a8fe8940a7eb6ff5b6489fd5": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-de5a6150594c9b1854174641a9ee78cf9d0d042edb4291234e7df9ed": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-de857d183f84adeacc60fe16b75e2752ae565f14c2ee7fe00cfc6908": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-defce3d124421d5254dbf2c961fc126793d20029842792eec4e850ff": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-dfa347c669db6121cb0c97ffabec06866c4f4b76fc9e5408068f8ef9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-e31ef6630e73044bf010dab8312b97b5ded9985c67fc42b129825817": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-e45d7695f8119495dc0a6ba4ce7728da7f983da1dd8641cd20ee29a8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-e4cbf4a93681ee9f253fa89b1e9362c9427eafb52d02463c712beee2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b"
+    },
+    "keyHash-e4ee20bfe4df8f6ccb595a8678824c65d40d91ffa336053566d7df39": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-eda3d8d08adbd5bb87fffd839d5a29b91693fbf6ba0b420beceae1e8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-f0d1637bdf6c9426be62eba0ace760f6b2df953c35e517f591e89e8b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-f1fa70f429720c0d7424889b6341603f3780285146876fc97786862f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-f5528df666aeb2bf133b6667d4a50d99511c42e52428efac63e1d5f0": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-f8e3a744964a66fdc52c4c74994ab5a035843a658594c7fe4d3d4f2d": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-fb84f10aec4d6070d4daf2212e5310c0e1fe00e6ddb1896d6905f8cd": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-fbdd29daa08b20ddfa632d83e3559837b4524730423d7594dfa3dbc2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-ffc8d87ce6ccc6f6b9eb242755e520f62089e763a511cc1c12c931af": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    }
+   },
+   "dreps": {
+    "keyHash-da388496cca1dc6418e33fe706639873469d8b1e423d056e47736aca": {
+     "deposit": 500000000,
+     "expiry": 20
+    }
+   },
+   "pools": {
+    "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b": {
+     "deposit": 500000000,
+     "retiring": null
+    },
+    "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414": {
+     "deposit": 500000000,
+     "retiring": null
+    },
+    "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b": {
+     "deposit": 500000000,
+     "retiring": null
+    }
+   },
+   "pots": {
+    "deposited": 2216000000,
+    "fees": 227260689,
+    "reserves": 14982254351458862,
+    "treasury": 17745249444168
+   }
+  }
+ },
+ {
+  "epoch": 4,
+  "hash": "bb42f09bb1cc51a4b8d331d366f14a4f4c763d2c08bce3c8280d3a9689bd955c",
+  "slot": 86416,
+  "state": {
+   "accounts": {
+    "keyHash-00bc89c65c1e24c9f655ef37b3c628326d1a5431bfbfe1c02abf4a87": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-0183b44e0e18b17d2bcf1d0cbc967636077064554e50e2e08bf9a305": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-03e1144557fc93bd0243846a9f33ee373260238ec7ca711daec4bcaf": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-0d574dae8cd3ba2f29cfa618d23dc6ae53cd73aebaa697d75d311855": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-0d7637d7e4e65fa7521fda9cc5643c9a1ace62a2841383dbe0a52b1f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-0eb262a3fabb19afa938719cebcef01c7ae3378f979a3a3a30553d35": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-1321aa2a3e8c406ced024cc262c2bbbce8e8b9480f67c95569da26d1": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-14a73d451e22ea3e6fd4b26c4bab5b247ec592353209e1d6a0bb6950": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-1731d0dac6015104c0cf6a27648a707ec19d93c71801d17c88e1759b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-17d6e5dbc905918d1e16b0b2df27029391ac73f13966cf183b8051a9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-181b37264f467e2d881cec040b8bd92728f18049b16bc4fa3d9945ba": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-184aae9d8ed603d37aaed2eeccaf9d8784591491bf9ac337e09aae57": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-1c940ff9a54f2fad921142e01c4e0864c51110b5d6f7e3874264da75": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-1efdceed7a7d0aae4cea44a9b7c6f7826e707b1a817316758b95caed": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-2138e8159d43e6942d5709f4a581d061816ab15753549e8b9347ee53": {
+     "balance": 8575856063,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b"
+    },
+    "keyHash-218ff655a058cb55d0f5bd3757c1691ee8e49e8dcca537c0b0ef6301": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-21a611ae3120e3ebf3b7928f37944cf7a280ad6c259f12c3914ccabb": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-229c1ef7ee70091be326d0ffc140d054a028864bd4a860aafd3a1b25": {
+     "balance": 1637734,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-261031b38a093fbed29db88164b204027599eb4de992a701943b3297": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-27ec6323e21a4df5c10f15e4bcb56df9cfd9c13856457106ae4cbab2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-2b0677562c0115ad8c765ed6e944ba012fdb8fae4fbdbc986807d4b2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-2e0a97fd1dd73a4e44989248c3768102ed1decdda04e7b13317e00c9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-2ebf434a201f05df9577ae7668a2c5bc037dfb7f57e4af2ff642a368": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-325771fc9920879dff3581724e5d2db8b610100c68bc87820b323841": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-334b4c27f9a24f6263086570273c996b0027dedfea0b2db0b77a5d8a": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-34d608dbf838dfb6d9a5903712d4b58c26cac122ed159fdfad7e5501": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-37bed833b2468693776dc8c523a3dbd2912980288bee1b3ac17978e2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-3878aa99f44e29ac104c41ab5bb844c3b61cef9fa888b8f95e9901c8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-3d0e30f02b1bf8638b4c24873e87e7f3e4dc4dcada321541b032f945": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-3e8e496e66c6d21cd3e9824c6935dec47ce06fcbda03d4ae306c1035": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-402ce9d1ffc62169c19c07e9d75e830296d243e6d476ff9de1a9512e": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-405381ac0377d13eb7bf6d9ad622a2c8c83c9309e4499508b92d76f5": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-405600694994748702a7668d4122a24a241ddf125698997493884deb": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-422f97c529830aeba65a7ec1db84fe3b0072a454d2c9b7c79246739c": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-42c10f42cac6e653bbd50987034449dab1873255155d4b49e59b8f85": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-435b398536d47b52718c8923fda8a35d697e360229de8a7f6ba8b23f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-4d6bd0fb0ef8ccbc03fc47a18dbd2dee68f6edbbc5eae637cccbb967": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-51bc6e9a1bcc3661b68d29cb6cd788b43119d20d458b64d4977a69d4": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-54f5f814a344c4174c74892ee753a9b06881be59f64643a4ed969a82": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-55f96075141b78720c2c2966dcc509ff87ce068429a0751c9df31f0d": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-56bc2e54f4ab0aa0e6f600478c8213c54e13d2b3bd6b06a08a302c6a": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-57d0b57e8fa4f1e736a138caac4130531e42d0a00d789addd0c2743e": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-590c24dac4f9d84365cba09b87010125bb965687a0b7a51f298ba8e9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b"
+    },
+    "keyHash-5dd80de95febdb7a1f64c87521220ea3866d010b5481801d3e22ddee": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-61a065d4edc048b33e25497b34bac9eb70115f1c39975b2f53e9aa89": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-63778baa8aa6698bf31d803b9c08c8e3fd9a1019985bcb2973d5964f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-64995ccbd3489dfb26515fb19c17b1a5217f274e066a3535c36ab521": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-68da84881e8de70c5ea759e61bc5a09fde2447896c1b25d3bbac22ef": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": "drep-keyHash-da388496cca1dc6418e33fe706639873469d8b1e423d056e47736aca",
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-696a097d0ce06d6a4571c2afc9e7f10965f4f00cf3ee227018b33227": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-6b033ababb88b99874cc9d7c88909353b9bcf8db95598e750fee17cf": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-6be2d03cd87e0354cb0efafcf01f24867cf97413dd0f0608f4809585": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-6ff26400367b6dcf9591f5fef3c2efeac2b7466495c77646a92ca527": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-729357d890b6882610b3187a4b52baf4c0086387586665e5f7a0ddca": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-72eb9de4752b495befff8ae9e4b454878cb6dd07aac6fdad0f826c24": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-7506dad32e5c50de632be3ca4535ab73e8637bedc1eac4e045bc9ac5": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-76941f1b9bce9e97692f3ce9f14397ef85ab4ade7ee2b83e118b2b14": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-78ee8dd4bf7d19257eb8961d8a2affd075fe6ef1893ffd7c128a2ce9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-7f59ab5ac656b95a360cef8a49809d939aac23410ef5c688b893f089": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-83f22f088d18e3bd93c16807d586034db517d73252a54823a312ca52": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-86257add5acbfaa99c6502b00a4d4115748e2a54f0e1e2b645954e7f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-871e0f1463ce9a02930167e4687b12be4c93c769ebf950711bc32e04": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b"
+    },
+    "keyHash-89d4e7db18b8d3c02629ebf9f16df9c6552131f817b868e288b0dc1c": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-8a009a544ac7486956941decc05efb793d339d479095cb9569f6543b": {
+     "balance": 9859762120,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414"
+    },
+    "keyHash-8f9a2359373dee73cf7a6d3ca0f7ff036276782982d2c738a15018f6": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-90d86418521d57cdf216a77adf09e693caef4b7642faa0aaae41dd30": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-927b513254a443f82ec1586f18a236427ce96ac4681165eca067465f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-966e16bbe6710ddc286cd5f95d845d16c9171205f9527571d26430d2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-96e21365fdf371569391aee15643f7ced0d131bb39275efde707c33c": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-99295d9e2c6457c42477cbc43aa76301187b45cce23124ef3c57de75": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-995224f5bbc6120908ec54be529beff98fe2786ff7814c64963615e8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a102149f898d88832888c3fe23af5e7620b1ba937f2e0c2a790cbb01": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a4b7932c54801e1844420860ccf9fce2b87c70961954afe3ba42c24b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a4f73e6d962f5c9f3e0ec39dc97f0bf84028cd6e7a796875f48815ae": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a53cb9d910fcd45f85714f85b698659b0b1c3c4da2cddffbfab57755": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-a6de081931240da45569fbc68f77a030c12ed9f2e8d278a7d547d795": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-ac5bebf24aa2f933ef1bf702ad0d29bfbca76b3ec96f79d0d866a536": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-acf276f7c26384732cfdc53e60d44312bd929ee70483caaef2002cf0": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-af9452897cba9eb604437fcab87d8ccd734234d0a194d83b762039e5": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-afc03a1b7231073add568a7e0217edd96064ac647a5b332160afd569": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-b15f55881339637a8039ca475349cf8e1ae341fd4686fb783da719cf": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-bb82d5e0dcaed406a31fdbc62f652e4221c0806d514707f4d45d8578": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-bd476b658b3a57a4dd552c107ae08c2a0005009fb60b45f5ac886a0e": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-bfbfa7efce22ccf82d161852682b7cf95ad35a9b00ddf60181223677": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-c0a6232450e72a4ce5547325bbba65e738dd152ae7e68ddaced61c59": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-c43f85e6b125c0fe58b256ff551aebf02e15e36f71a34882a3ee9732": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-cbd4555289e9883d90b819264a6e2059a45c7c11ca32001ebac428d9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-cdca56140d4ab658bd263247c0c3f2026e7d56c56427cf704a2142c8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-ce44440bec494f5fab3ff433b776a64ee1b10ca15c0d6178132fb433": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-cef629ea63d1faeaf6e1915b48b6c2d7db26d0e8fd969e781ff47ab4": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-d15fb7f01d972191eacc56825e78874e41b2245d31a4990afd92ed77": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-d19be84fdfce15e5ea5adcb0e2fdc505a5722e0a12791954018c80da": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-d7e01c6333532e20b13d9dc8bc2f75f1a8fe8940a7eb6ff5b6489fd5": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-de5a6150594c9b1854174641a9ee78cf9d0d042edb4291234e7df9ed": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-de857d183f84adeacc60fe16b75e2752ae565f14c2ee7fe00cfc6908": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-defce3d124421d5254dbf2c961fc126793d20029842792eec4e850ff": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-dfa347c669db6121cb0c97ffabec06866c4f4b76fc9e5408068f8ef9": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-e31ef6630e73044bf010dab8312b97b5ded9985c67fc42b129825817": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-e45d7695f8119495dc0a6ba4ce7728da7f983da1dd8641cd20ee29a8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-e4cbf4a93681ee9f253fa89b1e9362c9427eafb52d02463c712beee2": {
+     "balance": 8417043913,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b"
+    },
+    "keyHash-e4ee20bfe4df8f6ccb595a8678824c65d40d91ffa336053566d7df39": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-eda3d8d08adbd5bb87fffd839d5a29b91693fbf6ba0b420beceae1e8": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-f0d1637bdf6c9426be62eba0ace760f6b2df953c35e517f591e89e8b": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-f1fa70f429720c0d7424889b6341603f3780285146876fc97786862f": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-f5528df666aeb2bf133b6667d4a50d99511c42e52428efac63e1d5f0": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-f8e3a744964a66fdc52c4c74994ab5a035843a658594c7fe4d3d4f2d": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-fb84f10aec4d6070d4daf2212e5310c0e1fe00e6ddb1896d6905f8cd": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-fbdd29daa08b20ddfa632d83e3559837b4524730423d7594dfa3dbc2": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    },
+    "keyHash-ffc8d87ce6ccc6f6b9eb242755e520f62089e763a511cc1c12c931af": {
+     "balance": 0,
+     "deposit": 2000000,
+     "drep": null,
+     "spool": null
+    }
+   },
+   "dreps": {
+    "keyHash-da388496cca1dc6418e33fe706639873469d8b1e423d056e47736aca": {
+     "deposit": 500000000,
+     "expiry": 20
+    }
+   },
+   "pools": {
+    "5f0b42b4fbdc7e442d5da37744cafdca86e0e7f3bf94223e75e9312b": {
+     "deposit": 500000000,
+     "retiring": null
+    },
+    "8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414": {
+     "deposit": 500000000,
+     "retiring": null
+    },
+    "8a89ad6a871bdc17039285768e4ac8e24df94c7ddcc342752852976b": {
+     "deposit": 500000000,
+     "retiring": null
+    }
+   },
+   "pots": {
+    "deposited": 2216000000,
+    "fees": 0,
+    "reserves": 14973787677320663,
+    "treasury": 26185298180960
+   }
+  }
+ }
+]

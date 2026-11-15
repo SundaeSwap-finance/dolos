@@ -510,7 +510,7 @@ fn delegators(domain: &DomainAdapter) -> BTreeMap<[u8; 28], Vec<CredentialObject
     by_pool
 }
 
-fn read_all<T: Entity + FixedNamespace>(domain: &DomainAdapter) -> Vec<T> {
+pub(super) fn read_all<T: Entity + FixedNamespace>(domain: &DomainAdapter) -> Vec<T> {
     let entities = domain
         .state()
         .iter_entities_typed::<T>(T::NS, None)
@@ -567,7 +567,7 @@ fn pools(domain: &DomainAdapter, unheld: &mut Vec<Unrepresentable>) -> state::Po
 }
 
 /// The registered DReps Dolos holds as the ledger's DRep states.
-fn dreps(
+pub(super) fn dreps(
     domain: &DomainAdapter,
     unheld: &mut Vec<Unrepresentable>,
 ) -> BTreeMap<Credential, state::DRepState> {

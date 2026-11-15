@@ -172,6 +172,19 @@ pub fn compare(
     dolos: &BTreeMap<Credential, Account>,
     tally: &mut Tally,
 ) {
+    compare_by(ledger, dolos, tally, |cells, detail| {
+        Finding::new(id, cells, detail)
+    });
+}
+
+/// Counts each account either side holds against the other side's account for
+/// that credential, making each disagreement with `finding`.
+pub fn compare_by<F>(
+    ledger: &LedgerAccounts,
+    dolos: &BTreeMap<Credential, Account>,
+    tally: &mut Tally<F>,
+    finding: impl Fn(Vec<CellKey>, String) -> F,
+) {
     let ledger: BTreeMap<&Credential, Account> =
         ledger.iter().map(|(c, a)| (c, a.into())).collect();
     let mut credentials: Vec<&Credential> = ledger.keys().copied().chain(dolos.keys()).collect();
@@ -186,7 +199,7 @@ pub fn compare(
                 shown(l),
                 shown(d)
             );
-            Finding::new(id, cells(l, d), detail)
+            finding(cells(l, d), detail)
         });
     }
 }
