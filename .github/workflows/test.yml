@@ -1,0 +1,42 @@
+name: Test
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: The runner to test on
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # rust-cache hashes the CARGO variables into its key, so the CI jobs that
+  # restore this job's cache set the same values.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+
+jobs:
+  test:
+    name: Test (${{ inputs.os }})
+    runs-on: ${{ inputs.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-04
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # `all-features` and `e2e` restore this read only, and without a shared
+          # key each would save its own multi GB entry against a full quota.
+          shared-key: test-${{ inputs.os }}
+
+      - name: Run unit tests
+        run: cargo test --workspace --all-targets
+
+      - name: Run e2e smoke tests
+        run: cargo test --test smoke -- --ignored

@@ -7,7 +7,13 @@ on:
       - "leios-musashi-*"
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+    with:
+      os: ubuntu-latest
+
   build:
+    needs: [test]
     continue-on-error: true
 
     strategy:

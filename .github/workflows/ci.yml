@@ -75,31 +75,13 @@ jobs:
           command: check advisories bans
 
   test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-14]
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2026-09-04
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # `all-features` and `e2e` restore this read-only; without a shared
-          # key each would save its own multi-GB entry against a full quota.
-          shared-key: test-${{ matrix.os }}
-
-      - name: Run unit tests
-        run: cargo test --workspace --all-targets
-
-      - name: Run e2e smoke tests
-        run: cargo test --test smoke -- --ignored
+    uses: ./.github/workflows/test.yml
+    with:
+      os: ${{ matrix.os }}
 
   # Windows is the slowest job and skips e2e, so on a PR it adds latency without
   # coverage anyone acts on. A Windows-only break lands on main and is caught by
