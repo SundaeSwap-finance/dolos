@@ -254,3 +254,6 @@ server-fault-as-client = ["test=serve::grpc::convert::tests::each_submit_error_a
 stored-decode-as-client = ["test=validate::evaluation_tests::a_stored_output_that_fails_to_decode_is_a_server_fault", "test=validate::evaluation_tests::a_stored_output_of_an_unknown_era_is_a_server_fault"]
 evaluation-fault-as-client = ["test=validate::evaluation_tests::an_evaluation_the_server_cannot_build_is_a_server_fault"]
 dijkstra-witnesses-refused = ["test=methods::tests::a_dijkstra_submission_takes_its_witnesses"]
+eval-payload-changed = ["judge=eval-oracle entry=eval_tx:v1 answer:row ledger:failed dolos:failed"]
+eval-phase-one = ["judge=eval-tx demand:refuse error_layer:phase_one"]
+eval-row-dropped = ["judge=eval-oracle entry=eval_tx:v1 answer:row ledger:ran dolos:none"]

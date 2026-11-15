@@ -93,7 +93,7 @@ index 340a6ece..d8296f8f 100644
                  delta
                      .produced_utxo
 diff --git a/crates/cardano/src/validate.rs b/crates/cardano/src/validate.rs
-index 186cc4b9..1db910c6 100644
+index 186cc4b9..c86a7a9b 100644
 --- a/crates/cardano/src/validate.rs
 +++ b/crates/cardano/src/validate.rs
 @@ -69,6 +69,11 @@ pub fn validate_tx<D: Domain>(
@@ -186,7 +186,7 @@ index 186cc4b9..1db910c6 100644
  
              Ok::<_, ChainError>((
                  pallas_validate::utils::TxoRef::from((a, b)),
-@@ -330,16 +367,54 @@ fn evaluation_utxos(matches: UtxoMap) -> Result<pallas_validate::utils::UtxoMap,
+@@ -330,16 +367,59 @@ fn evaluation_utxos(matches: UtxoMap) -> Result<pallas_validate::utils::UtxoMap,
  /// The chain error for a phase two evaluation pallas could not complete.
  fn evaluation_error(error: pallas_validate::phase2::error::Error) -> ChainError {
      match error {
@@ -205,6 +205,11 @@ index 186cc4b9..1db910c6 100644
 +        {
              ChainError::Phase2EvaluationInternal(error.to_string())
          }
++        _ if pallas::crypto::oracle_plant("eval-phase-one") => {
++            ChainError::Phase1ValidationRejected(ValidationError::ShelleyMA(
++                pallas_validate::utils::ShelleyMAError::MissingScriptWitness,
++            ))
++        }
          error => ChainError::Phase2EvaluationError(error.to_string()),
      }
  }
@@ -242,7 +247,7 @@ index 186cc4b9..1db910c6 100644
  /// Whether an evaluation error comes from the inputs the node assembled for the
  /// evaluation.
  fn from_node_inputs(error: &pallas_validate::phase2::error::Error) -> bool {
-@@ -752,7 +827,11 @@ fn admit_unconfirmed<S, F>(
+@@ -752,7 +832,11 @@ fn admit_unconfirmed<S, F>(
  /// The mempool transactions, inflight before pending, each once.
  fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx> {
      let pending = utxos.pending();
@@ -255,7 +260,7 @@ index 186cc4b9..1db910c6 100644
      // Relay can move a transaction between these two reads. Count it once.
      let mut seen = std::collections::HashSet::new();
      inflight
-@@ -771,6 +850,9 @@ fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx
+@@ -771,6 +855,9 @@ fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx
  }
  
  fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError> {
@@ -415,7 +420,7 @@ index b3a5af22..6236592f 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index affa0775..518fc1fc 100644
+index affa0775..15c50f63 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
 @@ -111,6 +111,9 @@ fn tx_eval_to_u5c(
@@ -428,6 +433,24 @@ index affa0775..518fc1fc 100644
              MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
              other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
          };
+@@ -127,6 +130,7 @@ fn tx_eval_to_u5c(
+                 entry
+                     .failure_message
+                     .as_deref()
++                    .filter(|_| !pallas::crypto::oracle_plant("eval-payload-changed"))
+                     .unwrap_or("script evaluation failed")
+             )));
+         }
+@@ -141,6 +145,9 @@ fn tx_eval_to_u5c(
+             ..Default::default()
+         });
+     }
++    if pallas::crypto::oracle_plant("eval-row-dropped") {
++        result.redeemers.pop();
++    }
+     result
+ }
+ 
 diff --git a/src/serve/grpc/v1alpha/submit.rs b/src/serve/grpc/v1alpha/submit.rs
 index 514591f4..fc49e696 100644
 --- a/src/serve/grpc/v1alpha/submit.rs

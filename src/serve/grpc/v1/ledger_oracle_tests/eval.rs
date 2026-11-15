@@ -5,11 +5,12 @@ use std::collections::BTreeMap;
 
 use dolos_core::{ChainError, DomainError};
 use ledger_oracle_judge::{
-    cbor::Purpose,
+    cbor::{self, Data, Purpose},
     context::{self, ContextTally, ContextVerdict, Listing, PallasContext, PallasContexts},
     eval::{
-        self, named_in_message, wire_purpose, Answer, DolosAnswer, EvalTally, Layer, Level,
-        Malformed, Refusal, RowKey, RowVerdict, TxDemand, WireEval, WireFee,
+        self, named_in_message, wire_purpose, Answer, DolosAnswer, ErrorLayer, EvalField,
+        EvalFields, EvalTally, Failure, Layer, Level, Malformed, Refusal, RowKey, RowVerdict,
+        Traces, TxDemand, WireEval, WireFee, WirePayload,
     },
     judgement::{Axis, CellKey, Version},
     record::{LedgerOutcome, LedgerRedeemers, Phase2, Record, RecordId, Units},
@@ -37,8 +38,9 @@ use super::{coverage::builtin_member, purpose, tag_number, validate::Group};
 struct Evaluator {
     answer: Result<DolosAnswer, Malformed>,
     calls: BTreeMap<RowKey, Vec<Builtin>>,
-    /// The refusal and the message an EvalTx response renders it to.
-    refusal: Option<(String, Refusal)>,
+    /// The refusal, the message an EvalTx response renders it to and the stage
+    /// that refused.
+    refusal: Option<(String, Refusal, ErrorLayer)>,
     /// The message each EvalTx version that cannot represent a result gives in
     /// place of its report.
     unrepresentable: BTreeMap<Layer, String>,
@@ -71,17 +73,51 @@ fn refusal(e: &ChainError) -> Refusal {
     })
 }
 
+/// The stage of Dolos that raised an evaluation error.
+fn error_layer(e: &ChainError) -> ErrorLayer {
+    match e {
+        ChainError::DecodingError(_)
+        | ChainError::CborDecodingError(_)
+        | ChainError::AddressDecoding(_) => ErrorLayer::Decode,
+        ChainError::Phase1ValidationRejected(_) => ErrorLayer::PhaseOne,
+        ChainError::Phase2EvaluationError(_) | ChainError::Phase2ValidationRejected(_) => {
+            ErrorLayer::PhaseTwo
+        }
+        ChainError::Phase2EvaluationUnsupported(_) => ErrorLayer::Unsupported,
+        ChainError::CantReceiveBlock(_)
+        | ChainError::BrokenInvariant(_)
+        | ChainError::InvalidNamespace(_)
+        | ChainError::StateError(_)
+        | ChainError::ArchiveError(_)
+        | ChainError::GenesisFieldMissing(_)
+        | ChainError::InvalidConfig(_)
+        | ChainError::PParamsNotFound(_)
+        | ChainError::NoActiveEpoch
+        | ChainError::MissingGovState
+        | ChainError::EraNotFound
+        | ChainError::EpochValueVersionNotFound(_)
+        | ChainError::PoolSnapshotLagging { .. }
+        | ChainError::MissingRewards
+        | ChainError::InvalidPoolParams
+        | ChainError::InvalidProposalParams
+        | ChainError::UnrecordableProposalPart(_)
+        | ChainError::Phase2EvaluationInternal(_)
+        | ChainError::Consensus(_) => ErrorLayer::Node,
+    }
+}
+
 /// The evaluator's answer from its estimate of one transaction.
 fn evaluator(estimate: Result<Vec<(MultiEraTxEvalResult, Vec<Builtin>)>, ChainError>) -> Evaluator {
     let results = match estimate {
         Ok(results) => results,
         Err(e) => {
             let refusal = refusal(&e);
+            let layer = error_layer(&e);
             let text = format!("{:#?}", DomainError::from(e));
             return Evaluator {
-                answer: Ok(DolosAnswer::Refused(refusal.clone())),
+                answer: Ok(DolosAnswer::Refused(refusal.clone(), layer)),
                 calls: BTreeMap::new(),
-                refusal: Some((text, refusal)),
+                refusal: Some((text, refusal, layer)),
                 unrepresentable: BTreeMap::new(),
             };
         }
@@ -97,7 +133,10 @@ fn evaluator(estimate: Result<Vec<(MultiEraTxEvalResult, Vec<Builtin>)>, ChainEr
                 mem: r.units.mem,
                 steps: r.units.steps,
             }),
-            false => Answer::Failed,
+            false => Answer::Failed(match &r.failure_message {
+                Some(message) => Failure::of_dolos(message),
+                None => Failure::Unclassed("no message".into()),
+            }),
         };
         (key, answer)
     });
@@ -130,10 +169,50 @@ macro_rules! wire_fee {
 }
 pub(super) use wire_fee;
 
+/// The data a u5c Plutus data message gives, or why it gives none.
+macro_rules! wire_data {
+    ($version:ident) => {{
+        use pallas::interop::utxorpc::$version::spec::cardano::{
+            big_int::BigInt, plutus_data::PlutusData as Item, PlutusData,
+        };
+        fn read(data: &PlutusData) -> Result<Data, String> {
+            let all = |items: &[PlutusData]| items.iter().map(read).collect::<Result<Vec<_>, _>>();
+            let present = |d: &Option<PlutusData>| match d {
+                Some(d) => read(d),
+                None => Err("an empty pair".to_string()),
+            };
+            match &data.plutus_data {
+                None => Err("an empty data message".into()),
+                Some(Item::Constr(c)) => {
+                    let index = cbor::constructor(c.tag.into(), c.any_constructor)
+                        .ok_or_else(|| format!("constructor tag {}", c.tag))?;
+                    Ok(Data::Constr(index, all(&c.fields)?))
+                }
+                Some(Item::Map(m)) => {
+                    let mut pairs = Vec::new();
+                    for p in &m.pairs {
+                        pairs.push((present(&p.key)?, present(&p.value)?));
+                    }
+                    Ok(Data::Map(pairs))
+                }
+                Some(Item::BigInt(n)) => match &n.big_int {
+                    None => Err("an empty integer".into()),
+                    Some(BigInt::Int(n)) => Ok(Data::Int(cbor::Int::of_i64(*n))),
+                    Some(BigInt::BigUInt(b)) => Ok(Data::Int(cbor::Int::new(false, b))),
+                    Some(BigInt::BigNInt(b)) => Ok(Data::Int(cbor::Int::new(true, b))),
+                },
+                Some(Item::BoundedBytes(b)) => Ok(Data::Bytes(b.to_vec())),
+                Some(Item::Array(a)) => Ok(Data::List(all(&a.items)?)),
+            }
+        }
+        read
+    }};
+}
+
 /// The EvalTx response of one u5c version for a transaction against the group's
-/// domain, its errors read by the given closure.
+/// domain, its errors and its traces read by the given closures.
 macro_rules! wire_eval {
-    ($version:ident, $group:expr, $tx:expr, $error:expr) => {{
+    ($version:ident, $group:expr, $tx:expr, $error:expr, $trace:expr) => {{
         use pallas::interop::utxorpc::$version::spec::submit::{
             any_chain_eval::Chain, any_chain_tx, submit_service_server::SubmitService as _,
             AnyChainTx, EvalTxRequest,
@@ -157,9 +236,21 @@ macro_rules! wire_eval {
             });
             (wire_purpose(r.purpose, r.index), units)
         });
+        let data = wire_data!($version);
+        let payloads = report.redeemers.iter().map(|r| WirePayload {
+            purpose: wire_purpose(r.purpose, r.index),
+            data: r
+                .payload
+                .as_ref()
+                .ok_or("no payload".to_string())
+                .and_then(data),
+            original_cbor: r.original_cbor.to_vec(),
+        });
         WireEval {
             redeemers: redeemers.collect(),
             errors: report.errors.iter().map($error).collect(),
+            traces: Traces::of_named(report.traces.iter().map($trace).collect()),
+            payloads: payloads.collect(),
             total: report.ex_units.map(|u| Units {
                 mem: u.memory,
                 steps: u.steps,
@@ -176,12 +267,23 @@ async fn wire_evals(group: &Group, tx: &[u8]) -> [(Layer, WireEval); 3] {
         let purpose = purpose.zip(index).map(|(p, i)| wire_purpose(p, i));
         (purpose, msg.clone())
     };
-    let v1 = wire_eval!(v1, group, tx, |e| named(e.purpose, e.index, &e.msg));
-    let v1beta = wire_eval!(v1beta, group, tx, |e| named(e.purpose, e.index, &e.msg));
-    let v1alpha = wire_eval!(v1alpha, group, tx, |e| (
-        named_in_message(&e.msg),
-        e.msg.clone()
-    ));
+    let v1 = wire_eval!(v1, group, tx, |e| named(e.purpose, e.index, &e.msg), |t| {
+        named(t.purpose, t.index, &t.msg)
+    });
+    let v1beta = wire_eval!(
+        v1beta,
+        group,
+        tx,
+        |e| named(e.purpose, e.index, &e.msg),
+        |t| { named(t.purpose, t.index, &t.msg) }
+    );
+    let v1alpha = wire_eval!(
+        v1alpha,
+        group,
+        tx,
+        |e| (named_in_message(&e.msg), e.msg.clone()),
+        |t| (None, t.msg.clone())
+    );
     [
         (Layer::Eval(Version::V1), v1),
         (Layer::Eval(Version::V1beta), v1beta),
@@ -198,7 +300,7 @@ fn wire_answers(
     let refusal = evaluator
         .refusal
         .as_ref()
-        .map(|(text, r)| (text.as_str(), r));
+        .map(|(text, r, layer)| (text.as_str(), r, *layer));
     let answers = wires.iter().map(|(layer, wire)| {
         let unrepresentable = evaluator.unrepresentable.get(layer);
         let answer = wire.answer(refusal, unrepresentable.map(String::as_str));
@@ -375,11 +477,19 @@ pub(super) async fn judge_record(
     let wires = wire_evals(group, tx).await;
     for (layer, wire) in &wires {
         tally.add_total(*layer, id, wire);
-        tally.add_fee(*layer, id, record.min_fee, &wire.fee);
+        tally.add_fee(*layer, id, record.min_fee, wire);
     }
     if record.redeemers == LedgerRedeemers::Undecoded {
         tally.undecoded += 1;
         return AgreedRuns(BTreeMap::new());
+    }
+    let chain = cbor::top_redeemers(tx).unwrap_or_else(|e| panic!("{id} redeemers {e}"));
+    let logs = eval::ledger_logs(record);
+    for (layer, wire) in &wires {
+        if !wire.refuses() {
+            tally.add_traces(*layer, id, &logs, &wire.traces);
+            tally.add_payloads(*layer, id, &chain, &wire.payloads);
+        }
     }
     let ledger = eval::ledger_rows(record);
     tally.collisions += eval::collisions(&ledger);
@@ -423,6 +533,126 @@ pub(super) async fn judge_record(
         _ => None,
     });
     AgreedRuns(ran.collect())
+}
+
+/// One leaf field of an EvalTx report at a version, with the part of the judge
+/// that compares it.
+fn leaf<T>(
+    _: T,
+    version: Version,
+    path: &'static str,
+    field: EvalField,
+) -> (Version, &'static str, EvalField) {
+    (version, path, field)
+}
+
+/// The leaf fields of the EvalTx report of a u5c version whose errors and
+/// traces name a redeemer.
+macro_rules! named_report_fields {
+    ($version:ident, $v:expr) => {{
+        use pallas::interop::utxorpc::$version::spec::cardano::{
+            EvalReport, ExUnits, Redeemer, TxEval,
+        };
+        use EvalField as F;
+        let TxEval {
+            fee,
+            ex_units: _,
+            errors: _,
+            traces: _,
+            redeemers: _,
+        } = TxEval::default();
+        let ExUnits { steps, memory } = ExUnits::default();
+        let EvalReport {
+            msg,
+            purpose,
+            index,
+        } = EvalReport::default();
+        let trace = EvalReport::default();
+        let Redeemer {
+            purpose: row_purpose,
+            payload,
+            index: row_index,
+            ex_units: _,
+            original_cbor,
+        } = Redeemer::default();
+        let row_units = ExUnits::default();
+        vec![
+            leaf(fee, $v, "fee", F::Fee),
+            leaf(steps, $v, "ex_units.steps", F::Total),
+            leaf(memory, $v, "ex_units.memory", F::Total),
+            leaf(msg, $v, "errors.msg", F::ErrorMessage),
+            leaf(purpose, $v, "errors.purpose", F::ErrorName),
+            leaf(index, $v, "errors.index", F::ErrorName),
+            leaf(trace.msg, $v, "traces.msg", F::TraceMessage),
+            leaf(trace.purpose, $v, "traces.purpose", F::TraceName),
+            leaf(trace.index, $v, "traces.index", F::TraceName),
+            leaf(row_purpose, $v, "redeemers.purpose", F::RowName),
+            leaf(payload, $v, "redeemers.payload", F::Payload),
+            leaf(row_index, $v, "redeemers.index", F::RowName),
+            leaf(row_units.steps, $v, "redeemers.ex_units.steps", F::RowUnits),
+            leaf(
+                row_units.memory,
+                $v,
+                "redeemers.ex_units.memory",
+                F::RowUnits,
+            ),
+            leaf(
+                original_cbor,
+                $v,
+                "redeemers.original_cbor",
+                F::OriginalCbor,
+            ),
+        ]
+    }};
+}
+
+/// Every leaf field of each EvalTx version's report, each bound by a pattern
+/// that names every field of its message.
+pub(super) fn eval_fields() -> EvalFields {
+    use pallas::interop::utxorpc::v1alpha::spec::cardano::{
+        EvalError, EvalTrace, ExUnits, Redeemer, TxEval,
+    };
+    use EvalField as F;
+    let v = Version::V1alpha;
+    let TxEval {
+        fee,
+        ex_units: _,
+        errors: _,
+        traces: _,
+        redeemers: _,
+    } = TxEval::default();
+    let ExUnits { steps, memory } = ExUnits::default();
+    let EvalError { msg } = EvalError::default();
+    let EvalTrace { msg: trace } = EvalTrace::default();
+    let Redeemer {
+        purpose,
+        payload,
+        index,
+        ex_units: _,
+        original_cbor,
+    } = Redeemer::default();
+    let row_units = ExUnits::default();
+    let mut fields = named_report_fields!(v1, Version::V1);
+    fields.extend(named_report_fields!(v1beta, Version::V1beta));
+    fields.extend([
+        leaf(fee, v, "fee", F::Fee),
+        leaf(steps, v, "ex_units.steps", F::Total),
+        leaf(memory, v, "ex_units.memory", F::Total),
+        leaf(msg, v, "errors.msg", F::ErrorMessage),
+        leaf(trace, v, "traces.msg", F::TraceMessage),
+        leaf(purpose, v, "redeemers.purpose", F::RowName),
+        leaf(payload, v, "redeemers.payload", F::Payload),
+        leaf(index, v, "redeemers.index", F::RowName),
+        leaf(row_units.steps, v, "redeemers.ex_units.steps", F::RowUnits),
+        leaf(
+            row_units.memory,
+            v,
+            "redeemers.ex_units.memory",
+            F::RowUnits,
+        ),
+        leaf(original_cbor, v, "redeemers.original_cbor", F::OriginalCbor),
+    ]);
+    fields
 }
 
 /// The contexts the evaluator builds for one transaction, keyed by row.
@@ -473,6 +703,14 @@ pub(super) fn judge_context(
             _ => None,
         });
     AgreedLanguages(agreed.collect())
+}
+
+#[test]
+fn every_eval_tx_version_lists_each_leaf_of_its_report_once() {
+    let fields = eval_fields();
+    let paths: std::collections::BTreeSet<String> =
+        fields.iter().map(|(v, p, _)| format!("{v}.{p}")).collect();
+    assert_eq!((fields.len(), paths.len()), (41, 41));
 }
 
 #[test]

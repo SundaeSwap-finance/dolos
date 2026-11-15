@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
@@ -281,9 +281,11 @@ impl<'b> Reader<'b> {
                 })?;
                 Data::Map(out)
             }
-            Head::Tag(tag @ 121..=127) => Data::Constr(tag - 121, self.fields()?),
-            Head::Tag(tag @ 1280..=1400) => Data::Constr(tag - 1280 + 7, self.fields()?),
             Head::Tag(102) => self.general_constr()?,
+            Head::Tag(tag @ (121..=127 | 1280..=1400)) => match constructor(tag, 0) {
+                Some(index) => Data::Constr(index, self.fields()?),
+                None => return self.fail("a tag no constructor holds"),
+            },
             Head::Tag(tag @ (2 | 3)) => match self.head()? {
                 Head::Bytes(len) => Data::Int(Int::new(tag == 3, &self.bytes(len)?)),
                 _ => return self.fail("expected the bytes of a big integer"),
@@ -315,12 +317,33 @@ pub struct Int {
 }
 
 impl Int {
-    fn new(negative: bool, big_endian: &[u8]) -> Self {
+    /// The integer of a sign and a big endian magnitude.
+    pub fn new(negative: bool, big_endian: &[u8]) -> Self {
         let start = big_endian.iter().take_while(|b| **b == 0).count();
         Int {
             negative,
             magnitude: big_endian[start..].to_vec(),
         }
+    }
+
+    /// The integer of a machine integer.
+    pub fn of_i64(n: i64) -> Self {
+        let magnitude = match n < 0 {
+            true => (-1 - n) as u64,
+            false => n as u64,
+        };
+        Int::new(n < 0, &magnitude.to_be_bytes())
+    }
+}
+
+/// The constructor index a data constructor's CBOR tag names, the index itself
+/// for the general tag.
+pub fn constructor(tag: u64, general: u64) -> Option<u64> {
+    match tag {
+        121..=127 => Some(tag - 121),
+        1280..=1400 => Some(tag - 1280 + 7),
+        102 => Some(general),
+        _ => None,
     }
 }
 
@@ -468,6 +491,109 @@ pub fn txin(raw: &[u8]) -> Result<TxIn> {
 /// Decodes one redeemer purpose from its CBOR bytes.
 pub fn purpose(raw: &[u8]) -> Result<Purpose> {
     Reader::new(raw).purpose()
+}
+
+/// The data of one redeemer of a transaction, with the bytes that encode it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Redeemer {
+    pub data: Data,
+    pub data_bytes: Vec<u8>,
+}
+
+impl Reader<'_> {
+    /// One data value and the bytes that encode it.
+    fn data_with_bytes(&mut self) -> Result<Redeemer> {
+        let start = self.pos;
+        let data = self.data()?;
+        Ok(Redeemer {
+            data,
+            data_bytes: self.buf[start..self.pos].to_vec(),
+        })
+    }
+
+    /// One redeemer as a list entry `[tag, index, data, units]`, or as a map
+    /// entry `[[tag, index], [data, units]]`.
+    fn redeemer_entry(&mut self) -> Result<(Purpose, Redeemer)> {
+        match self.array()? {
+            Len::Def(4) => self.list_entry_items(),
+            Len::Def(2) => {
+                let purpose = self.purpose()?;
+                let redeemer = self.redeemer_value()?;
+                Ok((purpose, redeemer))
+            }
+            _ => self.fail("expected a redeemer entry"),
+        }
+    }
+
+    /// The `[data, units]` value of a redeemer map entry.
+    fn redeemer_value(&mut self) -> Result<Redeemer> {
+        if self.array()? != Len::Def(2) {
+            return self.fail("expected a redeemer data and units");
+        }
+        let redeemer = self.data_with_bytes()?;
+        self.skip()?;
+        Ok(redeemer)
+    }
+
+    /// The redeemers of a witness set field, in list or map form.
+    fn redeemers(&mut self) -> Result<BTreeMap<Purpose, Redeemer>> {
+        let mut out = BTreeMap::new();
+        match self.untagged_head()? {
+            Head::Array(len) => self.each(len, |r| {
+                if r.array()? != Len::Def(4) {
+                    return r.fail("expected a four element redeemer");
+                }
+                let (purpose, redeemer) = r.list_entry_items()?;
+                out.insert(purpose, redeemer);
+                Ok(())
+            })?,
+            Head::Map(len) => self.each(len, |r| {
+                let purpose = r.purpose()?;
+                out.insert(purpose, r.redeemer_value()?);
+                Ok(())
+            })?,
+            _ => return self.fail("expected redeemers"),
+        }
+        Ok(out)
+    }
+
+    /// The items of a list entry `[tag, index, data, units]` after its header.
+    fn list_entry_items(&mut self) -> Result<(Purpose, Redeemer)> {
+        let purpose = Purpose {
+            tag: self.uint()?,
+            index: self.uint()?,
+        };
+        let redeemer = self.data_with_bytes()?;
+        self.skip()?;
+        Ok((purpose, redeemer))
+    }
+}
+
+/// The redeemers of a transaction's top level witness set, by purpose.
+pub fn top_redeemers(raw: &[u8]) -> Result<BTreeMap<Purpose, Redeemer>> {
+    let mut r = Reader::new(raw);
+    r.array()?;
+    r.skip()?;
+    let mut out = BTreeMap::new();
+    body(&mut r, |r, key| match key {
+        5 => {
+            out = r.redeemers()?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    })?;
+    Ok(out)
+}
+
+/// The purpose of one redeemer from the bytes of its list or map entry, with
+/// the bytes of its data.
+pub fn redeemer_entry(raw: &[u8]) -> Result<(Purpose, Vec<u8>)> {
+    let mut r = Reader::new(raw);
+    let (purpose, redeemer) = r.redeemer_entry()?;
+    match r.pos == raw.len() {
+        true => Ok((purpose, redeemer.data_bytes)),
+        false => r.fail("bytes after the redeemer entry"),
+    }
 }
 
 /// The inputs one sub transaction body names.

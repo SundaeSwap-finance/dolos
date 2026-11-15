@@ -2261,6 +2261,7 @@ fn print_views(all: &Judged, manifests: &Manifests, whole: bool, out: &mut judge
         println!("{line}");
     }
     println!("{}", all.eval);
+    println!("{}", all.eval.deep_line(&eval::eval_fields()));
     println!("{}", all.context);
     print_candidates(all);
 }

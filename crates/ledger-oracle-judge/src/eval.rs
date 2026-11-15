@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    cbor::Purpose,
+    cbor::{self, Data, Purpose},
     judgement::{
         self, member, Axis, CellKey, EntryPoint, Instrument, Judge, Outcome, Pass, RequestShape,
         Route, Subject, Verdict, Version,
@@ -119,19 +119,140 @@ impl fmt::Display for RowKey {
     }
 }
 
-/// The verdict of one evaluation of a redeemer, with its units when it ran.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The ledger's words for a script that raised an error.
+const LEDGER_ERROR: &str = "The machine terminated because of an error, either from a built-in function or from an explicit use of 'error'";
+
+/// The ledger's words for a script that spent more than its budget.
+const LEDGER_BUDGET: &str =
+    "The machine terminated part way through evaluation due to overspending the budget";
+
+/// The ledger's words for a builtin applied to an argument of another type.
+const LEDGER_UNLIFT: &str = "Could not unlift a value";
+
+/// The ledger's constructor for a script it ran and that failed.
+const LEDGER_RAN: &str = "ValidationFailure";
+
+/// The evaluator's messages for a script that raised an error.
+const DOLOS_ERROR: [&str; 9] = [
+    "Explicit error term",
+    "Division by zero",
+    "Byte string out of bounds",
+    "Integer out of bounds",
+    "Empty list",
+    "Malformed data",
+    "Empty byte array",
+    "Unexpected Ed25519 public key length",
+    "Unexpected Ed25519 signature length",
+];
+
+/// The evaluator's messages for a script that spent more than its budget.
+const DOLOS_BUDGET: [&str; 1] = ["Out of budget"];
+
+/// The evaluator's messages for a builtin applied to an argument of another
+/// type.
+const DOLOS_UNLIFT: [&str; 6] = [
+    "Type mismatch",
+    "Expected pair",
+    "Expected list",
+    "Expected array",
+    "Not data",
+    "MkCons type mismatch",
+];
+
+/// The kind of a redeemer's failure, as the ledger's or the evaluator's
+/// message names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Failure {
+    Error,
+    Budget,
+    Unlift,
+    /// The ledger ran no script for the redeemer, under this constructor.
+    NotRun(String),
+    /// A message that names no kind.
+    Unclassed(String),
+}
+
+impl Failure {
+    /// The kind the ledger's failure text names.
+    pub fn of_ledger(text: &str) -> Self {
+        let constructor = text.split_whitespace().next().unwrap_or_default();
+        if constructor != LEDGER_RAN {
+            return Failure::NotRun(constructor.to_string());
+        }
+        let kinds = [
+            (LEDGER_ERROR, Failure::Error),
+            (LEDGER_BUDGET, Failure::Budget),
+            (LEDGER_UNLIFT, Failure::Unlift),
+        ];
+        let named = kinds.into_iter().find(|(words, _)| text.contains(words));
+        named.map_or_else(|| Failure::Unclassed(clipped(text)), |(_, kind)| kind)
+    }
+
+    /// The kind the evaluator's failure message names.
+    pub fn of_dolos(message: &str) -> Self {
+        let lists = [
+            (&DOLOS_ERROR[..], Failure::Error),
+            (&DOLOS_BUDGET[..], Failure::Budget),
+            (&DOLOS_UNLIFT[..], Failure::Unlift),
+        ];
+        let named = lists.into_iter().find(|(list, _)| list.contains(&message));
+        named.map_or_else(|| Failure::Unclassed(clipped(message)), |(_, kind)| kind)
+    }
+
+    /// The name of the kind, without its constructor or message.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Failure::Error => "error",
+            Failure::Budget => "budget",
+            Failure::Unlift => "unlift",
+            Failure::NotRun(_) => "not_run",
+            Failure::Unclassed(_) => "unclassed",
+        }
+    }
+}
+
+impl fmt::Display for Failure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Failure::NotRun(constructor) => write!(f, "not_run[{constructor}]"),
+            Failure::Unclassed(message) => write!(f, "unclassed[{message}]"),
+            kind => f.write_str(kind.kind()),
+        }
+    }
+}
+
+/// The first line of a message, at most 160 characters.
+fn clipped(message: &str) -> String {
+    let line = message.lines().next().unwrap_or_default();
+    line.chars().take(160).collect()
+}
+
+/// The verdict of one evaluation of a redeemer, with its units when it ran and
+/// the kind of its failure when it failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answer {
     Ran(Units),
-    Failed,
+    Failed(Failure),
 }
 
 impl Answer {
-    /// The name of the answer without its units.
+    /// The name of the answer without its units or failure.
     pub fn kind(&self) -> &'static str {
         match self {
             Answer::Ran(_) => "ran",
-            Answer::Failed => "failed",
+            Answer::Failed(_) => "failed",
+        }
+    }
+
+    /// Whether both sides ran the redeemer in the same units, or both failed it
+    /// for the same kind of failure that both name.
+    pub fn agrees(&self, other: &Answer) -> bool {
+        match (self, other) {
+            (Answer::Ran(a), Answer::Ran(b)) => a == b,
+            (Answer::Failed(a), Answer::Failed(b)) => {
+                a == b && matches!(a, Failure::Error | Failure::Budget | Failure::Unlift)
+            }
+            (Answer::Ran(_), Answer::Failed(_)) | (Answer::Failed(_), Answer::Ran(_)) => false,
         }
     }
 }
@@ -140,7 +261,7 @@ impl From<&Evaluation> for Answer {
     fn from(evaluation: &Evaluation) -> Self {
         match evaluation {
             Evaluation::Ran(units) => Answer::Ran(*units),
-            Evaluation::Failed(_) => Answer::Failed,
+            Evaluation::Failed(text) => Answer::Failed(Failure::of_ledger(text)),
         }
     }
 }
@@ -149,7 +270,7 @@ impl fmt::Display for Answer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Answer::Ran(units) => write!(f, "ran {units}"),
-            Answer::Failed => f.write_str("failed"),
+            Answer::Failed(failure) => write!(f, "failed {failure}"),
         }
     }
 }
@@ -172,11 +293,45 @@ impl fmt::Display for Refusal {
     }
 }
 
+/// The stage of Dolos that refused to evaluate a transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorLayer {
+    Decode,
+    PhaseOne,
+    PhaseTwo,
+    Unsupported,
+    /// The node's own state or configuration.
+    Node,
+    /// A response whose message is not the one the evaluator's refusal renders
+    /// to.
+    Unread,
+}
+
+impl ErrorLayer {
+    /// The name of the stage.
+    pub fn name(self) -> &'static str {
+        match self {
+            ErrorLayer::Decode => "decode",
+            ErrorLayer::PhaseOne => "phase_one",
+            ErrorLayer::PhaseTwo => "phase_two",
+            ErrorLayer::Unsupported => "unsupported",
+            ErrorLayer::Node => "node",
+            ErrorLayer::Unread => "unread",
+        }
+    }
+}
+
+impl fmt::Display for ErrorLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 /// What one layer of Dolos answered for the redeemers of one transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DolosAnswer {
     Evaluated(BTreeMap<RowKey, Answer>),
-    Refused(Refusal),
+    Refused(Refusal, ErrorLayer),
     /// The layer's message cannot carry a redeemer the evaluator answered, and
     /// the layer says so.
     Unrepresentable(String),
@@ -276,6 +431,11 @@ impl Disagreement {
                 cells.push(CellKey::new(Axis::Units, "steps"));
             }
         }
+        if let (Some(Answer::Failed(_)), DolosRow::Answered(Answer::Failed(d))) =
+            (&self.ledger, &self.dolos)
+        {
+            cells.push(CellKey::new(Axis::Failure, d.kind()));
+        }
         if let DolosRow::Refused(refusal) = &self.dolos {
             cells.push(CellKey::new(Axis::Refusal, refusal));
         }
@@ -302,7 +462,8 @@ impl fmt::Display for Disagreement {
 /// disagree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowVerdict {
-    /// Both sides ran the redeemer in these units, or both failed it.
+    /// Both sides ran the redeemer in these units, or both failed it for this
+    /// kind of failure.
     Agree(Answer),
     /// Dolos refused a listed row for the reason the list gives.
     Known(Refusal),
@@ -318,8 +479,8 @@ pub fn row_verdict(
     dolos: DolosRow,
     listed: Option<&Refusal>,
 ) -> RowVerdict {
-    match (ledger, &dolos, listed) {
-        (Some(l), DolosRow::Answered(d), None) if l == *d => RowVerdict::Agree(l),
+    match (&ledger, &dolos, listed) {
+        (Some(l), DolosRow::Answered(d), None) if l.agrees(d) => RowVerdict::Agree(l.clone()),
         (Some(_), DolosRow::Refused(r), Some(listed)) if r == listed => {
             RowVerdict::Known(r.clone())
         }
@@ -341,7 +502,7 @@ pub fn judge_tx(
 ) -> Vec<(RowKey, RowVerdict)> {
     let answered = match dolos {
         DolosAnswer::Evaluated(rows) => rows.keys().copied().collect(),
-        DolosAnswer::Refused(_) | DolosAnswer::Unrepresentable(_) => Vec::new(),
+        DolosAnswer::Refused(..) | DolosAnswer::Unrepresentable(_) => Vec::new(),
     };
     let keys: BTreeSet<RowKey> = ledger
         .keys()
@@ -352,13 +513,13 @@ pub fn judge_tx(
     let row = |key: &RowKey| match dolos {
         DolosAnswer::Evaluated(rows) => rows
             .get(key)
-            .map_or(DolosRow::Unanswered, |a| DolosRow::Answered(*a)),
-        DolosAnswer::Refused(refusal) => DolosRow::Refused(refusal.clone()),
+            .map_or(DolosRow::Unanswered, |a| DolosRow::Answered(a.clone())),
+        DolosAnswer::Refused(refusal, _) => DolosRow::Refused(refusal.clone()),
         DolosAnswer::Unrepresentable(why) => DolosRow::Unrepresentable(why.clone()),
     };
     keys.into_iter()
         .map(|key| {
-            let verdict = row_verdict(ledger.get(&key).copied(), row(&key), listed.get(&key));
+            let verdict = row_verdict(ledger.get(&key).cloned(), row(&key), listed.get(&key));
             (key, verdict)
         })
         .collect()
@@ -430,7 +591,8 @@ impl fmt::Display for TxDemand {
 /// ledger evaluated none of.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TxVerdict {
-    /// The layer refused for the leaf, naming a script or redeemer.
+    /// The layer refused for the leaf in phase two, naming a script or
+    /// redeemer.
     Refused { leaf: LedgerLeaf, refusal: Refusal },
     /// The layer evaluated no redeemer, as the ledger did.
     EvaluatedNone,
@@ -438,11 +600,12 @@ pub enum TxVerdict {
     Undecided,
     /// The layer gave the answer the known list gives the record.
     Known { demand: TxDemand, dolos: String },
-    /// The layer's answer, which the demand refuses, with the answer the known
-    /// list gives the record.
+    /// The layer's answer, which the demand refuses, with the stage that
+    /// refused when it refused and the answer the known list gives the record.
     Disagree {
         demand: TxDemand,
         dolos: String,
+        refused_at: Option<ErrorLayer>,
         listed: Option<String>,
     },
 }
@@ -457,7 +620,7 @@ fn names_script_or_redeemer(refusal: &Refusal) -> bool {
 fn answer_text(answer: &Result<DolosAnswer, Malformed>) -> String {
     match answer {
         Ok(DolosAnswer::Evaluated(rows)) => format!("evaluated[{} rows]", rows.len()),
-        Ok(DolosAnswer::Refused(refusal)) => format!("refused[{refusal}]"),
+        Ok(DolosAnswer::Refused(refusal, _)) => format!("refused[{refusal}]"),
         Ok(DolosAnswer::Unrepresentable(why)) => format!("unrepresentable[{why}]"),
         Err(malformed) => format!("malformed[{malformed}]"),
     }
@@ -467,7 +630,7 @@ fn answer_text(answer: &Result<DolosAnswer, Malformed>) -> String {
 fn answer_kind(answer: &Result<DolosAnswer, Malformed>) -> &'static str {
     match answer {
         Ok(DolosAnswer::Evaluated(_)) => "evaluated",
-        Ok(DolosAnswer::Refused(_)) => "refused",
+        Ok(DolosAnswer::Refused(..)) => "refused",
         Ok(DolosAnswer::Unrepresentable(_)) => "unrepresentable",
         Err(_) => "malformed",
     }
@@ -482,9 +645,13 @@ pub fn tx_verdict(
     listed: Option<&str>,
 ) -> TxVerdict {
     let dolos = answer_text(answer);
+    let refused_at = match answer {
+        Ok(DolosAnswer::Refused(_, layer)) => Some(*layer),
+        Ok(DolosAnswer::Evaluated(_) | DolosAnswer::Unrepresentable(_)) | Err(_) => None,
+    };
     match (demand, answer, listed) {
         (TxDemand::Undecided, _, None) => TxVerdict::Undecided,
-        (TxDemand::Refuse(leaf), Ok(DolosAnswer::Refused(refusal)), None)
+        (TxDemand::Refuse(leaf), Ok(DolosAnswer::Refused(refusal, ErrorLayer::PhaseTwo)), None)
             if names_script_or_redeemer(refusal) =>
         {
             TxVerdict::Refused {
@@ -501,6 +668,7 @@ pub fn tx_verdict(
         _ => TxVerdict::Disagree {
             demand,
             dolos,
+            refused_at,
             listed: listed.map(str::to_string),
         },
     }
@@ -528,6 +696,81 @@ pub fn ledger_rows(record: &Record) -> BTreeMap<RowKey, Answer> {
             (key, Answer::from(&r.evaluation))
         })
         .collect()
+}
+
+/// The messages the ledger logged for each redeemer of a record that logged
+/// any, at its top level and in each sub transaction.
+pub fn ledger_logs(record: &Record) -> BTreeMap<RowKey, Vec<String>> {
+    let LedgerRedeemers::Read(redeemers) = &record.redeemers else {
+        return BTreeMap::new();
+    };
+    let top = redeemers.top.iter().map(|r| (Level::Top, r));
+    let subs = redeemers
+        .subs
+        .iter()
+        .enumerate()
+        .flat_map(|(k, sub)| sub.iter().map(move |r| (Level::Sub(k as u32), r)));
+    let logged = top.chain(subs).filter(|(_, r)| !r.logs.is_empty());
+    logged
+        .map(|(level, r)| {
+            let key = RowKey {
+                level,
+                purpose: r.purpose,
+            };
+            (key, r.logs.clone())
+        })
+        .collect()
+}
+
+/// The messages one layer of Dolos logged for the redeemers of a transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Traces {
+    /// The messages of each redeemer that logged any.
+    Named(BTreeMap<RowKey, Vec<String>>),
+    /// Every message of every redeemer, with no redeemer named.
+    Unnamed(Vec<String>),
+}
+
+impl Traces {
+    /// Whether the messages are the ledger's, redeemer by redeemer, or as one
+    /// collection when the layer names no redeemer.
+    pub fn agree(&self, ledger: &BTreeMap<RowKey, Vec<String>>) -> bool {
+        match self {
+            Traces::Named(rows) => rows == ledger,
+            Traces::Unnamed(messages) => {
+                let mut dolos = messages.clone();
+                let mut ledger: Vec<String> = ledger.values().flatten().cloned().collect();
+                dolos.sort();
+                ledger.sort();
+                dolos == ledger
+            }
+        }
+    }
+
+    /// The messages of a layer that names a redeemer for each, by redeemer, or
+    /// as one collection when any message names none.
+    pub fn of_named(traces: Vec<(Option<Purpose>, String)>) -> Self {
+        let mut rows: BTreeMap<RowKey, Vec<String>> = BTreeMap::new();
+        for (purpose, msg) in &traces {
+            let Some(purpose) = purpose else {
+                return Traces::Unnamed(traces.into_iter().map(|(_, m)| m).collect());
+            };
+            let key = RowKey {
+                level: Level::Top,
+                purpose: *purpose,
+            };
+            rows.entry(key).or_default().push(msg.clone());
+        }
+        Traces::Named(rows)
+    }
+
+    /// The number of messages.
+    fn len(&self) -> usize {
+        match self {
+            Traces::Named(rows) => rows.values().map(Vec::len).sum(),
+            Traces::Unnamed(messages) => messages.len(),
+        }
+    }
 }
 
 /// The rows of an evaluation by key, or the first key it answers twice.
@@ -614,24 +857,35 @@ impl fmt::Display for Malformed {
     }
 }
 
+/// The data and the bytes one EvalTx response gives a redeemer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WirePayload {
+    pub purpose: Purpose,
+    /// The redeemer's data, or why the message's data reads as none.
+    pub data: Result<Data, String>,
+    pub original_cbor: Vec<u8>,
+}
+
 /// One EvalTx response in the terms every version of the message shares.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireEval {
     pub redeemers: Vec<(Purpose, Option<Units>)>,
     /// Each error with the redeemer it names.
     pub errors: Vec<(Option<Purpose>, String)>,
+    pub traces: Traces,
+    pub payloads: Vec<WirePayload>,
     pub total: Option<Units>,
     pub fee: WireFee,
 }
 
 impl WireEval {
     /// The answer the response gives, a refusal when it carries no redeemer and
-    /// no total, named as the evaluator's refusal when its message is the one
-    /// that refusal renders to and as unrepresentable when it is the message
-    /// that says so.
+    /// no total, named as the evaluator's refusal at the evaluator's stage when
+    /// its message is the one that refusal renders to and as unrepresentable
+    /// when it is the message that says so.
     pub fn answer(
         &self,
-        refusal: Option<(&str, &Refusal)>,
+        refusal: Option<(&str, &Refusal, ErrorLayer)>,
         unrepresentable: Option<&str>,
     ) -> Result<DolosAnswer, Malformed> {
         if self.refuses() {
@@ -642,21 +896,29 @@ impl WireEval {
                 .collect::<Vec<_>>()
                 .join("\n");
             return Ok(match (refusal, unrepresentable) {
-                (Some((text, refusal)), _) if msg == text => DolosAnswer::Refused(refusal.clone()),
+                (Some((text, refusal, layer)), _) if msg == text => {
+                    DolosAnswer::Refused(refusal.clone(), layer)
+                }
                 (_, Some(text)) if msg == text => DolosAnswer::Unrepresentable(msg),
-                _ => DolosAnswer::Refused(Refusal::new(&msg)),
+                _ => DolosAnswer::Refused(Refusal::new(&msg), ErrorLayer::Unread),
             });
         }
-        let failed: BTreeSet<Purpose> = self.errors.iter().filter_map(|(p, _)| *p).collect();
+        let mut failed: BTreeMap<Purpose, &str> = BTreeMap::new();
+        for (purpose, msg) in &self.errors {
+            if let Some(purpose) = purpose {
+                let message = msg.split_once("]: ").map_or(msg.as_str(), |(_, m)| m);
+                failed.insert(*purpose, message);
+            }
+        }
         let rows = self.redeemers.iter().map(|(purpose, units)| {
             let key = RowKey {
                 level: Level::Top,
                 purpose: *purpose,
             };
-            let answer = match (failed.contains(purpose), units) {
-                (true, _) => Answer::Failed,
-                (false, Some(units)) => Answer::Ran(*units),
-                (false, None) => return Err(Malformed::NoUnits(key)),
+            let answer = match (failed.get(purpose), units) {
+                (Some(message), _) => Answer::Failed(Failure::of_dolos(message)),
+                (None, Some(units)) => Answer::Ran(*units),
+                (None, None) => return Err(Malformed::NoUnits(key)),
             };
             Ok((key, answer))
         });
@@ -666,7 +928,7 @@ impl WireEval {
 
     /// Whether the response carries no redeemer and no total, the shape of a
     /// refusal.
-    fn refuses(&self) -> bool {
+    pub fn refuses(&self) -> bool {
         self.redeemers.is_empty() && self.total.is_none()
     }
 
@@ -875,7 +1137,40 @@ mod part {
     pub const REFUSED: &str = "refused";
     pub const EVALUATED_NONE: &str = "evaluated_none";
     pub const KNOWN: &str = "known";
+    pub const TRACE: &str = "trace";
+    pub const PAYLOAD: &str = "payload";
+    pub const ORIGINAL_CBOR: &str = "original_cbor";
 }
+
+/// A field of an EvalTx response, by the judgement that compares it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvalField {
+    /// The fee, against the ledger's minimum fee.
+    Fee,
+    /// A unit count of the total, against the sum of the redeemers' units.
+    Total,
+    /// A redeemer's purpose or index, against a redeemer the ledger evaluated.
+    RowName,
+    /// A unit count of a redeemer that ran, against the ledger's.
+    RowUnits,
+    /// An error's message, against the kind of the ledger's failure.
+    ErrorMessage,
+    /// The purpose or index an error names, against a redeemer the ledger
+    /// failed.
+    ErrorName,
+    /// A trace's message, against the ledger's logs.
+    TraceMessage,
+    /// The purpose or index a trace names, against the redeemer the ledger
+    /// logged it for.
+    TraceName,
+    /// A redeemer's data, against the transaction's.
+    Payload,
+    /// A redeemer's bytes, against the transaction's.
+    OriginalCbor,
+}
+
+/// The fields of one version of the EvalTx response, by name and judgement.
+pub type EvalFields = Vec<(Version, &'static str, EvalField)>;
 
 /// The member of the draft axis on the verdict of a record whose bytes derive
 /// no draft.
@@ -974,7 +1269,8 @@ pub struct EvalTally {
     pub verdicts: BTreeMap<Layer, judgement::Tally>,
     /// The units each layer ran each agreeing row of a record in.
     pub ran: BTreeMap<RecordId, BTreeMap<(Layer, RowKey), Units>>,
-    pub fee_unset: usize,
+    /// The responses that refused, whose fee no judgement holds.
+    pub fee_refused: usize,
     pub fee_undecoded: usize,
     pub collisions: usize,
     pub skipped_cascade: usize,
@@ -1091,22 +1387,109 @@ impl EvalTally {
         }
     }
 
-    /// Judges one response's fee against the ledger's minimum fee.
-    pub fn add_fee(&mut self, layer: Layer, id: RecordId, ledger: Option<u64>, wire: &WireFee) {
+    /// Judges the fee of one response that evaluated the transaction against
+    /// the ledger's minimum fee.
+    pub fn add_fee(&mut self, layer: Layer, id: RecordId, ledger: Option<u64>, wire: &WireEval) {
         let cells = || vec![CellKey::new(Axis::Answer, part::FEE)];
-        match (ledger, wire) {
-            (_, WireFee::Unset) => self.fee_unset += 1,
-            (None, _) => self.fee_undecoded += 1,
-            (Some(l), WireFee::Int(n)) if i64::try_from(l) == Ok(*n) => {
+        match (wire.refuses(), ledger, &wire.fee) {
+            (true, _, _) => self.fee_refused += 1,
+            (false, None, _) => self.fee_undecoded += 1,
+            (false, Some(l), WireFee::Int(n)) if i64::try_from(l) == Ok(*n) => {
                 self.add(EvalJudge::Oracle, layer, id, cells(), Outcome::Agree)
             }
-            (Some(l), other) => {
+            (false, Some(l), other) => {
                 self.fail(
                     layer,
                     id,
                     cells(),
                     format!("fee ledger={l} dolos={other:?}"),
                 );
+            }
+        }
+    }
+
+    /// Judges the messages one layer logged for one record against the
+    /// ledger's, a verdict on a record whose ledger logged nothing naming so.
+    pub fn add_traces(
+        &mut self,
+        layer: Layer,
+        id: RecordId,
+        ledger: &BTreeMap<RowKey, Vec<String>>,
+        dolos: &Traces,
+    ) {
+        let logged = match ledger.is_empty() {
+            true => "none",
+            false => "logged",
+        };
+        let cells = vec![
+            CellKey::new(Axis::Answer, part::TRACE),
+            CellKey::new(Axis::Logs, logged),
+        ];
+        match dolos.agree(ledger) {
+            true => self.add(EvalJudge::Oracle, layer, id, cells, Outcome::Agree),
+            false => {
+                let ledger: usize = ledger.values().map(Vec::len).sum();
+                let first = |t: &Traces| match t {
+                    Traces::Named(rows) => rows.values().flatten().next().cloned(),
+                    Traces::Unnamed(messages) => messages.first().cloned(),
+                };
+                let detail = format!(
+                    "traces ledger={ledger} dolos={} first={:?}",
+                    dolos.len(),
+                    first(dolos).map(|m| clipped(&m))
+                );
+                self.fail(layer, id, cells, detail);
+            }
+        }
+    }
+
+    /// Judges the data and the bytes one layer gives each redeemer against the
+    /// transaction's redeemers.
+    pub fn add_payloads(
+        &mut self,
+        layer: Layer,
+        id: RecordId,
+        chain: &BTreeMap<Purpose, cbor::Redeemer>,
+        payloads: &[WirePayload],
+    ) {
+        for payload in payloads {
+            let key = RowKey {
+                level: Level::Top,
+                purpose: payload.purpose,
+            };
+            let on_chain = chain.get(&payload.purpose);
+            let mut cells = key.cells();
+            cells.push(CellKey::new(Axis::Answer, part::PAYLOAD));
+            let data = on_chain.map(|r| &r.data);
+            match (&payload.data, data) {
+                (Ok(dolos), Some(chain)) if dolos == chain => {
+                    self.add(EvalJudge::Oracle, layer, id, cells, Outcome::Agree)
+                }
+                (dolos, chain) => {
+                    let dolos = dolos.as_ref().map(|d| clipped(&d.to_string()));
+                    let chain = chain.map(|d| clipped(&d.to_string()));
+                    let detail = format!("{key} payload dolos={dolos:?} chain={chain:?}");
+                    self.fail(layer, id, cells, detail);
+                }
+            }
+            let mut cells = key.cells();
+            cells.push(CellKey::new(Axis::Answer, part::ORIGINAL_CBOR));
+            let entry = cbor::redeemer_entry(&payload.original_cbor);
+            match (&entry, on_chain) {
+                (Ok((purpose, bytes)), Some(chain))
+                    if *purpose == payload.purpose && *bytes == chain.data_bytes =>
+                {
+                    self.add(EvalJudge::Oracle, layer, id, cells, Outcome::Agree)
+                }
+                (entry, _) => {
+                    let detail = format!(
+                        "{key} original_cbor={} read={:?} on_chain={}",
+                        hex::encode(&payload.original_cbor),
+                        entry.as_ref().map(|(p, _)| *p),
+                        on_chain.is_some()
+                    );
+                    self.fail(layer, id, cells, detail);
+                }
             }
         }
     }
@@ -1131,14 +1514,19 @@ impl EvalTally {
             TxVerdict::Disagree {
                 demand,
                 dolos,
+                refused_at,
                 listed,
             } => {
                 let dolos: String = dolos.chars().take(160).collect();
                 let listed = listed
                     .as_ref()
                     .map_or(String::new(), |l| format!(" listed=({l})"));
-                let cells = vec![CellKey::new(Axis::Demand, demand.kind())];
-                let detail = format!("demand={demand} dolos={dolos}{listed}");
+                let mut cells = vec![CellKey::new(Axis::Demand, demand.kind())];
+                if let Some(layer) = refused_at {
+                    cells.push(CellKey::new(Axis::ErrorLayer, layer));
+                }
+                let at = refused_at.map_or(String::new(), |l| format!(" error_layer={l}"));
+                let detail = format!("demand={demand} dolos={dolos}{at}{listed}");
                 (cells, Outcome::Disagree(detail))
             }
         };
@@ -1201,9 +1589,9 @@ impl EvalTally {
     ) {
         let mut cells = vec![CellKey::new(Axis::Answer, answer_kind(answer))];
         let outcome = match answer {
-            Ok(DolosAnswer::Refused(refusal)) if refusal == expected => Outcome::Agree,
+            Ok(DolosAnswer::Refused(refusal, _)) if refusal == expected => Outcome::Agree,
             other => {
-                if let Ok(DolosAnswer::Refused(refusal)) = other {
+                if let Ok(DolosAnswer::Refused(refusal, _)) = other {
                     cells.push(CellKey::new(Axis::Refusal, refusal));
                 }
                 Outcome::Disagree(format!(
@@ -1237,7 +1625,7 @@ impl EvalTally {
         let EvalTally {
             verdicts,
             ran,
-            fee_unset,
+            fee_refused,
             fee_undecoded,
             collisions,
             skipped_cascade,
@@ -1253,7 +1641,7 @@ impl EvalTally {
         for (id, rows) in ran {
             self.ran.entry(id).or_default().extend(rows);
         }
-        self.fee_unset += fee_unset;
+        self.fee_refused += fee_refused;
         self.fee_undecoded += fee_undecoded;
         self.collisions += collisions;
         self.skipped_cascade += skipped_cascade;
@@ -1415,7 +1803,7 @@ impl EvalTally {
         let (_, unnamed) = part_counts(&every, judge, part::UNNAMED);
         let (fee_equal, fee_differ) = part_counts(&every, judge, part::FEE);
         format!(
-            "EVAL-ORACLE compared={} agree={} known={} unrepresentable={} disagree={} by_layer={} by_purpose={} by_level={} by_ledger={} totals={} totals_disagree={totals_disagree} unnamed={unnamed} fee_unset={} fee_equal={fee_equal} fee_differ={fee_differ} fee_undecoded={} collisions={} skipped_cascade={} undecoded={} every_layer_agrees={}",
+            "EVAL-ORACLE compared={} agree={} known={} unrepresentable={} disagree={} by_layer={} by_purpose={} by_level={} by_ledger={} totals={} totals_disagree={totals_disagree} unnamed={unnamed} fee_refused={} fee_equal={fee_equal} fee_differ={fee_differ} fee_undecoded={} collisions={} skipped_cascade={} undecoded={} every_layer_agrees={}",
             all.compared(),
             all.agree,
             all.known,
@@ -1426,12 +1814,61 @@ impl EvalTally {
             levels.join(","),
             answers.join(","),
             totals_agree + totals_disagree,
-            self.fee_unset,
+            self.fee_refused,
             self.fee_undecoded,
             self.collisions,
             self.skipped_cascade,
             self.undecoded,
             self.every_layer_judged(EvalJudge::Oracle)
+        )
+    }
+
+    /// Whether an agreeing verdict at `layer` compared `field`.
+    pub fn compared(&self, layer: Layer, field: EvalField) -> bool {
+        let Some(tally) = self.verdicts.get(&layer) else {
+            return false;
+        };
+        let on = |cells: &[CellKey], answer: &str, axis: Axis, member_of: Option<&str>| {
+            let named = member(cells, Axis::Answer) == Some(answer);
+            named && member_of.is_none_or(|m| member(cells, axis) == Some(m))
+        };
+        let wanted = |cells: &[CellKey]| match field {
+            EvalField::Fee => on(cells, part::FEE, Axis::Answer, None),
+            EvalField::Total => on(cells, part::TOTAL, Axis::Answer, None),
+            EvalField::RowName => on(cells, part::ROW, Axis::Answer, None),
+            EvalField::RowUnits => on(cells, part::ROW, Axis::Ledger, Some("ran")),
+            EvalField::ErrorMessage | EvalField::ErrorName => {
+                on(cells, part::ROW, Axis::Ledger, Some("failed"))
+            }
+            EvalField::TraceMessage | EvalField::TraceName => {
+                on(cells, part::TRACE, Axis::Logs, Some("logged"))
+            }
+            EvalField::Payload => on(cells, part::PAYLOAD, Axis::Answer, None),
+            EvalField::OriginalCbor => on(cells, part::ORIGINAL_CBOR, Axis::Answer, None),
+        };
+        let mut passed = tally.passed(Judge::EvalOracle);
+        passed.any(|(p, _)| p.pass == Pass::Agree && wanted(&p.cells))
+    }
+
+    /// The line that says how many of the response's fields an agreeing
+    /// verdict compared, the fields none compared and the failing verdicts of
+    /// every evaluation judge.
+    pub fn deep_line(&self, fields: &EvalFields) -> String {
+        let uncompared: Vec<String> = fields
+            .iter()
+            .filter(|(version, _, field)| !self.compared(Layer::Eval(*version), *field))
+            .map(|(version, name, _)| format!("{version}.{name}"))
+            .collect();
+        let every = self.every_verdict();
+        let disagree: usize = EvalJudge::ALL
+            .into_iter()
+            .map(|judge| every.failed(judge.judge()).count())
+            .sum();
+        format!(
+            "DEEP route=eval_tx fields_compared={} fields_total={} disagree={disagree} uncompared={}",
+            fields.len() - uncompared.len(),
+            fields.len(),
+            uncompared.join(",")
         )
     }
 
@@ -1589,12 +2026,16 @@ mod tests {
     #[test]
     fn a_refused_row_never_agrees_with_a_ledger_failure() {
         let verdict = row_verdict(
-            Some(Answer::Failed),
+            Some(Answer::Failed(Failure::Error)),
             DolosRow::Refused(refusal("subtransaction redeemers")),
             None,
         );
         assert!(matches!(verdict, RowVerdict::Disagree(_)), "{verdict:?}");
-        let unanswered = row_verdict(Some(Answer::Failed), DolosRow::Unanswered, None);
+        let unanswered = row_verdict(
+            Some(Answer::Failed(Failure::Error)),
+            DolosRow::Unanswered,
+            None,
+        );
         assert!(
             matches!(unanswered, RowVerdict::Disagree(_)),
             "{unanswered:?}"
@@ -1606,16 +2047,16 @@ mod tests {
         let same = row_verdict(Some(ran(1, 2)), DolosRow::Answered(ran(1, 2)), None);
         assert_eq!(same, RowVerdict::Agree(ran(1, 2)));
         let failed = row_verdict(
-            Some(Answer::Failed),
-            DolosRow::Answered(Answer::Failed),
+            Some(Answer::Failed(Failure::Error)),
+            DolosRow::Answered(Answer::Failed(Failure::Error)),
             None,
         );
-        assert_eq!(failed, RowVerdict::Agree(Answer::Failed));
+        assert_eq!(failed, RowVerdict::Agree(Answer::Failed(Failure::Error)));
         for (ledger, dolos) in [
             (ran(1, 2), ran(1, 3)),
             (ran(1, 2), ran(2, 2)),
-            (ran(1, 2), Answer::Failed),
-            (Answer::Failed, ran(1, 2)),
+            (ran(1, 2), Answer::Failed(Failure::Error)),
+            (Answer::Failed(Failure::Error), ran(1, 2)),
         ] {
             let verdict = row_verdict(Some(ledger), DolosRow::Answered(dolos), None);
             assert!(matches!(verdict, RowVerdict::Disagree(_)), "{verdict:?}");
@@ -1628,13 +2069,13 @@ mod tests {
     fn a_listed_row_passes_only_while_dolos_refuses_it_for_the_listed_reason() {
         let listed = refusal("subtransaction redeemers");
         let known = row_verdict(
-            Some(Answer::Failed),
+            Some(Answer::Failed(Failure::Error)),
             DolosRow::Refused(listed.clone()),
             Some(&listed),
         );
         assert_eq!(known, RowVerdict::Known(listed.clone()));
         let other = DolosRow::Refused(refusal("extraneous redeemer"));
-        let relabelled = row_verdict(Some(Answer::Failed), other, Some(&listed));
+        let relabelled = row_verdict(Some(Answer::Failed(Failure::Error)), other, Some(&listed));
         assert!(
             matches!(relabelled, RowVerdict::Disagree(_)),
             "{relabelled:?}"
@@ -1669,7 +2110,7 @@ mod tests {
     fn a_transaction_is_judged_on_every_row_any_side_names() {
         let ledger = BTreeMap::from([
             (key(Level::Top, 0, 0), ran(1, 2)),
-            (key(Level::Sub(0), 0, 0), Answer::Failed),
+            (key(Level::Sub(0), 0, 0), Answer::Failed(Failure::Error)),
         ]);
         let dolos = DolosAnswer::Evaluated(BTreeMap::from([
             (key(Level::Top, 0, 0), ran(1, 2)),
@@ -1690,7 +2131,7 @@ mod tests {
                 "top Spend#0 Agree(Ran(Units { mem: 1, steps: 2 }))",
                 "top Mint#0 ledger=(none) dolos=(ran mem=3 steps=4)",
                 "top Cert#0 ledger=(none) dolos=(none) listed=(x)",
-                "sub0 Spend#0 ledger=(failed) dolos=(none)",
+                "sub0 Spend#0 ledger=(failed error) dolos=(none)",
             ]
         );
     }
@@ -1699,11 +2140,12 @@ mod tests {
     fn a_refused_transaction_refuses_each_ledger_row() {
         let ledger = BTreeMap::from([
             (key(Level::Top, 0, 0), ran(1, 2)),
-            (key(Level::Sub(0), 0, 0), Answer::Failed),
+            (key(Level::Sub(0), 0, 0), Answer::Failed(Failure::Error)),
         ]);
         let why = refusal("subtransaction redeemers");
         let listed = BTreeMap::from([(key(Level::Sub(0), 0, 0), why.clone())]);
-        let verdicts = judge_tx(&ledger, &DolosAnswer::Refused(why.clone()), &listed);
+        let refused = DolosAnswer::Refused(why.clone(), ErrorLayer::PhaseTwo);
+        let verdicts = judge_tx(&ledger, &refused, &listed);
         assert_eq!(verdicts.len(), 2);
         assert!(matches!(verdicts[0].1, RowVerdict::Disagree(_)));
         assert_eq!(verdicts[1].1, RowVerdict::Known(why));
@@ -1740,6 +2182,8 @@ mod tests {
                 .into_iter()
                 .map(|(p, m)| (p.map(purpose), m.to_string()))
                 .collect(),
+            traces: Traces::Named(BTreeMap::new()),
+            payloads: Vec::new(),
             total: total.map(|(mem, steps)| Units { mem, steps }),
             fee: WireFee::Unset,
         }
@@ -1749,12 +2193,12 @@ mod tests {
     fn a_response_fails_the_redeemers_its_errors_name_and_runs_the_rest() {
         let w = wire(
             vec![(0, 1, 2), (1, 3, 4)],
-            vec![(Some((1, 0)), "Mint[0]: boom")],
+            vec![(Some((1, 0)), "Mint[0]: Explicit error term")],
             Some((4, 6)),
         );
         let expected = BTreeMap::from([
             (key(Level::Top, 0, 0), ran(1, 2)),
-            (key(Level::Top, 1, 0), Answer::Failed),
+            (key(Level::Top, 1, 0), Answer::Failed(Failure::Error)),
         ]);
         assert_eq!(w.answer(None, None), Ok(DolosAnswer::Evaluated(expected)));
         assert_eq!(w.total_agrees(), Some(true));
@@ -1809,13 +2253,14 @@ mod tests {
         let w = wire(vec![], vec![(None, "ChainError(x)")], None);
         let evaluator = refusal("subtransaction redeemers");
         let answer = |r, u| w.answer(r, u).unwrap();
+        let phase_one = ErrorLayer::PhaseOne;
         assert_eq!(
-            answer(Some(("ChainError(x)", &evaluator)), None),
-            DolosAnswer::Refused(evaluator.clone())
+            answer(Some(("ChainError(x)", &evaluator, phase_one)), None),
+            DolosAnswer::Refused(evaluator.clone(), phase_one)
         );
         assert_eq!(
-            answer(Some(("ChainError(y)", &evaluator)), None),
-            DolosAnswer::Refused(refusal("ChainError(x)"))
+            answer(Some(("ChainError(y)", &evaluator, phase_one)), None),
+            DolosAnswer::Refused(refusal("ChainError(x)"), ErrorLayer::Unread)
         );
         assert_eq!(
             answer(None, Some("ChainError(x)")),
@@ -1823,7 +2268,7 @@ mod tests {
         );
         assert_eq!(
             answer(None, Some("other")),
-            DolosAnswer::Refused(refusal("ChainError(x)"))
+            DolosAnswer::Refused(refusal("ChainError(x)"), ErrorLayer::Unread)
         );
         assert_eq!(w.total_agrees(), None);
         assert!(w.unnamed().is_empty());
@@ -1894,7 +2339,19 @@ mod tests {
         for layer in Layer::ALL {
             t.add_rows(layer, ic(1), &agree);
         }
-        t.add_fee(Layer::Eval(Version::V1), ic(1), Some(7), &WireFee::Unset);
+        let fee = |fee| WireEval {
+            fee,
+            ..wire(vec![(0, 1, 2)], vec![], Some((1, 2)))
+        };
+        t.add_fee(
+            Layer::Eval(Version::V1),
+            ic(1),
+            Some(7),
+            &fee(WireFee::Int(7)),
+        );
+        let refusing = wire(vec![], vec![(None, "ChainError(x)")], None);
+        t.add_fee(Layer::Eval(Version::V1), ic(1), Some(7), &refusing);
+        assert_eq!(t.fee_refused, 1);
         assert!(passes(&t) && t.every_layer_judged(EvalJudge::Oracle), "{t}");
         let mut no_v1alpha = EvalTally::default();
         for layer in &Layer::ALL[..3] {
@@ -1924,15 +2381,32 @@ mod tests {
         );
         assert!(!passes(&twice));
         let mut differing_fee = t.clone();
-        differing_fee.add_fee(Layer::Eval(Version::V1), ic(1), Some(7), &WireFee::Int(8));
+        differing_fee.add_fee(
+            Layer::Eval(Version::V1),
+            ic(1),
+            Some(7),
+            &fee(WireFee::Int(8)),
+        );
         assert!(!passes(&differing_fee));
+        let mut unset_fee = t.clone();
+        unset_fee.add_fee(
+            Layer::Eval(Version::V1),
+            ic(1),
+            Some(7),
+            &fee(WireFee::Unset),
+        );
+        assert!(!passes(&unset_fee));
         let mut refused = t.clone();
-        let row = row_verdict(Some(Answer::Failed), DolosRow::Refused(refusal("r")), None);
+        let row = row_verdict(
+            Some(Answer::Failed(Failure::Error)),
+            DolosRow::Refused(refusal("r")),
+            None,
+        );
         refused.add_rows(Layer::Pallas, ic(2), &[(key(Level::Sub(0), 0, 0), row)]);
         assert!(!passes(&refused));
         assert_eq!(
             lines(&failed(&refused, Judge::EvalOracle)),
-            ["VERDICT judge=eval-oracle entry=estimate_tx_calls record=ic#2 cells=purpose:Spend,index:0,level:sub,answer:row,ledger:failed,dolos:refused,refusal:r,request_shape:signed outcome=disagree sub0 Spend#0 ledger=(failed) dolos=(refused r)"]
+            ["VERDICT judge=eval-oracle entry=estimate_tx_calls record=ic#2 cells=purpose:Spend,index:0,level:sub,answer:row,ledger:failed,dolos:refused,refusal:r,request_shape:signed outcome=disagree sub0 Spend#0 ledger=(failed error) dolos=(refused r)"]
         );
         let mut slow = t.clone();
         let row = row_verdict(Some(ran(1, 2)), DolosRow::Answered(ran(3, 2)), None);
@@ -1963,7 +2437,10 @@ mod tests {
     fn the_tally_keeps_the_units_of_each_row_a_layer_ran_and_agreed_on() {
         let mut t = EvalTally::default();
         let rows = [
-            (key(Level::Top, 0, 1), RowVerdict::Agree(Answer::Failed)),
+            (
+                key(Level::Top, 0, 1),
+                RowVerdict::Agree(Answer::Failed(Failure::Error)),
+            ),
             (key(Level::Top, 0, 2), RowVerdict::Known(refusal("r"))),
             (
                 key(Level::Top, 0, 3),
@@ -2010,11 +2487,21 @@ mod tests {
         let rows = [
             (key(Level::Top, 5, 0), RowVerdict::Known(refusal("r"))),
             (key(Level::Top, 0, 0), RowVerdict::Agree(ran(1, 2))),
-            (key(Level::Top, 0, 1), RowVerdict::Agree(Answer::Failed)),
-            (key(Level::Sub(0), 5, 0), RowVerdict::Agree(Answer::Failed)),
+            (
+                key(Level::Top, 0, 1),
+                RowVerdict::Agree(Answer::Failed(Failure::Error)),
+            ),
+            (
+                key(Level::Sub(0), 5, 0),
+                RowVerdict::Agree(Answer::Failed(Failure::Error)),
+            ),
             (
                 key(Level::Top, 5, 1),
-                row_verdict(Some(Answer::Failed), DolosRow::Answered(ran(1, 2)), None),
+                row_verdict(
+                    Some(Answer::Failed(Failure::Error)),
+                    DolosRow::Answered(ran(1, 2)),
+                    None,
+                ),
             ),
         ];
         t.add_rows(Layer::Pallas, ic(1), &rows);
@@ -2050,7 +2537,7 @@ mod tests {
     }
 
     fn refused_for(why: &str) -> Result<DolosAnswer, Malformed> {
-        Ok(DolosAnswer::Refused(refusal(why)))
+        Ok(DolosAnswer::Refused(refusal(why), ErrorLayer::PhaseTwo))
     }
 
     #[test]
@@ -2100,6 +2587,20 @@ mod tests {
             TxVerdict::Disagree {
                 demand,
                 dolos: "evaluated[0 rows]".to_string(),
+                refused_at: None,
+                listed: None,
+            }
+        );
+        let phase_one = Ok(DolosAnswer::Refused(
+            refusal("MissingRedeemer Spend 0"),
+            ErrorLayer::PhaseOne,
+        ));
+        assert_eq!(
+            tx_verdict(demand, &phase_one, None),
+            TxVerdict::Disagree {
+                demand,
+                dolos: "refused[MissingRedeemer Spend 0]".to_string(),
+                refused_at: Some(ErrorLayer::PhaseOne),
                 listed: None,
             }
         );
@@ -2244,7 +2745,7 @@ mod tests {
         }
         assert!(passes(&t));
         assert!(t.every_layer_judged(EvalJudge::Draft));
-        let rows_failed = BTreeMap::from([(key(Level::Top, 0, 0), Answer::Failed)]);
+        let rows_failed = BTreeMap::from([(key(Level::Top, 0, 0), Answer::Failed(Failure::Error))]);
         let budget = Ok(DolosAnswer::Evaluated(rows_failed));
         t.add_draft(Layer::Eval(Version::V1), ic(2), &ledger, &unlisted, budget);
         let witnesses = refused_for("missing key witnesses");
@@ -2261,7 +2762,7 @@ mod tests {
             lines(&failed(&t, Judge::EvalDraft)),
             [
                 "VERDICT judge=eval-draft entry=estimate_tx_calls record=ic#2 cells=purpose:Spend,index:0,level:top,answer:row,ledger:ran,dolos:refused,refusal:missing_key_witnesses,request_shape:draft outcome=disagree top Spend#0 ledger=(ran mem=5 steps=7) dolos=(refused missing key witnesses)",
-                "VERDICT judge=eval-draft entry=eval_tx:v1 record=ic#2 cells=purpose:Spend,index:0,level:top,answer:row,ledger:ran,dolos:failed,request_shape:draft outcome=disagree top Spend#0 ledger=(ran mem=5 steps=7) dolos=(failed)"
+                "VERDICT judge=eval-draft entry=eval_tx:v1 record=ic#2 cells=purpose:Spend,index:0,level:top,answer:row,ledger:ran,dolos:failed,request_shape:draft outcome=disagree top Spend#0 ledger=(ran mem=5 steps=7) dolos=(failed error)"
             ]
         );
         let mut underived = EvalTally::default();
@@ -2326,6 +2827,164 @@ mod tests {
         let mut expected = vec![Instrument::EstimateTxCalls.into()];
         expected.extend(Version::ALL.map(|v| EntryPoint::Route(Route::EvalTx, v)));
         assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn two_failures_agree_only_on_a_kind_both_messages_name() {
+        let failed = |f| Answer::Failed(f);
+        let unclassed = || Failure::Unclassed("script evaluation failed".into());
+        assert!(!failed(unclassed()).agrees(&failed(unclassed())));
+        assert!(!failed(Failure::Error).agrees(&failed(Failure::Budget)));
+        let not_run = Failure::NotRun("MissingScript".into());
+        assert!(!failed(not_run.clone()).agrees(&failed(not_run)));
+        assert!(!failed(Failure::Error).agrees(&ran(1, 2)));
+        for kind in [Failure::Error, Failure::Budget, Failure::Unlift] {
+            assert!(failed(kind.clone()).agrees(&failed(kind)));
+        }
+    }
+
+    #[test]
+    fn a_failure_message_names_its_kind_on_either_side() {
+        let ledger = |class: &str| {
+            format!("ValidationFailure (ExUnits 1 2) (CekError An error has occurred:\n{class}\nCaused by: x)")
+        };
+        assert_eq!(Failure::of_ledger(&ledger(LEDGER_ERROR)), Failure::Error);
+        assert_eq!(Failure::of_ledger(&ledger(LEDGER_BUDGET)), Failure::Budget);
+        assert_eq!(Failure::of_ledger(&ledger(LEDGER_UNLIFT)), Failure::Unlift);
+        assert_eq!(
+            Failure::of_ledger("ValidationFailure (ExUnits 1 2) other"),
+            Failure::Unclassed("ValidationFailure (ExUnits 1 2) other".into())
+        );
+        assert_eq!(
+            Failure::of_ledger(&format!("MissingScript {LEDGER_ERROR}")),
+            Failure::NotRun("MissingScript".into())
+        );
+        assert_eq!(Failure::of_dolos("Explicit error term"), Failure::Error);
+        assert_eq!(Failure::of_dolos("Out of budget"), Failure::Budget);
+        assert_eq!(Failure::of_dolos("Type mismatch"), Failure::Unlift);
+        assert_eq!(
+            Failure::of_dolos("Explicit error term and more"),
+            Failure::Unclassed("Explicit error term and more".into())
+        );
+    }
+
+    #[test]
+    fn a_phase_two_demand_refuses_a_refusal_from_another_stage() {
+        let demand = TxDemand::Refuse(LedgerLeaf::CollectErrors);
+        let why = refusal("missing redeemer Spend[0]");
+        for layer in [
+            ErrorLayer::Decode,
+            ErrorLayer::PhaseOne,
+            ErrorLayer::Unsupported,
+            ErrorLayer::Node,
+            ErrorLayer::Unread,
+        ] {
+            let answer = Ok(DolosAnswer::Refused(why.clone(), layer));
+            let verdict = tx_verdict(demand, &answer, None);
+            assert!(
+                matches!(verdict, TxVerdict::Disagree { refused_at: Some(l), .. } if l == layer)
+            );
+            let mut t = EvalTally::default();
+            t.add_tx(Layer::Pallas, ic(1), &verdict);
+            let cells = &failed(&t, Judge::EvalTx)[0].cells;
+            let cell = format!("error_layer:{layer}");
+            assert!(cells.iter().any(|c| c.to_string() == cell), "{cells:?}");
+        }
+        let answer = Ok(DolosAnswer::Refused(why.clone(), ErrorLayer::PhaseTwo));
+        let leaf = LedgerLeaf::CollectErrors;
+        let verdict = tx_verdict(demand, &answer, None);
+        assert_eq!(verdict, TxVerdict::Refused { leaf, refusal: why });
+    }
+
+    #[test]
+    fn traces_agree_only_with_the_ledger_logs_of_each_redeemer() {
+        let spend = key(Level::Top, 0, 0);
+        let mint = key(Level::Top, 1, 0);
+        let ledger = BTreeMap::from([(spend, vec!["a".to_string(), "b".to_string()])]);
+        let swapped = Traces::of_named(vec![
+            (Some(mint.purpose), "a".into()),
+            (Some(mint.purpose), "b".into()),
+        ]);
+        assert!(!swapped.agree(&ledger));
+        assert!(!Traces::Named(BTreeMap::new()).agree(&ledger));
+        assert!(!Traces::Unnamed(vec!["a".into()]).agree(&ledger));
+        let named = Traces::of_named(vec![
+            (Some(spend.purpose), "a".into()),
+            (Some(spend.purpose), "b".into()),
+        ]);
+        assert!(named.agree(&ledger));
+        let unnamed = Traces::of_named(vec![(Some(spend.purpose), "b".into()), (None, "a".into())]);
+        assert_eq!(unnamed, Traces::Unnamed(vec!["b".into(), "a".into()]));
+        assert!(unnamed.agree(&ledger));
+        assert!(Traces::Named(BTreeMap::new()).agree(&BTreeMap::new()));
+    }
+
+    #[test]
+    fn a_payload_agrees_only_with_the_transactions_data_and_bytes() {
+        let spend = Purpose { tag: 0, index: 0 };
+        // The list form entry [0, 0, 42, [1, 2]].
+        let entry = vec![0x84, 0x00, 0x00, 0x18, 0x2a, 0x82, 0x01, 0x02];
+        let int = |n: u8| cbor::data(&[0x18, n]).unwrap();
+        assert_eq!(Data::Int(cbor::Int::of_i64(42)), int(42));
+        assert_eq!(
+            Data::Int(cbor::Int::of_i64(-25)),
+            cbor::data(&[0x38, 0x18]).unwrap()
+        );
+        assert_eq!(cbor::constructor(122, 9), Some(1));
+        assert_eq!(cbor::constructor(102, 9), Some(9));
+        assert_eq!(cbor::constructor(120, 9), None);
+        let chain = BTreeMap::from([(
+            spend,
+            cbor::Redeemer {
+                data: int(42),
+                data_bytes: vec![0x18, 0x2a],
+            },
+        )]);
+        let map_form = [0x82, 0x82, 0x00, 0x00, 0x82, 0x18, 0x2a, 0x82, 0x01, 0x02];
+        assert_eq!(
+            cbor::redeemer_entry(&map_form).unwrap(),
+            (spend, vec![0x18, 0x2a])
+        );
+        assert!(cbor::redeemer_entry(&[&entry[..], &[0x00]].concat()).is_err());
+        let payload = |data, original_cbor| WirePayload {
+            purpose: spend,
+            data,
+            original_cbor,
+        };
+        let mut wrong = EvalTally::default();
+        let layer = Layer::Eval(Version::V1);
+        wrong.add_payloads(layer, ic(1), &chain, &[payload(Ok(int(43)), vec![])]);
+        assert_eq!(failed(&wrong, Judge::EvalOracle).len(), 2);
+        let mut unread = EvalTally::default();
+        let missing = payload(Err("unset".into()), entry.clone());
+        unread.add_payloads(layer, ic(1), &chain, &[missing]);
+        assert_eq!(failed(&unread, Judge::EvalOracle).len(), 1);
+        let mut agree = EvalTally::default();
+        agree.add_payloads(layer, ic(1), &chain, &[payload(Ok(int(42)), entry)]);
+        assert!(passes(&agree), "{agree}");
+        assert!(agree.compared(layer, EvalField::Payload));
+        assert!(agree.compared(layer, EvalField::OriginalCbor));
+        assert!(!agree.compared(layer, EvalField::Fee));
+    }
+
+    #[test]
+    fn the_deep_line_counts_the_fields_a_layer_agreed_on() {
+        let fields: EvalFields = vec![
+            (Version::V1, "fee", EvalField::Fee),
+            (Version::V1, "total", EvalField::Total),
+        ];
+        let mut t = EvalTally::default();
+        let w = WireEval {
+            fee: WireFee::Int(7),
+            ..wire(vec![(0, 1, 2)], vec![], Some((1, 2)))
+        };
+        t.add_fee(Layer::Eval(Version::V1), ic(1), Some(7), &w);
+        assert_eq!(
+            t.deep_line(&fields),
+            "DEEP route=eval_tx fields_compared=1 fields_total=2 disagree=0 uncompared=v1.total"
+        );
+        t.add_fee(Layer::Eval(Version::V1), ic(2), Some(8), &w);
+        assert!(t.deep_line(&fields).contains(" disagree=1 "));
     }
 
     #[test]
