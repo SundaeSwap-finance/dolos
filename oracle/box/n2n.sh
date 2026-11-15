@@ -1,22 +1,26 @@
 # The node to node leg: one session of the head with a live Leios peer, judged against the blocks the serving Dolos holds, run by the done tier alone.
-# Sourced by run.sh after lib.sh. Reads ROOT, OUT, HERE, IN_IMAGE, LIVE_ENV, GRPCURL, LAST_N2N, N2N_PEER and N2N_BLOCKS.
+# Sourced by run.sh after lib.sh. Reads ROOT, OUT, HERE, IN_IMAGE, GRPCURL, LAST_N2N, N2N_PEER, N2N_ENDPOINT and N2N_BLOCKS.
 
 # The record of the inputs of the last passing node to node leg.
 LAST_N2N=${LAST_N2N:-$ROOT/runs/last-n2n}
 # The address and network magic of the Leios peer the leg talks to.
 N2N_PEER=${N2N_PEER:-leios-node.play.dev.cardano.org:3001 164}
+# The utxorpc endpoint whose blocks the leg judges the peer's endorser blocks against.
+N2N_ENDPOINT=${N2N_ENDPOINT:-u5c.musashi.sundae.fi:443}
+# The grpcurl the leg reads the endpoint with.
+GRPCURL=${GRPCURL:-grpcurl}
 # The number of blocks below the endpoint's tip the leg reads.
 N2N_BLOCKS=${N2N_BLOCKS:-20}
 
-# The inputs of the node to node leg at the commit $1: the commit, the peer and the hash of this file.
+# The inputs of the node to node leg at the commit $1: the commit, the peer, the endpoint and the hash of this file.
 n2n_inputs() {
-  echo "commit=$1 peer=$(echo "$N2N_PEER" | tr ' ' /) files=$(sha256sum <"$HERE/n2n.sh" | cut -c1-12)"
+  echo "commit=$1 peer=$(echo "$N2N_PEER" | tr ' ' /) endpoint=$N2N_ENDPOINT files=$(sha256sum <"$HERE/n2n.sh" | cut -c1-12)"
 }
 
 # Calls one endpoint method with the request $2 into the file $3 of the reads dir, trying again after a pause while the endpoint's rate limit refuses it.
 n2n_read() {
   for pause in 1 2 4 8; do
-    if printf '%s' "$2" | "$GRPCURL" -max-msg-sz 200000000 -d @ "$ENDPOINT" "utxorpc.v1.$1" >"$OUT/n2n/$3" 2>"$OUT/n2n.err"; then
+    if printf '%s' "$2" | "$GRPCURL" -max-msg-sz 200000000 -d @ "$N2N_ENDPOINT" "utxorpc.v1.$1" >"$OUT/n2n/$3" 2>"$OUT/n2n.err"; then
       return 0
     fi
     grep -q 'Too Many Requests' "$OUT/n2n.err" || return 1
@@ -27,9 +31,6 @@ n2n_read() {
 
 # Reads the endpoint's tip block and the N2N_BLOCKS blocks below it, then runs the head's node to node test against N2N_PEER, printing its lines and the leg's verdict line.
 n2n_leg() {
-  set -a
-  . "$LIVE_ENV"
-  set +a
   mkdir -p "$OUT/n2n" "$OUT/bin"
   echo "$N2N_PEER" >"$OUT/n2n/peer"
   if ! n2n_read sync.SyncService/ReadTip '{}' tip.json; then
