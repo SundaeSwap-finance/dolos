@@ -130,6 +130,12 @@ impl<D: Domain> SyncExt for D {
             return Err(DomainError::RollbackTargetNotInWal(to.clone()));
         }
 
+        // The store before the genesis is the store at origin, and its unset
+        // cursor is what makes the next block apply the genesis.
+        if *to == ChainPoint::Origin && self.state().read_cursor()?.is_none() {
+            return Ok(());
+        }
+
         let undo_blocks = self.wal().iter_logs(Some(to.clone()), None)?;
 
         let writer = self.state().start_writer()?;

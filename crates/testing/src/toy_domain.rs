@@ -331,6 +331,12 @@ impl ToyDomain<MemoryStores> {
     ) -> Self {
         Self::with_backend(genesis, config, initial_delta, storage_config)
     }
+
+    /// A domain over empty stores with the genesis not yet applied, as a node
+    /// holds before its first block.
+    pub fn before_genesis(genesis: Arc<dolos_core::Genesis>, config: CardanoConfig) -> Self {
+        Self::assemble(genesis, config, None, MemoryStores::open())
+    }
 }
 
 impl<B: ToyStores> ToyDomain<B> {
@@ -369,26 +375,8 @@ impl<B: ToyStores> ToyDomain<B> {
         storage_config: Option<StorageConfig>,
         stores: B,
     ) -> Self {
-        let (tip_broadcast, _) = tokio::sync::broadcast::channel(100);
-
-        let chain = dolos_cardano::CardanoLogic::initialize::<Self>(
-            config.clone(),
-            stores.state(),
-            &genesis,
-        )
-        .unwrap();
-
         // Create the domain first (genesis work unit needs it for execution)
-        let domain = Self {
-            stores,
-            wal: dolos_redb3::wal::RedbWalStore::memory().unwrap(),
-            chain: Arc::new(RwLock::new(chain)),
-            mempool: Mempool::default(),
-            storage_config: storage_config.unwrap_or_default(),
-            sync_config: SyncConfig::default(),
-            genesis: genesis.clone(),
-            tip_broadcast,
-        };
+        let domain = Self::assemble(genesis.clone(), config.clone(), storage_config, stores);
 
         // Apply genesis state using the work unit pattern.
         // Note: We're bypassing the normal pop_work flow here, so we need to
@@ -428,6 +416,32 @@ impl<B: ToyStores> ToyDomain<B> {
         }
 
         domain
+    }
+
+    /// A domain over the given stores with the chain logic they initialize and
+    /// nothing applied.
+    fn assemble(
+        genesis: Arc<dolos_core::Genesis>,
+        config: CardanoConfig,
+        storage_config: Option<StorageConfig>,
+        stores: B,
+    ) -> Self {
+        let (tip_broadcast, _) = tokio::sync::broadcast::channel(100);
+
+        let chain =
+            dolos_cardano::CardanoLogic::initialize::<Self>(config, stores.state(), &genesis)
+                .unwrap();
+
+        Self {
+            stores,
+            wal: dolos_redb3::wal::RedbWalStore::memory().unwrap(),
+            chain: Arc::new(RwLock::new(chain)),
+            mempool: Mempool::default(),
+            storage_config: storage_config.unwrap_or_default(),
+            sync_config: SyncConfig::default(),
+            genesis,
+            tip_broadcast,
+        }
     }
 
     /// Override the sync config so tests can exercise pruning windows

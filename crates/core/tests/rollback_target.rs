@@ -64,9 +64,10 @@ fn a_rollback_to_a_point_the_wal_holds_moves_the_cursor() {
     assert_eq!(domain.state().read_cursor().unwrap(), Some(point(30)));
 }
 
-/// The must-not case a follower on a fresh store takes on every start. Origin
-/// is the position before the first entry, so no entry stands for it, and a
-/// rollback to it is still carried out and still writes the cursor.
+/// The must-not case for a store the genesis was applied to and whose wal holds
+/// nothing. Origin is the position before the first entry, so no entry stands
+/// for it, and a rollback to it is still carried out and still writes the
+/// cursor.
 #[test]
 fn a_rollback_to_origin_on_an_empty_wal_moves_the_cursor_to_origin() {
     let domain = domain_with_an_empty_wal();
