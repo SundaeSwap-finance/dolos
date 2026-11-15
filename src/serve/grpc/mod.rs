@@ -9,6 +9,7 @@ use crate::serve::ChainReads;
 mod block_context;
 pub(crate) mod block_refs;
 mod convert;
+mod eval;
 mod masking;
 mod stream;
 mod v1;

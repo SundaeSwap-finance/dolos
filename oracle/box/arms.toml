@@ -60,6 +60,7 @@ fixes = [
   { subject = "fix(cardano): class a stored decode as server", arm = "stored-decode-as-client" },
   { subject = "fix(cardano): class an evaluation fault as server", arm = "evaluation-fault-as-client" },
   { subject = "fix(trp): apply witnesses to Dijkstra txs", arm = "dijkstra-witnesses-refused" },
+  { subject = "fix(grpc): fill EvalTx redeemer data", arm = "eval-redeemer-data-unset" },
 ]
 
 [pallas]
@@ -257,3 +258,4 @@ dijkstra-witnesses-refused = ["test=methods::tests::a_dijkstra_submission_takes_
 eval-payload-changed = ["judge=eval-oracle entry=eval_tx:v1 answer:row ledger:failed dolos:failed"]
 eval-phase-one = ["judge=eval-tx demand:refuse error_layer:phase_one"]
 eval-row-dropped = ["judge=eval-oracle entry=eval_tx:v1 answer:row ledger:ran dolos:none"]
+eval-redeemer-data-unset = ["judge=eval-oracle entry=eval_tx:v1 answer:payload"]

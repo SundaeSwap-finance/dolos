@@ -3,15 +3,17 @@ use dolos_core::SubmitExt;
 use futures_core::Stream;
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use pallas::crypto::hash::Hash;
-use pallas::interop::utxorpc::v1::spec as u5c;
 use pallas::interop::utxorpc::v1::spec::cardano::ExUnits;
 use pallas::interop::utxorpc::v1::spec::submit::{WaitForTxResponse, *};
+use pallas::interop::utxorpc::v1::{self as interop, spec as u5c};
 use std::collections::HashSet;
 use std::pin::Pin;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info};
 
 use crate::prelude::*;
+use crate::serve::grpc::block_context::NoInputs;
+use crate::serve::grpc::eval::{evaluate_tx, TxEvaluation};
 
 pub struct SubmitServiceImpl<D>
 where
@@ -58,11 +60,12 @@ fn event_to_wait_for_tx_response(event: MempoolEvent) -> WaitForTxResponse {
     }
 }
 
-fn tx_eval_to_u5c(
-    eval: Result<dolos_core::mempool::MultiEraEvalReport, DomainError>,
+fn tx_eval_to_u5c<R>(
+    eval: Result<TxEvaluation<R>, DomainError>,
+    map: impl Fn(&R) -> u5c::cardano::Redeemer,
 ) -> u5c::cardano::TxEval {
-    let report = match eval {
-        Ok(report) => report,
+    let evaluation = match eval {
+        Ok(evaluation) => evaluation,
         Err(e) => {
             return u5c::cardano::TxEval {
                 errors: vec![u5c::cardano::EvalReport {
@@ -73,6 +76,7 @@ fn tx_eval_to_u5c(
             }
         }
     };
+    let report = &evaluation.report;
     let mut result = u5c::cardano::TxEval {
         ex_units: report.iter().try_fold(ExUnits::default(), |acc, eval| {
             Some(ExUnits {
@@ -130,15 +134,20 @@ fn tx_eval_to_u5c(
                     .unwrap_or("script evaluation failed")
             )));
         }
-        result.traces.extend(entry.logs.into_iter().map(named));
+        result.traces.extend(entry.logs.iter().cloned().map(named));
+        let held = evaluation.redeemer(entry.tag, entry.index).map(&map);
+        let (payload, original_cbor) = held
+            .map(|r| (r.payload, r.original_cbor))
+            .unwrap_or_default();
         result.redeemers.push(u5c::cardano::Redeemer {
             purpose: purpose as i32,
+            payload,
             index: entry.index,
             ex_units: Some(ExUnits {
                 steps: entry.units.steps,
                 memory: entry.units.mem,
             }),
-            ..Default::default()
+            original_cbor,
         });
     }
     result
@@ -253,8 +262,10 @@ where
 
         let chain = self.domain.read_chain();
 
-        let result = self.domain.estimate_tx(&chain, &tx_raw);
-        let result = tx_eval_to_u5c(result);
+        let mapper = interop::Mapper::new(NoInputs);
+        let result = evaluate_tx(&self.domain, &chain, &tx_raw, |evaluation| {
+            tx_eval_to_u5c(evaluation, |r| mapper.map_redeemer(r))
+        });
 
         let report = AnyChainEval {
             chain: Some(Chain::Cardano(result)),
@@ -279,7 +290,7 @@ mod mapping_tests {
     fn guarding_result_keeps_identity_and_budget() {
         let mut success = entry(RedeemerTag::Guarding, 9, true);
         success.logs = vec!["guard completed".into()];
-        let report = tx_eval_to_u5c(Ok(vec![success]));
+        let report = tx_eval_to_u5c(Ok(evaluation(vec![success])));
         assert_eq!(
             report.traces,
             vec![u5c::cardano::EvalReport {
@@ -316,7 +327,7 @@ mod mapping_tests {
         failed.logs = vec!["before failure".into(), "detail".into()];
         failed.units = PallasUnits { mem: 11, steps: 23 };
 
-        let report = tx_eval_to_u5c(Ok(vec![failed]));
+        let report = tx_eval_to_u5c(Ok(evaluation(vec![failed])));
 
         assert_eq!(report.errors.len(), 1);
         let error = &report.errors[0];
@@ -354,7 +365,10 @@ mod mapping_tests {
         let failed = tx_eval_to_u5c(Err(DomainError::Internal("unbalanced".into())));
         let mut huge = entry(RedeemerTag::Spend, 0, true);
         huge.units.mem = u64::MAX;
-        let overflow = tx_eval_to_u5c(Ok(vec![huge, entry(RedeemerTag::Mint, 0, true)]));
+        let overflow = tx_eval_to_u5c(Ok(evaluation(vec![
+            huge,
+            entry(RedeemerTag::Mint, 0, true),
+        ])));
 
         for report in [&failed.errors[0], &overflow.errors[0]] {
             assert_eq!((report.purpose, report.index), (None, None), "{report:?}");
@@ -369,7 +383,7 @@ mod mapping_tests {
         let mut success = entry(RedeemerTag::Cert, 2, true);
         success.logs = vec!["completed".into()];
 
-        let report = tx_eval_to_u5c(Ok(vec![failed, success]));
+        let report = tx_eval_to_u5c(Ok(evaluation(vec![failed, success])));
         assert_eq!(report.redeemers.len(), 2);
         assert_eq!(report.errors.len(), 1);
         assert_eq!(

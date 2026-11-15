@@ -3,15 +3,17 @@ use dolos_core::SubmitExt;
 use futures_core::Stream;
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use pallas::crypto::hash::Hash;
-use pallas::interop::utxorpc::v1alpha::spec as u5c;
 use pallas::interop::utxorpc::v1alpha::spec::cardano::ExUnits;
 use pallas::interop::utxorpc::v1alpha::spec::submit::{WaitForTxResponse, *};
+use pallas::interop::utxorpc::v1alpha::{self as interop, spec as u5c};
 use std::collections::HashSet;
 use std::pin::Pin;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info};
 
 use crate::prelude::*;
+use crate::serve::grpc::block_context::NoInputs;
+use crate::serve::grpc::eval::{evaluate_tx, TxEvaluation};
 
 pub struct SubmitServiceImpl<D>
 where
@@ -58,11 +60,12 @@ fn event_to_wait_for_tx_response(event: MempoolEvent) -> WaitForTxResponse {
     }
 }
 
-fn tx_eval_to_u5c(
-    eval: Result<dolos_core::mempool::MultiEraEvalReport, DomainError>,
+fn tx_eval_to_u5c<R>(
+    eval: Result<TxEvaluation<R>, DomainError>,
+    map: impl Fn(&R) -> u5c::cardano::Redeemer,
 ) -> u5c::cardano::TxEval {
-    let report = match eval {
-        Ok(report) => report,
+    let evaluation = match eval {
+        Ok(evaluation) => evaluation,
         Err(e) => {
             return u5c::cardano::TxEval {
                 errors: vec![u5c::cardano::EvalError {
@@ -72,6 +75,7 @@ fn tx_eval_to_u5c(
             }
         }
     };
+    let report = &evaluation.report;
     let mut result = u5c::cardano::TxEval {
         ex_units: report.iter().try_fold(ExUnits::default(), |acc, eval| {
             Some(ExUnits {
@@ -126,17 +130,23 @@ fn tx_eval_to_u5c(
         result.traces.extend(
             entry
                 .logs
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(|msg| u5c::cardano::EvalTrace { msg }),
         );
+        let held = evaluation.redeemer(entry.tag, entry.index).map(&map);
+        let (payload, original_cbor) = held
+            .map(|r| (r.payload, r.original_cbor))
+            .unwrap_or_default();
         result.redeemers.push(u5c::cardano::Redeemer {
             purpose: purpose as i32,
+            payload,
             index: entry.index,
             ex_units: Some(ExUnits {
                 steps: entry.units.steps,
                 memory: entry.units.mem,
             }),
-            ..Default::default()
+            original_cbor,
         });
     }
     result
@@ -251,8 +261,10 @@ where
 
         let chain = self.domain.read_chain();
 
-        let result = self.domain.estimate_tx(&chain, &tx_raw);
-        let result = tx_eval_to_u5c(result);
+        let mapper = interop::Mapper::new(NoInputs);
+        let result = evaluate_tx(&self.domain, &chain, &tx_raw, |evaluation| {
+            tx_eval_to_u5c(evaluation, |r| mapper.map_redeemer(r))
+        });
 
         let report = AnyChainEval {
             chain: Some(Chain::Cardano(result)),
@@ -284,7 +296,7 @@ mod mapping_tests {
                     entry(RedeemerTag::Cert, 2, false),
                 ];
                 entries.insert(position, guard);
-                let report = tx_eval_to_u5c(Ok(entries));
+                let report = tx_eval_to_u5c(Ok(evaluation(entries)));
                 assert_eq!(
                     report.errors,
                     vec![u5c::cardano::EvalError {
@@ -296,5 +308,35 @@ mod mapping_tests {
                 assert!(report.ex_units.is_none());
             }
         }
+    }
+
+    #[test]
+    fn a_redeemer_this_version_cannot_represent_is_never_mapped() {
+        let mapped = std::cell::RefCell::new(vec![]);
+        let mut held = evaluation(vec![
+            entry(RedeemerTag::Spend, 4, true),
+            entry(RedeemerTag::Guarding, 9, true),
+        ]);
+        let redeemer = |index| u5c::cardano::Redeemer {
+            index,
+            ..Default::default()
+        };
+        held.redeemers = vec![
+            (RedeemerTag::Spend, 4, redeemer(4)),
+            (RedeemerTag::Guarding, 9, redeemer(9)),
+        ];
+
+        let report = super::tx_eval_to_u5c(Ok(held), |r| {
+            mapped.borrow_mut().push(r.index);
+            r.clone()
+        });
+
+        assert_eq!(mapped.into_inner(), [4]);
+        assert_eq!(
+            report.errors,
+            vec![u5c::cardano::EvalError {
+                msg: "RPC v1alpha cannot represent redeemer Guarding[9]".into(),
+            }]
+        );
     }
 }

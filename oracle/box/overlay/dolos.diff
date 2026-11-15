@@ -93,7 +93,7 @@ index 340a6ece..d8296f8f 100644
                  delta
                      .produced_utxo
 diff --git a/crates/cardano/src/validate.rs b/crates/cardano/src/validate.rs
-index 186cc4b9..c86a7a9b 100644
+index a5ea9daf..69c68004 100644
 --- a/crates/cardano/src/validate.rs
 +++ b/crates/cardano/src/validate.rs
 @@ -69,6 +69,11 @@ pub fn validate_tx<D: Domain>(
@@ -260,10 +260,10 @@ index 186cc4b9..c86a7a9b 100644
      // Relay can move a transaction between these two reads. Count it once.
      let mut seen = std::collections::HashSet::new();
      inflight
-@@ -771,6 +855,9 @@ fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx
- }
+@@ -772,6 +856,9 @@ fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx
  
- fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError> {
+ /// Decodes the bytes of a transaction submitted in an era.
+ pub fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError> {
 +    if pallas::crypto::oracle_plant("era-trial-decoded") {
 +        return Ok(MultiEraTx::decode(cbor)?);
 +    }
@@ -420,10 +420,10 @@ index b3a5af22..6236592f 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index affa0775..15c50f63 100644
+index 2a336734..5c19597d 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
-@@ -111,6 +111,9 @@ fn tx_eval_to_u5c(
+@@ -115,6 +115,9 @@ fn tx_eval_to_u5c<R>(
              MultiEraRedeemerTag::Reward => RedeemerPurpose::Reward,
              MultiEraRedeemerTag::Vote => RedeemerPurpose::Vote,
              MultiEraRedeemerTag::Propose => RedeemerPurpose::Propose,
@@ -433,7 +433,7 @@ index affa0775..15c50f63 100644
              MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
              other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
          };
-@@ -127,6 +130,7 @@ fn tx_eval_to_u5c(
+@@ -131,11 +134,15 @@ fn tx_eval_to_u5c<R>(
                  entry
                      .failure_message
                      .as_deref()
@@ -441,8 +441,17 @@ index affa0775..15c50f63 100644
                      .unwrap_or("script evaluation failed")
              )));
          }
-@@ -141,6 +145,9 @@ fn tx_eval_to_u5c(
-             ..Default::default()
+         result.traces.extend(entry.logs.iter().cloned().map(named));
+-        let held = evaluation.redeemer(entry.tag, entry.index).map(&map);
++        let held = evaluation
++            .redeemer(entry.tag, entry.index)
++            .filter(|_| !pallas::crypto::oracle_plant("eval-redeemer-data-unset"))
++            .map(&map);
+         let (payload, original_cbor) = held
+             .map(|r| (r.payload, r.original_cbor))
+             .unwrap_or_default();
+@@ -150,6 +157,9 @@ fn tx_eval_to_u5c<R>(
+             original_cbor,
          });
      }
 +    if pallas::crypto::oracle_plant("eval-row-dropped") {
@@ -452,12 +461,12 @@ index affa0775..15c50f63 100644
  }
  
 diff --git a/src/serve/grpc/v1alpha/submit.rs b/src/serve/grpc/v1alpha/submit.rs
-index 514591f4..fc49e696 100644
+index 0ca0b589..76fd814e 100644
 --- a/src/serve/grpc/v1alpha/submit.rs
 +++ b/src/serve/grpc/v1alpha/submit.rs
-@@ -132,9 +132,16 @@ fn tx_eval_to_u5c(
-         result.redeemers.push(u5c::cardano::Redeemer {
+@@ -142,9 +142,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
+             payload,
              index: entry.index,
 -            ex_units: Some(ExUnits {
 -                steps: entry.units.steps,
@@ -473,7 +482,7 @@ index 514591f4..fc49e696 100644
 +                    memory: entry.units.mem,
 +                }
              }),
-             ..Default::default()
+             original_cbor,
          });
 diff --git a/src/serve/grpc/v1alpha/watch.rs b/src/serve/grpc/v1alpha/watch.rs
 index b3f07291..d4ed3362 100644
@@ -493,12 +502,12 @@ index b3f07291..d4ed3362 100644
                  .clone()
                  .map(u5c::watch::any_chain_block::Chain::Cardano),
 diff --git a/src/serve/grpc/v1beta/submit.rs b/src/serve/grpc/v1beta/submit.rs
-index 4d711d8e..fcb8b16e 100644
+index 2a5d8ff0..294a4ca4 100644
 --- a/src/serve/grpc/v1beta/submit.rs
 +++ b/src/serve/grpc/v1beta/submit.rs
-@@ -133,9 +133,16 @@ fn tx_eval_to_u5c(
-         result.redeemers.push(u5c::cardano::Redeemer {
+@@ -142,9 +142,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
+             payload,
              index: entry.index,
 -            ex_units: Some(ExUnits {
 -                steps: entry.units.steps,
@@ -514,9 +523,9 @@ index 4d711d8e..fcb8b16e 100644
 +                    memory: entry.units.mem,
 +                }
              }),
-             ..Default::default()
+             original_cbor,
          });
-@@ -179,7 +186,11 @@ where
+@@ -188,7 +195,11 @@ where
  
          info!(tx.hash = %hash, "accepted grpc transaction into mempool");
          Ok(Response::new(SubmitTxResponse {

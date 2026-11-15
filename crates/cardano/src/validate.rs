@@ -770,7 +770,8 @@ fn unconfirmed_txs<D: Domain>(utxos: &MempoolAwareUtxoStore<D>) -> Vec<MempoolTx
         .collect()
 }
 
-fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError> {
+/// Decodes the bytes of a transaction submitted in an era.
+pub fn decode_submission(era: Era, cbor: &[u8]) -> Result<MultiEraTx<'_>, ChainError> {
     let mut decoder = pallas::codec::minicbor::Decoder::new(cbor);
     decoder.skip()?;
     if decoder.position() != cbor.len() {
