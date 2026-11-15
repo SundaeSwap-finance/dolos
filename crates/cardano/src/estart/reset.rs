@@ -384,42 +384,6 @@ mod drift_tests {
         assert_eq!(panic.is_some(), cfg!(debug_assertions));
     }
 
-    /// The guard the two epoch transition deltas assert through lets a drifted
-    /// boundary past when the process is lenient and refuses it when the
-    /// process is strict. A consistent boundary is accepted under both.
-    ///
-    /// The flag is process wide, so this test sets and restores it rather than
-    /// leaving it set for whatever runs next in the same binary.
-    #[test]
-    fn the_delta_guard_follows_the_process_setting() {
-        let (initial, ended) = boundary();
-        let expected = initial.max_supply();
-
-        let before = crate::pots::lenient_apply();
-
-        crate::pots::set_lenient_apply(false);
-        assert!(
-            !crate::pots::supply_holds_or_lenient(&ended, expected),
-            "a drifted boundary is refused under the strict setting"
-        );
-        assert!(
-            crate::pots::supply_holds_or_lenient(&initial, expected),
-            "a consistent boundary is accepted under the strict setting"
-        );
-
-        crate::pots::set_lenient_apply(true);
-        assert!(
-            crate::pots::supply_holds_or_lenient(&ended, expected),
-            "a drifted boundary is let past under the lenient setting"
-        );
-        assert!(
-            crate::pots::supply_holds_or_lenient(&initial, expected),
-            "and a consistent one still is"
-        );
-
-        crate::pots::set_lenient_apply(before);
-    }
-
     /// A consistent boundary is silent under both settings.
     #[test]
     fn a_consistent_boundary_is_silent_under_both_settings() {

@@ -1393,11 +1393,6 @@ impl dolos_core::EntityDelta for EpochTransition {
     fn apply(&mut self, entity: &mut Option<Self::Entity>) {
         let entity = entity.as_mut().expect("existing epoch");
 
-        debug_assert!(crate::pots::supply_holds_or_lenient(
-            &self.new_pots,
-            entity.initial_pots.max_supply()
-        ));
-
         // save undo info (snapshot whole EpochValues so rotation + any era
         // migration are both covered)
         self.prev_number = entity.number;
@@ -1501,11 +1496,6 @@ impl dolos_core::EntityDelta for EpochTransitionV2 {
 
     fn apply(&mut self, entity: &mut Option<Self::Entity>) {
         let entity = entity.as_mut().expect("existing epoch");
-
-        debug_assert!(crate::pots::supply_holds_or_lenient(
-            &self.new_pots,
-            entity.initial_pots.max_supply()
-        ));
 
         // save undo info (snapshot whole EpochValues so rotation + any era
         // migration are both covered)
@@ -1813,9 +1803,6 @@ mod prop_tests {
         fn any_epoch_transition()(
             new_epoch in root::any_epoch(),
         ) -> EpochTransition {
-            // new_pots is filled in by the test harness from the entity's initial_pots
-            // so that `new_pots.max_supply() == entity.initial_pots.max_supply()` holds
-            // (which `apply`'s debug_assert requires).
             EpochTransition::new(new_epoch, crate::pots::Pots::default(), None, None)
         }
     }
@@ -1824,9 +1811,6 @@ mod prop_tests {
         fn any_epoch_transition_v2()(
             new_epoch in root::any_epoch(),
         ) -> EpochTransitionV2 {
-            // new_pots is filled in by the test harness from the entity's initial_pots
-            // so that `new_pots.max_supply() == entity.initial_pots.max_supply()` holds
-            // (which `apply`'s debug_assert requires).
             EpochTransitionV2::new(new_epoch, crate::pots::Pots::default(), None, None)
         }
     }
@@ -1906,9 +1890,6 @@ mod prop_tests {
             entity in any_epoch_state(),
             mut delta in any_epoch_transition(),
         ) {
-            // align new_pots with the entity's initial_pots so apply's max_supply
-            // consistency debug_assert holds.
-            delta.new_pots = entity.initial_pots.clone();
             // `transition` asserts `new_epoch` is exactly one past the
             // entity's epoch under `strict`.
             delta.new_epoch = entity.rolling.epoch().expect("generated at epoch position") + 1;
@@ -1920,10 +1901,28 @@ mod prop_tests {
             entity in any_epoch_state(),
             mut delta in any_epoch_transition_v2(),
         ) {
-            // align new_pots with the entity's initial_pots so apply's max_supply
-            // consistency debug_assert holds.
-            delta.new_pots = entity.initial_pots.clone();
             delta.new_epoch = entity.rolling.epoch().expect("generated at epoch position") + 1;
+            assert_delta_roundtrip(Some(entity), delta);
+        }
+
+        /// The boundary that defines the pots checks them against the supply
+        /// under its own setting, so the delta records whatever pots it is given.
+        #[test]
+        fn epoch_transition_v2_records_pots_that_drift(
+            entity in any_epoch_state(),
+            mut delta in any_epoch_transition_v2(),
+        ) {
+            let drifted = crate::pots::Pots {
+                utxos: entity.initial_pots.utxos + 1,
+                ..entity.initial_pots.clone()
+            };
+            delta.new_pots = drifted.clone();
+            delta.new_epoch = entity.rolling.epoch().expect("generated at epoch position") + 1;
+
+            let mut applied = Some(entity.clone());
+            dolos_core::EntityDelta::apply(&mut delta.clone(), &mut applied);
+            prop_assert_eq!(&applied.expect("existing epoch").initial_pots, &drifted);
+
             assert_delta_roundtrip(Some(entity), delta);
         }
 

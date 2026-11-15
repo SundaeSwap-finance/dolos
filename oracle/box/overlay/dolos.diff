@@ -617,18 +617,18 @@ index a18eaa03..bab519a9 100644
              original_cbor,
          });
 diff --git a/src/serve/grpc/v1alpha/watch.rs b/src/serve/grpc/v1alpha/watch.rs
-index 17e56920..ac857eed 100644
+index 0f36770a..b4d8b222 100644
 --- a/src/serve/grpc/v1alpha/watch.rs
 +++ b/src/serve/grpc/v1alpha/watch.rs
-@@ -387,7 +387,11 @@ fn block_to_txs<C: ChainReads>(
-     txs.into_iter().map(move |x| u5c::watch::AnyChainTx {
-         chain: Some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
-         block: Some(u5c::watch::AnyChainBlock {
--            native_bytes: native_bytes.clone(),
+@@ -400,7 +400,11 @@ fn block_to_txs<C: ChainReads>(
+             .tx
+             .then_some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
+         block: (mask.block != BlockMask::none()).then(|| u5c::watch::AnyChainBlock {
+-            native_bytes: native_bytes.clone().unwrap_or_default(),
 +            native_bytes: if pallas::crypto::oracle_plant("watch-block-copied") {
-+                bytes::Bytes::copy_from_slice(&native_bytes)
++                bytes::Bytes::copy_from_slice(&native_bytes.clone().unwrap_or_default())
 +            } else {
-+                native_bytes.clone()
++                native_bytes.clone().unwrap_or_default()
 +            },
              chain: mapped
                  .clone()
@@ -693,18 +693,18 @@ index c2fa5a49..1ab08846 100644
              None
          },
 diff --git a/src/serve/grpc/v1beta/watch.rs b/src/serve/grpc/v1beta/watch.rs
-index 1b5ced59..884ac1b8 100644
+index c9f74968..9e32c9ac 100644
 --- a/src/serve/grpc/v1beta/watch.rs
 +++ b/src/serve/grpc/v1beta/watch.rs
-@@ -379,7 +379,11 @@ fn block_to_txs<C: ChainReads>(
-     txs.into_iter().map(move |x| u5c::watch::AnyChainTx {
-         chain: Some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
-         block: Some(u5c::watch::AnyChainBlock {
--            native_bytes: native_bytes.clone(),
+@@ -392,7 +392,11 @@ fn block_to_txs<C: ChainReads>(
+             .tx
+             .then_some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
+         block: (mask.block != BlockMask::none()).then(|| u5c::watch::AnyChainBlock {
+-            native_bytes: native_bytes.clone().unwrap_or_default(),
 +            native_bytes: if pallas::crypto::oracle_plant("watch-block-copied") {
-+                bytes::Bytes::copy_from_slice(&native_bytes)
++                bytes::Bytes::copy_from_slice(&native_bytes.clone().unwrap_or_default())
 +            } else {
-+                native_bytes.clone()
++                native_bytes.clone().unwrap_or_default()
 +            },
              chain: mapped
                  .clone()
