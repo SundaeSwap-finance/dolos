@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, the overlay build's target dir, which arms an overlay switches, when two test logs differ, an encoding arm's verdict, an arm's verdict from its run, the log run_into_log writes of a run that writes to both outputs, what an arm served against its row of served.txt, the switches an overlay plant leaves out, the files a planted tree writes and whether git writes each diff as committed, the free space floor, the space the candidate's store needs, the sync deadline, the candidate's fsync state, the IO guard's breach rule, the record a passing done run writes, the box lock, how many switched arms are judged at once, the pallas pin, the scratch pallas checkout, when the box tests are due, when the value leg is due, a value arm's verdict, what the value leg hands the harness tier and which of its steps it reruns, the value control's verdict, the amaru pin, the amaru leg's verdicts, the build image's name by the harness's image scripts, the image in-image.sh runs and the endorser block endorser_fixture.py reads from each LeiosDb layout.
+# Checks that build_checked refuses a unit cargo reports fresh after a file it reads changed, and passes every other unit, with a runner that prints canned cargo messages, the overlay build's target dir, which arms an overlay switches, when two test logs differ, an encoding arm's verdict, an arm's verdict from its run, the log run_into_log writes of a run that writes to both outputs, what an arm served against its row of served.txt, the switches an overlay plant leaves out, the files a planted tree writes and whether git writes each diff as committed, the free space floor, the record a passing done run writes, the box lock, how many switched arms are judged at once, the pallas pin, the scratch pallas checkout, when the box tests are due, when the value leg is due, a value arm's verdict, what the value leg hands the harness tier and which of its steps it reruns, the value control's verdict, the amaru pin, the amaru leg's verdicts, the build image's name by the harness's image scripts, the image in-image.sh runs and the endorser block endorser_fixture.py reads from each LeiosDb layout.
 # Usage: lib_test.sh <empty work dir>
 set -eu
 lib_test_work=$(cd "$1" && pwd)
@@ -35,12 +35,16 @@ change_a() {
   commit
 }
 
-# Runs build_checked with messages naming each unit given as name=fresh, printing its exit and output.
+# Runs build_checked with messages naming each unit given as name=fresh, a name with a leading slash being the unit's output file, printing its exit and output.
 build() {
   : >"$ROOT/messages"
   for arg in "$@"; do
-    printf '{"reason":"compiler-artifact","filenames":["/w/target/release/deps/lib%s-1.rlib"],"fresh":%s}\n' \
-      "${arg%=*}" "${arg#*=}" >>"$ROOT/messages"
+    unit=${arg%=*}
+    case $unit in
+      /*) ;;
+      *) unit=/w/target/release/deps/lib$unit-1.rlib ;;
+    esac
+    printf '{"reason":"compiler-artifact","filenames":["%s"],"fresh":%s}\n' "$unit" "${arg#*=}" >>"$ROOT/messages"
   done
   (
     SCRATCH=scratch/dolos IN_IMAGE=$ROOT/runner.sh
@@ -103,6 +107,35 @@ build x=false y=false >/dev/null
 change_a
 expect between "$(build y=true)" "exit=0 "
 expect skipped "$(build x=true y=true)" "exit=1 STALE unit=/w/target/release/deps/libx-1.rlib file=a.rs"
+
+# Must fire: a fresh unit with no dep-info, on trees that did not change.
+setup no_dep_info
+build x=false z=false >/dev/null
+expect no_dep_info "$(build x=true z=true)" "exit=1 STALE unit=/w/target/release/deps/libz-1.rlib dep_info=missing"
+
+# Must not fire, then must fire: a unit that reads a pallas file, fresh before and after that file changed.
+setup pallas_changed
+mkdir -p "$ROOT/scratch/pallas"
+git -C "$ROOT/scratch/pallas" init -q
+echo 1 >"$ROOT/scratch/pallas/p.rs"
+git -C "$ROOT/scratch/pallas" add -A
+git -C "$ROOT/scratch/pallas" -c user.name=t -c user.email=t@t commit -q -m t
+echo "/w/target/release/deps/libw-1.rlib: /w/scratch/pallas/p.rs" >"$ROOT/target/release/deps/w-1.d"
+build w=false >/dev/null
+expect pallas_unchanged "$(build w=true)" "exit=0 "
+echo 2 >"$ROOT/scratch/pallas/p.rs"
+git -C "$ROOT/scratch/pallas" -c user.name=t -c user.email=t@t commit -q -a -m t
+expect pallas_changed "$(build w=true)" "exit=1 STALE unit=/w/target/release/deps/libw-1.rlib file=/w/scratch/pallas/p.rs"
+
+# Must not fire, then must fire: a build script fresh before and after a file it reads changed, its dep-info named for the script and its unit hash.
+setup build_script
+script=/w/target/release/build/s-0f/build-script-build
+mkdir -p "$ROOT/target/release/build/s-0f"
+echo "$script: /w/scratch/dolos/a.rs" >"$ROOT/target/release/build/s-0f/build_script_build-0f.d"
+build "$script=false" >/dev/null
+expect build_script_unchanged "$(build "$script=true")" "exit=0 "
+change_a
+expect build_script_changed "$(build "$script=true")" "exit=1 STALE unit=$script file=a.rs"
 
 # Must hand an overlay build the overlay's target dir and keep its record there, and must leave the head's record and trees as they were.
 setup overlay_target
@@ -647,144 +680,6 @@ expect free_whole "$(free_of 10737418240 10)" "free=10 exit=0 "
 # Must fire: one byte short of 10 gibibytes is 9, which a 10 gibibyte floor refuses.
 expect free_short "$(free_of 10737418239 10)" "free=9 exit=2 REFUSED free=9G below 10G at $lib_test_work/free"
 
-# The exit and output of store_size_g for a store whose du answers $1 bytes, or fails when $1 is empty.
-need_of() {
-  (
-    HERE=$H
-    . "$lib_test_lib"
-    du() {
-      [ -n "$DU_BYTES" ] || return 1
-      printf '%s\t%s\n' "$DU_BYTES" "$2"
-    }
-    DU_BYTES=$1
-    status=0
-    out=$(store_size_g "$lib_test_work/store") || status=$?
-    echo "exit=$status $out"
-  )
-}
-# Must not fire: a store of whole gibibytes needs that many.
-expect need_whole "$(need_of 19327352832)" "exit=0 18"
-# Must fire: any bytes past a whole gibibyte round up.
-expect need_over "$(need_of 19327352833)" "exit=0 19"
-expect need_serving "$(need_of 19251746715)" "exit=0 18"
-# Must fail: a store du cannot read.
-expect need_unread "$(need_of '')" "exit=1 "
-
-# The minutes sync_minutes allows a sync to the node slot $1 at $2 slots a second.
-deadline_of() {
-  (
-    HERE=$H
-    . "$lib_test_lib"
-    sync_minutes "$1" "$2"
-  )
-}
-# Must not fire: half again a projection of whole minutes is whole.
-expect deadline_whole "$(deadline_of 2328000 291)" 200
-# Must fire: any slots past a whole minute round up.
-expect deadline_over "$(deadline_of 2328001 291)" 201
-expect deadline_tip "$(deadline_of 2345162 291)" 202
-
-# Maps of a process with libeatmydata preloaded, of one without it, of one whose loader has mapped only itself, of one that has exited, and none at all.
-M=$lib_test_work/maps
-rm -rf "$M"
-mkdir -p "$M"
-printf '%s\n' '7f00 r-xp 00000000 08:01 1 /usr/lib/x86_64-linux-gnu/libc.so.6' '7f01 r-xp 00000000 08:01 2 /opt/eatmydata.so' >"$M/preloaded"
-printf '%s\n' '7f00 r-xp 00000000 08:01 1 /usr/lib/x86_64-linux-gnu/libc.so.6' >"$M/plain"
-printf '%s\n' '7f02 r-xp 00000000 08:01 3 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2' >"$M/loading"
-: >"$M/exited"
-fsync_of() {
-  (
-    HERE=$H
-    . "$lib_test_lib"
-    fsync_state "$1"
-  )
-}
-# Must not fire: a process whose maps name libc but not libeatmydata.
-expect fsync_on "$(fsync_of "$M/plain")" fsync=on
-# Must fire: a process whose maps name libeatmydata.
-expect fsync_off "$(fsync_of "$M/preloaded")" fsync=off
-# Neither: maps that name only the loader, none, or cannot be read.
-expect fsync_loading "$(fsync_of "$M/loading")" fsync=unknown
-expect fsync_exited "$(fsync_of "$M/exited")" fsync=unknown
-expect fsync_missing "$(fsync_of "$M/missing")" fsync=unknown
-
-# The fsync state of a running process, with the library the candidate preloads in $1 or none.
-process_fsync() {
-  if [ -n "$1" ]; then
-    LD_PRELOAD=$1 sleep 30 &
-  else
-    sleep 30 &
-  fi
-  pid=$!
-  sleep 1
-  fsync_of "/proc/$pid/maps"
-  kill "$pid"
-}
-expect fsync_process_on "$(process_fsync '')" fsync=on
-expect fsync_process_off "$(process_fsync /usr/lib/x86_64-linux-gnu/libeatmydata.so.1)" fsync=off
-
-# The fsync mode CANDIDATE_FSYNC=$1 asks for, with the exit of candidate_fsync.
-mode_of() {
-  (
-    HERE=$H
-    . "$lib_test_lib"
-    status=0
-    out=$(CANDIDATE_FSYNC=$1 candidate_fsync 2>&1) || status=$?
-    echo "exit=$status $out"
-  )
-}
-# Must not fire: unset and the two named modes.
-expect mode_unset "$(mode_of '')" "exit=0 off"
-expect mode_on "$(mode_of on)" "exit=0 on"
-expect mode_off "$(mode_of off)" "exit=0 off"
-# Must fire: any other value.
-expect mode_other "$(mode_of none)" "exit=2 LIVE-CANDIDATE REFUSED candidate_fsync=none want=off,on"
-
-# The streak after one LIVE-IO sample line $2 following a streak of $1, with limits of 60 s of node lag, 40 slots of serve lag and 2000 ms.
-streak_of() {
-  (
-    HERE=$H
-    . "$lib_test_lib"
-    IO_NODE_LAG_S=60 IO_SERVE_LAG_SLOTS=40 IO_SERVE_MS=2000
-    io_streak "$1" "$2"
-  )
-}
-# Must not fire: every value at its limit, and a serve tip ahead of the node tip read before it.
-expect io_at_limit "$(streak_of 2 'LIVE-IO node_lag_s=60 serve_lag_slots=40 serve_ms=2000')" 0
-expect io_serve_ahead "$(streak_of 0 'LIVE-IO node_lag_s=5 serve_lag_slots=-20 serve_ms=80')" 0
-# Must fire: each value one over its limit, a failed read and a missing value.
-expect io_node_over "$(streak_of 0 'LIVE-IO node_lag_s=61 serve_lag_slots=0 serve_ms=80')" 1
-expect io_serve_over "$(streak_of 1 'LIVE-IO node_lag_s=5 serve_lag_slots=41 serve_ms=80')" 2
-expect io_ms_over "$(streak_of 0 'LIVE-IO node_lag_s=5 serve_lag_slots=0 serve_ms=2001')" 1
-expect io_failed "$(streak_of 0 'LIVE-IO node_lag_s=5 serve_lag_slots=failed serve_ms=failed')" 1
-expect io_missing "$(streak_of 0 'LIVE-IO node_lag_s=5 serve_lag_slots=0')" 1
-
-# Folds LIVE-IO sample lines through the guard with the limits of streak_of, printing the sample that breaches or the streak after the last.
-guard_of() {
-  (
-    HERE=$H
-    . "$lib_test_lib"
-    IO_NODE_LAG_S=60 IO_SERVE_LAG_SLOTS=40 IO_SERVE_MS=2000
-    streak=0
-    n=0
-    for line in "$@"; do
-      n=$((n + 1))
-      streak=$(io_streak "$streak" "$line")
-      if io_breached "$streak"; then
-        echo "breach sample=$n"
-        return
-      fi
-    done
-    echo "clear streak=$streak"
-  )
-}
-under='LIVE-IO node_lag_s=20 serve_lag_slots=0 serve_ms=80'
-over='LIVE-IO node_lag_s=20 serve_lag_slots=0 serve_ms=2500'
-# Must not fire: two samples over then one under.
-expect io_recovers "$(guard_of "$over" "$over" "$under")" "clear streak=0"
-# Must fire: three samples over in a row.
-expect io_breach "$(guard_of "$under" "$over" "$over" "$over")" "breach sample=4"
-
 # The exit of record_pass for a done run of commit c with the verdicts $1, and what it leaves in last-done.
 records_of() {
   (
@@ -1059,41 +954,11 @@ for word in ship live value regen quicker; do
   expect "tier_word_$word" "$(run_out "$K")" "usage: run.sh quick|done run-exit=2 exit=2"
 done
 
-# Must fire: breaks.sh and candidate.sh, each run alone, hold the lock when they read free space, candidate.sh with a config to copy.
+# Must fire: breaks.sh, run alone, holds the lock when it reads free space.
 lock_root lock-breaks
 tier "$K" judged breaks.sh
 expect lock_breaks "$(run_out "$K")" "REFUSED free exit=2"
 expect lock_breaks_held "$(paste -sd ' ' - <"$K/df.seen")" lock=held
-# A build root $lib_test_work/$1 holding a serving config to copy, the candidate.sh run on it with that config, and a du that answers $2 bytes for the serving store, or none when $2 is empty.
-candidate_root() {
-  lock_root "$1"
-  mkdir -p "$K/config" "$K/dir" "$K/bin"
-  for file in dolos.toml byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json dijkstra-genesis.json; do
-    : >"$K/config/$file"
-  done
-  if [ -n "$2" ]; then
-    printf '%s\n' '#!/bin/sh' "printf '%s\t%s\n' $2 \"\$2\"" >"$K/bin/du"
-    chmod +x "$K/bin/du"
-  fi
-  (
-    CANDIDATE=c COMMIT=c NODE=n ENDPOINT=e SERVE_CONFIG=$K/config CANDIDATE_GRPC=g
-    export CANDIDATE COMMIT NODE ENDPOINT SERVE_CONFIG CANDIDATE_GRPC
-    tier "$K" judged candidate.sh "$K/dir"
-  )
-}
-# The refusal lines of the candidate.sh run on the build root $1, its free space shortened.
-candidate_refusal() {
-  sed -n 's/^LIVE-CANDIDATE REFUSED free=[0-9]*G root_free=[0-9]*G /LIVE-CANDIDATE REFUSED free /p
-    /^LIVE-CANDIDATE REFUSED serve_store/p' "$1/run.out"
-}
-# Must fire: a serving store of a million gibibytes needs three more than that free.
-candidate_root lock-candidate 1073741824000000
-expect lock_candidate_held "$(sed -n 1p "$K/df.seen")" lock=held
-expect lock_candidate_released "$(record_left "$K")" released
-expect candidate_need_store "$(candidate_refusal "$K")" "LIVE-CANDIDATE REFUSED free need=1000003G"
-# Must refuse: a serving store du cannot read.
-candidate_root candidate-store-unread ""
-expect candidate_store_unread "$(candidate_refusal "$K")" "LIVE-CANDIDATE REFUSED serve_store=$K/config/data unreadable"
 
 # A build root whose scratch Cargo.toml holds the lines after $1, and the pin pallas_pin reads from it.
 pin_of() {
@@ -1221,8 +1086,7 @@ git -C "$lib_test_work/quick-src" push -q "$Q/dolos.git" HEAD:refs/heads/b
 qrev=$(git -C "$lib_test_work/quick-src" rev-parse HEAD)
 cp -R "$HERE" "$lib_test_work/quick-box"
 echo 'echo "ARMS head=PASS control=CLEAN logs=x"' >"$lib_test_work/quick-box/breaks.sh"
-echo 'echo lib >>"$ROOT/box-tests"' >"$lib_test_work/quick-box/lib_test.sh"
-echo 'echo fields >>"$ROOT/box-tests"; [ ! -f "$ROOT/box-tests-fail" ]' >"$lib_test_work/quick-box/fields_test.sh"
+echo 'echo lib >>"$ROOT/box-tests"; [ ! -f "$ROOT/box-tests-fail" ]' >"$lib_test_work/quick-box/lib_test.sh"
 echo 'build_image() { echo dolos-build:stub; }' >>"$lib_test_work/quick-box/lib.sh"
 echo 'value_leg() { echo ran >>"$ROOT/legs"; echo "VALUE value-head=PASS value-control=CLEAN pin=x"; }' >>"$lib_test_work/quick-box/value.sh"
 printf '%s\n' 'amaru_leg() { echo ran >>"$ROOT/amaru-legs"; echo "AMARU amaru-head=PASS rev=x"; }' \
@@ -1254,20 +1118,20 @@ quick_box_tests() {
   echo "runs=$(grep -c . "$Q/box-tests" || true) $(grep '^BOX-TEST ' "$Q/q$1.out" | sed 's/ inputs=.*//')"
 }
 # Must not run the box tests again on the files and box setup they passed on.
-expect quick_box_tests_passed "$(quick_box_tests 4)" "runs=2 BOX-TEST due=no"
+expect quick_box_tests_passed "$(quick_box_tests 4)" "runs=1 BOX-TEST due=no"
 # Must run them on a box file changed, on another box setup, and on each run after a failing one.
 echo '# a changed box file' >>"$lib_test_work/quick-box/breaks.sh"
-expect quick_box_tests_file "$(quick_box_tests 5)" "runs=4 BOX-TEST due=yes passed"
-expect quick_box_tests_file_passed "$(quick_box_tests 6)" "runs=4 BOX-TEST due=no"
+expect quick_box_tests_file "$(quick_box_tests 5)" "runs=2 BOX-TEST due=yes passed"
+expect quick_box_tests_file_passed "$(quick_box_tests 6)" "runs=2 BOX-TEST due=no"
 echo s2 >"$Q/box.hash"
-expect quick_box_tests_setup "$(quick_box_tests 7)" "runs=6 BOX-TEST due=yes passed"
+expect quick_box_tests_setup "$(quick_box_tests 7)" "runs=3 BOX-TEST due=yes passed"
 : >"$Q/box-tests-fail"
 echo '# another changed box file' >>"$lib_test_work/quick-box/breaks.sh"
-expect quick_box_tests_failed "$(quick_box_tests 8)" "runs=8 "
-expect quick_box_tests_refused "$(grep -c '^REFUSED fields_test ' "$Q/q8.out")" 1
-expect quick_box_tests_after_failed "$(quick_box_tests 9)" "runs=10 "
+expect quick_box_tests_failed "$(quick_box_tests 8)" "runs=4 "
+expect quick_box_tests_refused "$(grep -c '^REFUSED lib_test ' "$Q/q8.out")" 1
+expect quick_box_tests_after_failed "$(quick_box_tests 9)" "runs=5 "
 rm -f "$Q/box-tests-fail"
-expect quick_box_tests_after_fixed "$(quick_box_tests 10)" "runs=12 BOX-TEST due=yes passed"
+expect quick_box_tests_after_fixed "$(quick_box_tests 10)" "runs=6 BOX-TEST due=yes passed"
 
 # The run of the value arm emptyguards with the tier output $2, the reached line $3 and the disagreement class $4, and value_verdict's verdict for it.
 value_verdict_of() {
@@ -1638,18 +1502,16 @@ for script in run.sh regen.sh breaks.sh; do
   expect "slice_in_$script" "$(run_out "$K")" "REFUSED free$([ "$script" != breaks.sh ] && echo ' run-exit=2') exit=2"
 done
 # Must fire: each entry script run outside the slice with the box's ORACLE_MEMORY sets its limits and runs itself again in a scope of it, before taking the lock.
-for script in run.sh regen.sh breaks.sh candidate.sh endorser-fixture.sh; do
+for script in run.sh regen.sh breaks.sh endorser-fixture.sh; do
   lock_root "slice-out-$script"
   slice_of "$K" /user.slice/user-0.slice 9999 max
   case $script in
-    candidate.sh) arg=dir ;;
     endorser-fixture.sh) arg=out ;;
     *) arg=done ;;
   esac
   (
-    CANDIDATE=c COMMIT=c NODE=n ENDPOINT=e SERVE_CONFIG=$K/config CANDIDATE_GRPC=g
-    TREE=t GRPCURL=g PEER=p LEIOS_DB=l ORACLE_MEMORY=24G
-    export CANDIDATE COMMIT NODE ENDPOINT SERVE_CONFIG CANDIDATE_GRPC TREE GRPCURL PEER LEIOS_DB ORACLE_MEMORY
+    ENDPOINT=e TREE=t GRPCURL=g PEER=p LEIOS_DB=l ORACLE_MEMORY=24G
+    export ENDPOINT TREE GRPCURL PEER LEIOS_DB ORACLE_MEMORY
     tier "$K" "" "$script" "$([ "$arg" = done ] && echo done || echo "$K/$arg")"
   )
   expect "slice_out_$script" "$(run_out "$K" | sed -e "s#$HERE/##g" -e "s#$K/##g")" \
@@ -1843,47 +1705,8 @@ gen3=$(harness_gen g3 fail)
 expect gen_unbuilt "$(gen_of "$gen3")" "value_harness exit=1 VALUE REFUSED generator=unbuilt
 build work=gen-root/value/generator-work out=gen-dir"
 
-# Writes a docker at $lib_test_work/node-cli/docker that answers inspect of a container with the image node:1, the user $1 and the environment A=1 and B=two words, and logs every other call and each line of the env file it is handed.
-node_docker() {
-  D=$lib_test_work/node-cli
-  rm -rf "$D"
-  mkdir -p "$D"
-  cat >"$D/docker" <<EOF
-#!/bin/sh
-case "\$1 \$3" in
-  "inspect {{.Config.Image}}") echo node:1 ;;
-  "inspect {{.Config.User}}") echo "$1" ;;
-  inspect*) printf 'A=1\nB=two words\n' ;;
-  *)
-    echo "\$*" | sed 's|--env-file [^ ]*|--env-file F|' >>"$D/docker.log"
-    prev=
-    for a; do
-      if [ "\$prev" = --env-file ]; then sed 's/^/env /' "\$a" >>"$D/docker.log"; fi
-      prev=\$a
-    done
-    ;;
-esac
-EOF
-  chmod +x "$D/docker"
-}
-
-# The docker calls node-cli.sh makes for a tip query through the docker shim in front of the docker of node_docker.
-node_cli_of() {
-  : >"$lib_test_work/node-cli/docker.log"
-  PATH=$HERE/bin:$PATH ORACLE_DOCKER=$lib_test_work/node-cli/docker ORACLE_SLICE=dolos-oracle.slice NODE=n \
-    sh "$HERE/node-cli.sh" latest query tip || echo "node-cli exit=$?"
-  cat "$lib_test_work/node-cli/docker.log"
-}
-
 # Must not fire: no box script runs a command in another container, whose memory the oracle slice does not bound.
-expect node_cli_no_exec "$(cd "$HERE" && grep -l 'docker exec' -- *.sh | grep -v '^lib_test.sh$')" ""
-# Must run cardano-cli in a container of the node's image, user, environment and volumes that the shim places in the slice.
-node_docker ""
-expect node_cli_root "$(node_cli_of)" "run --cgroup-parent dolos-oracle.slice --oom-score-adj 1000 --rm --network none --volumes-from n --env-file F --user 0 --entrypoint cardano-cli node:1 latest query tip
-env A=1
-env B=two words"
-node_docker 1000:1000
-expect node_cli_user "$(node_cli_of | head -1)" "run --cgroup-parent dolos-oracle.slice --oom-score-adj 1000 --rm --network none --volumes-from n --env-file F --user 1000:1000 --entrypoint cardano-cli node:1 latest query tip"
+expect no_docker_exec "$(cd "$HERE" && grep -l 'docker exec' -- *.sh | grep -v '^lib_test.sh$')" ""
 
 # Writes the captured endorser block into a LeiosDb of a layout, a change and the schemas named, then prints node-eb's exit and either same, when it prints the line write_leiosdb.py says it must, or its refusal.
 node_eb_of() {

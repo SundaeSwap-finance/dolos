@@ -1,4 +1,4 @@
-# Functions and defaults the oracle box scripts share, reading ROOT, SCRATCH, REV, BASE, JUDGED, MIN_FREE_G, OUT, HERE, TARGET, LIVE_ENV, SYNC_SLOTS_PER_S, IN_IMAGE, LOCK_POLL_SECONDS, RUN_LOCK, LAST_DONE, LAST_BOX_TEST, BOX_SETUP_HASH, SERVE_CONFIG, CANDIDATE_GRPC, CANDIDATE_FSYNC, NODE, ENDPOINT, GRPCURL, the ORACLE_ slice settings, CGROUP_FILE, CGROUP_ROOT, the IO_ limits and VALUE_HARNESS_URL.
+# Functions and defaults the oracle box scripts share, reading ROOT, SCRATCH, REV, BASE, JUDGED, MIN_FREE_G, OUT, HERE, TARGET, IN_IMAGE, LOCK_POLL_SECONDS, RUN_LOCK, LAST_DONE, LAST_BOX_TEST, BOX_SETUP_HASH, the ORACLE_ slice settings, CGROUP_FILE, CGROUP_ROOT and VALUE_HARNESS_URL.
 
 PALLAS=${PALLAS:-scratch/pallas}
 SCRATCH=${SCRATCH:-scratch/dolos}
@@ -12,7 +12,6 @@ REV=${REV:-feat/ledger-oracle}
 MIN_FREE_G=${MIN_FREE_G:-6}
 OUT=${OUT:-"$ROOT/runs/$(date -u +%Y%m%dT%H%M%SZ)"}
 IN_IMAGE=${IN_IMAGE:-$HERE/in-image.sh}
-GRPCURL=${GRPCURL:-grpcurl}
 # The Dolos path of the box scripts, which holds the arms manifest and each arm's plant and records.
 BOX_PATH=oracle/box
 # The Dolos test module that judges the corpora and the live node.
@@ -467,13 +466,6 @@ free_g() {
   echo $(($(df -B1 --output=avail "$1" | tail -1 | tr -dc 0-9) / 1073741824))
 }
 
-# The whole gibibytes the store at $1 holds, rounded up, or a failure when du cannot read it.
-store_size_g() {
-  bytes=$(du -sb "$1") || return 1
-  bytes=${bytes%%[!0-9]*}
-  echo $(((bytes + 1073741823) / 1073741824))
-}
-
 # Exits when the build root has less than MIN_FREE_G gigabytes free.
 require_free() {
   free=$(free_g "$ROOT")
@@ -666,114 +658,6 @@ arm_jobs() {
   slice_memory=$(slice_limits | sed -n 's/^memory=\([0-9]*\) .*/\1/p')
   arm_fit=$((slice_memory / ARM_MEMORY))
   echo $((arm_fit > 0 ? arm_fit : 1))
-}
-
-# The names of a candidate's config files in its store.
-CONFIG_FILES="dolos.toml byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json dijkstra-genesis.json"
-
-# Writes the candidate's config into the dir $1: the serving genesis files, and the serving dolos.toml without its serve sections followed by the candidate's grpc listener.
-write_config() {
-  for file in $CONFIG_FILES; do
-    case $file in
-      dolos.toml)
-        awk '/^\[/ { skip = ($0 ~ /^\[serve/) } !skip' "$SERVE_CONFIG/dolos.toml" >"$1/dolos.toml"
-        printf '[serve.grpc]\nlisten_address = "%s"\n' "$CANDIDATE_GRPC" >>"$1/dolos.toml"
-        ;;
-      *) cat "$SERVE_CONFIG/$file" >"$1/$file" ;;
-    esac
-  done
-}
-
-# The candidate's fsync mode from CANDIDATE_FSYNC, off when unset, where off runs it with libeatmydata preloaded so its sync calls return without writing, refusing any value but off or on.
-candidate_fsync() {
-  case ${CANDIDATE_FSYNC:-off} in
-    off | on) echo "${CANDIDATE_FSYNC:-off}" ;;
-    *)
-      echo "LIVE-CANDIDATE REFUSED candidate_fsync=$CANDIDATE_FSYNC want=off,on" >&2
-      return 2
-      ;;
-  esac
-}
-
-# The fsync state of a process from its maps in the file $1, off when they name libeatmydata, on when they name libc but not libeatmydata, which the loader maps before libc, and unknown when they name neither or cannot be read.
-fsync_state() {
-  if grep -q eatmydata "$1" 2>/dev/null; then
-    echo fsync=off
-  elif grep -q '/libc\.so' "$1" 2>/dev/null; then
-    echo fsync=on
-  else
-    echo fsync=unknown
-  fi
-}
-
-# The slot of the wall clock, from the system start and slot length of $SERVE_CONFIG/shelley-genesis.json.
-wall_slot() {
-  genesis=$SERVE_CONFIG/shelley-genesis.json
-  start=$(jq -er .systemStart "$genesis") || return 1
-  start=$(date -u -d "$start" +%s) || return 1
-  length=$(jq -er .slotLength "$genesis") || return 1
-  awk -v now="$(date +%s)" -v start="$start" -v len="$length" 'BEGIN { printf "%d\n", (now - start) / len }'
-}
-
-# The slots a second a candidate syncs from genesis beside the serving Dolos.
-SYNC_SLOTS_PER_S=${SYNC_SLOTS_PER_S:-291}
-
-# The minutes a sync to the node slot $1 may take at $2 slots a second, half again the projected time, rounded up.
-sync_minutes() {
-  echo $(((3 * $1 + 120 * $2 - 1) / (120 * $2)))
-}
-
-# The limits of the IO guard on the node's lag behind the wall clock, the serving Dolos's lag behind the node and its ReadTip time, and the run of samples over a limit that breaches it.
-IO_NODE_LAG_S=${IO_NODE_LAG_S:-120}
-IO_SERVE_LAG_SLOTS=${IO_SERVE_LAG_SLOTS:-60}
-IO_SERVE_MS=${IO_SERVE_MS:-2000}
-IO_BREACH_SAMPLES=3
-
-# One LIVE-IO sample of the node tip's lag behind the wall clock in seconds, the serving Dolos tip's lag behind the node tip in slots and the serving Dolos's ReadTip time in milliseconds, each failed read printed as failed.
-io_line() {
-  wall=$(wall_slot) || wall=
-  node=$(sh "$HERE/node-cli.sh" latest query tip 2>/dev/null | jq -r '.slot // empty') || node=
-  before=$(date +%s%N)
-  serve=$("$GRPCURL" -max-time 10 -d '{}' "$ENDPOINT" utxorpc.v1.sync.SyncService/ReadTip 2>/dev/null |
-    jq -r '.tip.slot // empty') || serve=
-  ms=$((($(date +%s%N) - before) / 1000000))
-  node_lag=failed
-  serve_lag=failed
-  if [ -n "$wall" ] && [ -n "$node" ]; then
-    node_lag=$((wall - node))
-  fi
-  if [ -z "$serve" ]; then
-    ms=failed
-  elif [ -n "$node" ]; then
-    serve_lag=$((node - serve))
-  fi
-  echo "LIVE-IO node_lag_s=$node_lag serve_lag_slots=$serve_lag serve_ms=$ms"
-}
-
-# The run of consecutive LIVE-IO samples over a limit, from the run $1 before the sample line $2, a value that is missing or not a whole number counting as over.
-io_streak() {
-  over=0
-  for limit in "node_lag_s $IO_NODE_LAG_S" "serve_lag_slots $IO_SERVE_LAG_SLOTS" "serve_ms $IO_SERVE_MS"; do
-    value=$(echo " $2 " | sed -n "s/.* ${limit% *}=\([^ ]*\) .*/\1/p")
-    case ${value#-} in
-      '' | *[!0-9]*) over=1 ;;
-      *)
-        if [ "$value" -gt "${limit#* }" ]; then
-          over=1
-        fi
-        ;;
-    esac
-  done
-  if [ "$over" -eq 1 ]; then
-    echo $(($1 + 1))
-  else
-    echo 0
-  fi
-}
-
-# Whether a run of $1 samples over a limit breaches the IO guard.
-io_breached() {
-  [ "$1" -ge "$IO_BREACH_SAMPLES" ]
 }
 
 # The pallas commit the scratch tree's Cargo.toml pins pallas-validate to.
@@ -1100,25 +984,6 @@ changed_files() {
   fi | sed "s#^#$4#"
 }
 
-# The first dep-info file rustc wrote beside one of the output files of a unit, its outputs given comma separated.
-dep_info() {
-  echo "$1" | tr , '\n' | while read -r out; do
-    out=${out#/w/}
-    stem=$(basename "$out" | sed -E 's/^lib(.*)\.(rlib|rmeta|so|a)$/\1/')
-    # A build script's output is a link named build-script-<name> in a dir named after the package and the unit hash.
-    case $stem in
-      build-script-*)
-        dir=$(dirname "$out")
-        stem="$(echo "$stem" | tr - _)-${dir##*-}"
-        ;;
-    esac
-    if [ -f "$ROOT/$(dirname "$out")/$stem.d" ]; then
-      echo "$ROOT/$(dirname "$out")/$stem.d"
-      break
-    fi
-  done
-}
-
 # The output files of each unit a message file names, comma separated, one line per unit, only the fresh ones when $2 is fresh.
 units() {
   only=
@@ -1131,24 +996,84 @@ units() {
 
 # One line for each unit cargo reports fresh whose dep-info names a file changed between the trees of its last build and the trees $2 and $3, or that has no dep-info.
 fresh_reading() {
-  units "$1" fresh | while read -r outs; do
-    built=$(awk -v outs="$outs" '$3 == outs { print $1, $2 }' "$BUILT" 2>/dev/null || true)
-    built=${built:-none none}
-    changed="$1.changed-$(echo "$built" | tr ' ' -)"
-    if [ ! -f "$changed" ]; then
+  units "$1" fresh >"$1.fresh"
+  fresh_built=$BUILT
+  if [ ! -f "$fresh_built" ]; then
+    fresh_built=/dev/null
+  fi
+  # The trees each fresh unit was last built from, none for a unit with no record, and the files changed since each pair of them.
+  awk 'NR == FNR { built[$3] = $1 " " $2; next } { print ($0 in built) ? built[$0] : "none none" }' "$fresh_built" "$1.fresh" |
+    sort -u | while read -r fresh_dolos fresh_pallas; do
       {
-        changed_files "$ROOT/$SCRATCH" "${built% *}" "$2" ""
-        changed_files "$ROOT/$PALLAS" "${built#* }" "$3" "/w/$PALLAS/"
-      } >"$changed"
-    fi
-    d=$(dep_info "$outs")
-    if [ -z "$d" ]; then
-      echo "STALE unit=$outs dep_info=missing"
-      continue
-    fi
-    tr ' ' '\n' <"$d" | sed "s/:\$//; s#^/w/$SCRATCH/##" | grep -x -F -f "$changed" | sort -u |
-      sed "s#^#STALE unit=$outs file=#"
-  done
+        changed_files "$ROOT/$SCRATCH" "$fresh_dolos" "$2" ""
+        changed_files "$ROOT/$PALLAS" "$fresh_pallas" "$3" "/w/$PALLAS/"
+      } >"$1.changed-$fresh_dolos-$fresh_pallas"
+    done
+  # The dep-info of a unit is the first file <stem>.d beside one of its outputs, the stem of a build script output build-script-<name> in a dir ending in its unit hash being build_script_<name>-<hash>.
+  awk -v root="$ROOT" -v scratch="/w/$SCRATCH/" -v changed="$1.changed-" '
+    function dep_info(outs, o, n, i, out, dir, stem, hash, path, line) {
+      n = split(outs, o, ",")
+      for (i = 1; i <= n; i++) {
+        out = o[i]
+        sub(/^\/w\//, "", out)
+        dir = out
+        if (!sub(/\/[^\/]*$/, "", dir)) dir = "."
+        stem = out
+        sub(/^.*\//, "", stem)
+        if (stem ~ /^lib.*\.(rlib|rmeta|so|a)$/) {
+          sub(/^lib/, "", stem)
+          sub(/\.(rlib|rmeta|so|a)$/, "", stem)
+        }
+        if (stem ~ /^build-script-/) {
+          gsub(/-/, "_", stem)
+          hash = dir
+          sub(/^.*-/, "", hash)
+          stem = stem "-" hash
+        }
+        path = root "/" dir "/" stem ".d"
+        if ((getline line < path) >= 0) {
+          close(path)
+          return path
+        }
+      }
+      return ""
+    }
+    NR == FNR { built[$3] = $1 "-" $2; next }
+    {
+      pair = ($0 in built) ? built[$0] : "none-none"
+      if (!(pair in loaded)) {
+        loaded[pair] = 1
+        file = changed pair
+        while ((getline line < file) > 0) is_changed[pair, line] = 1
+        close(file)
+      }
+      d = dep_info($0)
+      if (d == "") {
+        print "STALE unit=" $0 " dep_info=missing"
+        next
+      }
+      n = 0
+      split("", seen)
+      while ((getline line < d) > 0) {
+        count = split(line, words, " ")
+        for (w = 1; w <= count; w++) {
+          word = words[w]
+          sub(/:$/, "", word)
+          if (index(word, scratch) == 1) word = substr(word, length(scratch) + 1)
+          if (((pair, word) in is_changed) && !(word in seen)) {
+            seen[word] = 1
+            k = ++n
+            while (k > 1 && sorted[k - 1] > word) {
+              sorted[k] = sorted[k - 1]
+              k--
+            }
+            sorted[k] = word
+          }
+        }
+      }
+      close(d)
+      for (k = 1; k <= n; k++) print "STALE unit=" $0 " file=" sorted[k]
+    }' "$fresh_built" "$1.fresh"
 }
 
 # Records the trees $2 and $3 for each unit a message file names, keeping the record of every other unit.
@@ -1229,20 +1154,16 @@ box_test_inputs() {
   echo "box=$(cat "$BOX_SETUP_HASH" 2>/dev/null || echo none) files=$( (cd "$HERE" && find . -type f -exec sha256sum {} + | LC_ALL=C sort -k2) | sha256sum | cut -c1-16)"
 }
 
-# Exits when the test of the box functions or of the field comparison fails, and runs them only when their inputs differ from those of their last pass.
+# Exits when the test of the box functions fails, and runs it only when its inputs differ from those of its last pass.
 require_lib_test() {
   inputs=$(box_test_inputs)
   if ! leg_due "$LAST_BOX_TEST" "$inputs"; then
     echo "BOX-TEST due=no inputs=$inputs"
     return
   fi
-  mkdir -p "$OUT/lib-test" "$OUT/fields-test"
+  mkdir -p "$OUT/lib-test"
   if ! sh "$HERE/lib_test.sh" "$OUT/lib-test" >"$OUT/lib-test.log" 2>&1; then
     echo "REFUSED lib_test log=$OUT/lib-test.log"
-    exit 2
-  fi
-  if ! sh "$HERE/fields_test.sh" "$OUT/fields-test" >"$OUT/fields-test.log" 2>&1; then
-    echo "REFUSED fields_test log=$OUT/fields-test.log"
     exit 2
   fi
   mkdir -p "$(dirname "$LAST_BOX_TEST")"
@@ -1257,55 +1178,4 @@ require_build_image() {
     exit 2
   fi
   export BUILD_IMAGE
-}
-
-# The file the live leg reads ENDPOINT, NODE, NODE_DB, GRPCURL, SERVE_CONFIG and CANDIDATE_GRPC from.
-LIVE_ENV=${LIVE_ENV:-$ROOT/live.env}
-
-# Builds Dolos from the scratch tree into $OUT/bin/dolos.
-build_candidate() {
-  mkdir -p "$OUT/bin"
-  if ! built=$(build_checked "$OUT/bin/dolos.build" build --release --locked --bin dolos); then
-    echo "LIVE-CANDIDATE build_failed $built"
-    return 1
-  fi
-  dolos=$(executable "$OUT/bin/dolos.build")
-  cp "$ROOT${dolos#/w}" "$OUT/bin/dolos"
-}
-
-# Builds the live judge from the scratch tree into $OUT/bin/judge.
-build_live_judge() {
-  mkdir -p "$OUT/bin"
-  if ! built=$(build_judge "$OUT/bin/judge.build" --locked); then
-    echo "LIVE-CANDIDATE judge_build_failed $built"
-    return 1
-  fi
-  judge=$(executable "$OUT/bin/judge.build")
-  cp "$ROOT${judge#/w}" "$OUT/bin/judge"
-}
-
-# Prints the verdict lines of the candidate's log in the reads dir $1.
-candidate_lines() {
-  grep -E '^(LIVE-CANDIDATE|LIVE-IO|LIVE-FIELD|LIVE-FIELD-SPENT|LIVE-FIELDS|LIVE) ' "$1/candidate.log" |
-    cut -c1-400 || true
-}
-
-# Syncs the candidate $1, a binary path or an image, of the commit $commit from the node and compares its reads with the serving Dolos field by field, reading into $OUT/live and logging to $OUT/live/candidate.log.
-sync_candidate() {
-  set -a
-  . "$LIVE_ENV"
-  set +a
-  mkdir -p "$OUT/live"
-  fields=0
-  CANDIDATE=$1 COMMIT=$commit sh "$HERE/candidate.sh" "$OUT/live" >"$OUT/live/candidate.log" 2>&1 || fields=$?
-  candidate_lines "$OUT/live"
-  return "$fields"
-}
-
-# Judges the candidate's reads against the node with $OUT/bin/judge, logging to $OUT/live.log.
-judge_live() {
-  # The judge runs in the run's own dir, since the arms check other commits out in the scratch tree meanwhile.
-  [ -f "$OUT/bin/judge" ] && [ -f "$OUT/live/candidate/image.txt" ] &&
-    run_into_log "$OUT/live.log" env LIVE_DIR="/w/${OUT#"$ROOT"/}/live/candidate" sh "$IN_IMAGE" "${OUT#"$ROOT"/}" \
-      "/w/${OUT#"$ROOT"/}/bin/judge" "$ORACLE_TESTS::live::live" --exact --ignored --nocapture
 }

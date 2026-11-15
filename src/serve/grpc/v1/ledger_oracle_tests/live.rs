@@ -470,7 +470,7 @@ fn compare_served_utxos(dir: &Path, tally: &mut Tally) -> Option<usize> {
 }
 
 #[test]
-#[ignore = "judges a live Dolos endpoint against its node from reads written by oracle/box/live.sh"]
+#[ignore = "judges a live Dolos endpoint against its node from the reads in LIVE_DIR"]
 fn live() {
     let dir = PathBuf::from(std::env::var("LIVE_DIR").expect("LIVE_DIR names the reads directory"));
     let known = manifest::known().unwrap_or_else(|e| panic!("{e}")).live;

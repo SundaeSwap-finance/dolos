@@ -1,6 +1,6 @@
 # The Dolos oracle
 
-`oracle/box/run.sh` judges a Dolos commit in one of two tiers. Each tier judges the commit (the head) on the oracle's corpora and judges planted defects (the arms in `box/arms.toml`), each of which must be caught. Each tier first runs the box tests (`box/lib_test.sh` and `box/fields_test.sh`) when the box setup hash or a file of `box` differs from their last passing run. Each tier also runs the value leg (`box/value.sh`, the pallas conformance harness) and the amaru leg (`box/amaru.sh`, the amaru-uplc conformance test) when their inputs differ from those of their last passing run.
+`oracle/box/run.sh` judges a Dolos commit in one of two tiers. Each tier judges the commit (the head) on the oracle's corpora and judges planted defects (the arms in `box/arms.toml`), each of which must be caught. Each tier first runs the box tests (`box/lib_test.sh`) when the box setup hash or a file of `box` differs from their last passing run. Each tier also runs the value leg (`box/value.sh`, the pallas conformance harness) and the amaru leg (`box/amaru.sh`, the amaru-uplc conformance test) when their inputs differ from those of their last passing run.
 
 On a builder box, `oracle-run <tier> <run name> <full commit id>` runs a tier, as the musashi-node README describes.
 
@@ -10,7 +10,7 @@ Checks the head, the control (the head on every arm's records) and the arms whos
 
 Run it on every iteration of a change, on a builder box.
 
-Takes about 3 minutes when the change touches no arm (164 s, measured on builder-1), and about 8 when no done run has passed on the box, since every arm runs then (502 s, measured on builder-1).
+Takes about 2 minutes when the change touches no arm (121 s, measured on builder-2), and about 8 when no done run has passed on the box, since every arm runs then (502 s, measured on builder-1).
 
 ## done
 
@@ -26,4 +26,4 @@ A tier runs a leg only when its inputs (the pinned pallas, its box files and its
 
 ## Manifests
 
-`oracle/box/regen.sh` writes the manifest lines the corpus judge and the live judge propose into `$ROOT/regen` and prints how each differs from the committed file. It builds the commit and syncs it from genesis against the node, so it runs on musashi-aws, and a sync from genesis takes over two hours (estimated, from slot 1441438 of a tip near slot 2349000 in 4006 s, measured on musashi-aws).
+`oracle/box/regen.sh` writes the manifest lines the corpus judge proposes into `$ROOT/regen` and prints how each differs from the committed file. On a builder box, `ROOT=/opt/oracle REV=<full commit id> ORACLE_MEMORY=24G sh oracle/box/regen.sh` runs it, in about 2 minutes (136 s, measured on builder-2).

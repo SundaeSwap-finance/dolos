@@ -1,10 +1,13 @@
 use std::{
+    any::Any,
     collections::{BTreeMap, BTreeSet},
     convert::Infallible,
+    future::Future,
     time::Duration,
 };
 
 use dolos_core::{BlockHash, ChainPoint};
+use futures_util::StreamExt as _;
 use ledger_oracle_judge::{
     cbor::TxIn,
     compare::{OutputRoute, UtxoRoute},
@@ -93,16 +96,63 @@ fn unpanicked<T>(answers: Answers<T, String>) -> Option<Answers<T, Infallible>> 
     unpanicked.collect()
 }
 
+/// What a read answers, or the message of its panic.
+fn answered<T>(
+    read: Result<Result<T, tonic::Status>, Box<dyn Any + Send>>,
+) -> ReadTxAnswer<T, String> {
+    match read {
+        Err(payload) => {
+            ReadTxAnswer::Panicked(super::validate::panic_message(payload).replace('\n', " "))
+        }
+        Ok(Err(status)) => ReadTxAnswer::Status(status),
+        Ok(Ok(answer)) => ReadTxAnswer::Answered(answer),
+    }
+}
+
+/// What each of the hashes answers, with at most `limit` reads in flight and a
+/// panic of a read caught.
+pub(super) async fn read_each<T, R>(
+    hashes: &BTreeSet<[u8; 32]>,
+    limit: usize,
+    read: impl Fn([u8; 32]) -> R,
+) -> Answers<T, String>
+where
+    T: Send + 'static,
+    R: Future<Output = Result<T, tonic::Status>> + Send + 'static,
+{
+    let reads = futures_util::stream::iter(hashes.iter().copied())
+        .map(|hash| {
+            let reading = tokio::spawn(read(hash));
+            async move {
+                (
+                    hash,
+                    reading.await.map_err(tokio::task::JoinError::into_panic),
+                )
+            }
+        })
+        .buffer_unordered(limit);
+    reads
+        .map(|(hash, read)| (hash, answered(read)))
+        .collect()
+        .await
+}
+
 impl ReadTxs<String> {
     /// What ReadTx answers at every version for each of the hashes.
     pub(super) async fn read(
         domain: &crate::adapters::DomainAdapter,
         hashes: &BTreeSet<[u8; 32]>,
     ) -> Self {
+        let limit = std::thread::available_parallelism().map_or(1, usize::from);
+        let (v1, v1beta, v1alpha) = tokio::join!(
+            v1::read_txs(domain, hashes, limit),
+            v1beta::read_txs(domain, hashes, limit),
+            v1alpha::read_txs(domain, hashes, limit),
+        );
         ReadTxs {
-            v1: v1::read_txs(domain, hashes).await,
-            v1beta: v1beta::read_txs(domain, hashes).await,
-            v1alpha: v1alpha::read_txs(domain, hashes).await,
+            v1,
+            v1beta,
+            v1alpha,
         }
     }
 
@@ -165,15 +215,14 @@ macro_rules! served_routes {
         keep_block: |$kb:ident, $b:ident| $keep_block:expr $(,)?
     ) => {
         pub(super) mod $version {
-            use std::{collections::BTreeSet, convert::Infallible, panic::AssertUnwindSafe};
+            use std::{collections::BTreeSet, convert::Infallible};
 
             use dolos_core::{BlockHash, ChainPoint};
-            use futures_util::{FutureExt as _, StreamExt as _};
+            use futures_util::StreamExt as _;
             use ledger_oracle_judge::cbor::TxIn;
             use tokio_util::sync::CancellationToken;
             use tonic::Request;
 
-            use super::super::validate::panic_message;
             use super::{hash32, Event, LatestParams, RouteServed, Served, Utxo, Utxos, NEXT};
             use super::{Answers, Messages, OutputRoute, ReadTxAnswer, UtxoRoute, Version};
             use crate::serve::grpc::$version::{
@@ -310,27 +359,20 @@ macro_rules! served_routes {
             pub(in super::super) async fn read_txs(
                 domain: &DomainAdapter,
                 hashes: &BTreeSet<[u8; 32]>,
+                limit: usize,
             ) -> Answers<Response, String> {
-                let mut answers = Answers::new();
-                for hash in hashes {
-                    let request = q::ReadTxRequest {
-                        hash: hash.to_vec().into(),
-                        ..Default::default()
-                    };
+                super::read_each(hashes, limit, |hash| {
                     let service = QueryServiceImpl::new(domain.clone());
-                    let answer = AssertUnwindSafe(service.read_tx(Request::new(request)))
-                        .catch_unwind()
-                        .await;
-                    let answer = match answer {
-                        Err(payload) => {
-                            ReadTxAnswer::Panicked(panic_message(payload).replace('\n', " "))
-                        }
-                        Ok(Err(status)) => ReadTxAnswer::Status(status),
-                        Ok(Ok(response)) => ReadTxAnswer::Answered(response.into_inner()),
-                    };
-                    answers.insert(*hash, answer);
-                }
-                answers
+                    async move {
+                        let request = q::ReadTxRequest {
+                            hash: hash.to_vec().into(),
+                            ..Default::default()
+                        };
+                        let response = service.read_tx(Request::new(request)).await;
+                        response.map(tonic::Response::into_inner)
+                    }
+                })
+                .await
             }
 
             /// The inputs ReadTx serves for each transaction hash it finds.
@@ -685,9 +727,13 @@ impl Streams {
     /// The inputs every stream serves for the next blocks and transactions of
     /// the event.
     pub(super) async fn read(self, event: Event, blocks: usize, txs: usize) -> Vec<RouteServed> {
+        let reads = self
+            .0
+            .map(|streams| tokio::spawn(streams.read(event, blocks, txs)));
         let mut served = Vec::new();
-        for streams in self.0 {
-            served.extend(streams.read(event, blocks, txs).await);
+        for read in reads {
+            let read = read.await;
+            served.extend(read.unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic())));
         }
         served
     }
@@ -780,4 +826,167 @@ fn one_panicked_answer_leaves_no_answers() {
         ),
     ]);
     assert!(unpanicked(answers).is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_hash_keeps_its_own_answer() {
+    let hashes: BTreeSet<[u8; 32]> = (0..32u8).map(|n| [n; 32]).collect();
+    let answers = read_each(&hashes, 4, |hash| async move {
+        for _ in 0..32 - hash[0] {
+            tokio::task::yield_now().await;
+        }
+        match hash[0] {
+            5 => Err(tonic::Status::not_found("none")),
+            n => Ok(n),
+        }
+    })
+    .await;
+    assert_eq!(answers.len(), 32);
+    for (hash, answer) in &answers {
+        match (hash[0], answer) {
+            (5, ReadTxAnswer::Status(status)) => assert_eq!(status.code(), tonic::Code::NotFound),
+            (n, ReadTxAnswer::Answered(answered)) if n != 5 => assert_eq!(*answered, n),
+            (n, other) => panic!("{n} {other:?}"),
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_panicking_read_is_named_for_its_hash_alone() {
+    let hashes: BTreeSet<[u8; 32]> = (0..4u8).map(|n| [n; 32]).collect();
+    let answers = read_each(&hashes, 4, |hash| async move {
+        if hash[0] == 2 {
+            panic!("mapping\nfailed");
+        }
+        Ok::<u8, tonic::Status>(hash[0])
+    })
+    .await;
+    assert!(matches!(&answers[&[2; 32]], ReadTxAnswer::Panicked(m) if m == "mapping failed"));
+    for n in [0, 1, 3] {
+        assert!(matches!(answers[&[n; 32]], ReadTxAnswer::Answered(a) if a == n));
+    }
+    assert_eq!(answers.len(), 4);
+}
+
+#[tokio::test]
+async fn reads_up_to_the_limit_are_in_flight_together() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let hashes: BTreeSet<[u8; 32]> = (0..4u8).map(|n| [n; 32]).collect();
+    let started = Arc::new(AtomicUsize::new(0));
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let reading = read_each(&hashes, 3, |hash| {
+        let (started, gate) = (started.clone(), gate.clone());
+        async move {
+            started.fetch_add(1, Ordering::SeqCst);
+            let _open = gate.acquire().await.expect("the gate is never closed");
+            Ok::<u8, tonic::Status>(hash[0])
+        }
+    });
+    let mut reading = std::pin::pin!(reading);
+    assert!(futures_util::poll!(reading.as_mut()).is_pending());
+    tokio::task::yield_now().await;
+    assert_eq!(started.load(Ordering::SeqCst), 3);
+    gate.add_permits(4);
+    assert_eq!(reading.await.len(), 4);
+}
+
+/// Streams of one version that answer with two empty routes once a gate opens,
+/// or panic.
+struct StreamsHeld {
+    version: Version,
+    started: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    gate: std::sync::Arc<tokio::sync::Semaphore>,
+    yields: usize,
+    panics: Option<&'static str>,
+}
+
+#[async_trait::async_trait]
+impl StreamsAt for StreamsHeld {
+    async fn read(self: Box<Self>, _: Event, _: usize, _: usize) -> [RouteServed; 2] {
+        self.started
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _open = self.gate.acquire().await.expect("the gate is never closed");
+        for _ in 0..self.yields {
+            tokio::task::yield_now().await;
+        }
+        if let Some(message) = self.panics {
+            panic!("{message}");
+        }
+        [OutputRoute::FollowTip, OutputRoute::WatchTx].map(|route| RouteServed {
+            route,
+            version: self.version,
+            subs: false,
+            served: Served::new(),
+            messages: Messages::default(),
+        })
+    }
+}
+
+/// Held streams at every version, with the count of reads started and the gate
+/// they wait on.
+fn streams_held(
+    panics: Option<&'static str>,
+) -> (
+    Streams,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    std::sync::Arc<tokio::sync::Semaphore>,
+) {
+    let started = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(3));
+    let held = |version, yields, panics| -> Box<dyn StreamsAt> {
+        Box::new(StreamsHeld {
+            version,
+            started: started.clone(),
+            gate: gate.clone(),
+            yields,
+            panics,
+        })
+    };
+    let streams = Streams([
+        held(Version::V1, 64, None),
+        held(Version::V1beta, 8, panics),
+        held(Version::V1alpha, 0, None),
+    ]);
+    (streams, started, gate)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stream_reads_keep_the_order_of_the_versions() {
+    let (streams, _, _) = streams_held(None);
+    let served = streams.read(Event::Apply, 1, 1).await;
+    let order: Vec<(Version, OutputRoute)> = served.iter().map(|r| (r.version, r.route)).collect();
+    assert_eq!(
+        order,
+        [
+            (Version::V1, OutputRoute::FollowTip),
+            (Version::V1, OutputRoute::WatchTx),
+            (Version::V1beta, OutputRoute::FollowTip),
+            (Version::V1beta, OutputRoute::WatchTx),
+            (Version::V1alpha, OutputRoute::FollowTip),
+            (Version::V1alpha, OutputRoute::WatchTx),
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[should_panic(expected = "FollowTip serves nothing")]
+async fn a_panicking_stream_read_panics_the_read() {
+    let (streams, _, _) = streams_held(Some("FollowTip serves nothing"));
+    streams.read(Event::Apply, 1, 1).await;
+}
+
+#[tokio::test]
+async fn the_streams_of_every_version_are_read_together() {
+    let (streams, started, gate) = streams_held(None);
+    gate.forget_permits(3);
+    let reading = streams.read(Event::Apply, 1, 1);
+    let mut reading = std::pin::pin!(reading);
+    assert!(futures_util::poll!(reading.as_mut()).is_pending());
+    tokio::task::yield_now().await;
+    assert_eq!(started.load(std::sync::atomic::Ordering::SeqCst), 3);
+    gate.add_permits(3);
+    assert_eq!(reading.await.len(), 6);
 }
