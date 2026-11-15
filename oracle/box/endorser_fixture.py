@@ -78,25 +78,40 @@ def read_rows(con, tables, eb):
     return body, txs
 
 
+def positions(bounds):
+    """The closure positions a txBounds value holds, four big endian bytes each."""
+    return [int.from_bytes(bounds[at : at + 4], "big") for at in range(0, len(bounds), 4)]
+
+
+def cut(closure, at):
+    """Each transaction's bytes in body order, cut from the closure between consecutive positions."""
+    return [closure[start:end] for start, end in zip(at, at[1:])]
+
+
 def read_closure(con, tables, eb):
     """The stored body, and each transaction's bytes in body order cut from the closure at its bounds, None where unfilled."""
     bodies = select(con, tables, "ebBodies", eb)
     if len(bodies) != 1:
         sys.exit(f"refused: {len(bodies)} ebBodies rows")
     body, bounds = bodies[0]
-    positions = [int.from_bytes(bounds[at : at + 4], "big") for at in range(0, len(bounds), 4)]
+    at = positions(bounds)
     closures = select(con, tables, "ebClosures", eb)
-    closure = closures[0][0] if closures else bytes(positions[-1])
+    closure = closures[0][0] if closures else bytes(at[-1])
     # The node allocates the closure as zeroes and writes each transaction into it as it arrives, so a transaction of only zero bytes is unfilled.
-    txs = [closure[start:end] for start, end in zip(positions, positions[1:])]
-    return body, [tx if any(tx) else None for tx in txs]
+    return body, [tx if any(tx) else None for tx in cut(closure, at)]
 
 
-# The columns each LeiosDb layout's reader reads from each of its tables beside ebHashBytes, rows as node release rc-2026w42 writes it and closure as rc-2026w43 to rc-2026w45 write it.
+def read_point(con, tables, eb):
+    """The stored body, and each transaction's bytes in body order cut from the closure at its bounds, None where its written marker is zero."""
+    ((_, written, bounds, body, closure),) = select(con, tables, "ebs", eb)
+    return body, [tx if marker else None for tx, marker in zip(cut(closure, positions(bounds)), written)]
+
+
+# The columns each LeiosDb layout's reader reads from each of its tables beside ebHashBytes, rows as node release rc-2026w42 writes it, closure as rc-2026w43 to rc-2026w45 write it and point as ouroboros-consensus 8a2a760c writes it.
 LAYOUTS = {
     "rows": (
         {
-            "ebs": ("ebSlot", "ebBytesSize"),
+            "ebs": ("ebSlot",),
             "ebTxs": ("txOffset", "txHashBytes", "txBytesSize"),
             "ebTxBytes": ("txOffset", "filled", "txBytes"),
         },
@@ -104,11 +119,15 @@ LAYOUTS = {
     ),
     "closure": (
         {
-            "ebs": ("ebSlot", "ebBytesSize"),
+            "ebs": ("ebSlot",),
             "ebBodies": ("body", "txBounds"),
             "ebClosures": ("txs",),
         },
         read_closure,
+    ),
+    "point": (
+        {"ebs": ("ebSlot", "txWritten", "txBounds", "body", "txs")},
+        read_point,
     ),
 }
 
@@ -141,9 +160,9 @@ def node_eb(db, tip, certifying, eb_hex):
     ebs = select(con, tables, "ebs", eb)
     if len(ebs) != 1:
         sys.exit(f"refused: {len(ebs)} ebs rows for {eb_hex}")
-    slot, size = ebs[0]
+    slot = ebs[0][0]
     body, txs = read(con, tables, eb)
-    if blake2b256(body) != eb or len(body) != size:
+    if blake2b256(body) != eb:
         sys.exit(f"refused: the body of {eb_hex} does not hash to it")
     entries = body_entries(body)
     if len(entries) != len(txs):

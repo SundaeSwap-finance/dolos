@@ -1,6 +1,6 @@
 """Writes the captured rc-2026w42 endorser block into a LeiosDb of the given schemas, and prints the node-eb line it must give.
 
-Usage: write_leiosdb.py <out db> <rows|closure|none> <none|unfilled|absent|tx-changed|body-changed> <schema name>...
+Usage: write_leiosdb.py <out db> <rows|closure|point|none> <none|unfilled|unmarked|absent|tx-changed|body-changed> <schema name>...
 """
 import gzip
 import hashlib
@@ -58,7 +58,12 @@ def main(out, layout, change, *schemas):
     con = sqlite3.connect(out)
     for schema in schemas:
         con.executescript(open(os.path.join(HERE, f"{schema}.sql")).read())
-    if layout != "none":
+    bounds = [0]
+    for tx in txs:
+        bounds.append(bounds[-1] + len(tx))
+    tx_bounds = b"".join(b.to_bytes(4, "big") for b in bounds)
+    body = eb[:-1] + bytes([eb[-1] ^ 1]) if change == "body-changed" else eb
+    if layout in ("rows", "closure"):
         con.execute("insert into ebs (ebSlot, ebHashBytes, ebBytesSize) values (?, ?, ?)", (SLOT, eb_hash, len(eb)))
     if layout == "rows":
         for offset, (tx, tx_bytes) in enumerate(zip(txs, stored)):
@@ -67,14 +72,16 @@ def main(out, layout, change, *schemas):
             con.execute("insert into ebTxs values (?, ?, ?, ?)", (eb_hash, offset, tx_hash, len(tx)))
             con.execute("insert into ebTxBytes values (?, ?, ?, ?)", (eb_hash, offset, filled, tx_bytes))
     if layout == "closure":
-        bounds = [0]
-        for tx in txs:
-            bounds.append(bounds[-1] + len(tx))
-        tx_bounds = b"".join(b.to_bytes(4, "big") for b in bounds)
-        body = eb[:-1] + bytes([eb[-1] ^ 1]) if change == "body-changed" else eb
         con.execute("insert into ebBodies values (?, ?, ?)", (eb_hash, tx_bounds, body))
         if change != "absent":
             con.execute("insert into ebClosures values (?, ?)", (eb_hash, b"".join(stored)))
+    if layout == "point":
+        unset = change in ("unfilled", "unmarked")
+        written = bytes(0 if unset and offset == CHANGED else 1 for offset in range(len(txs)))
+        con.execute(
+            "insert into ebs (ebSlot, ebHashBytes, txWritten, txBounds, body, txs) values (?, ?, ?, ?, ?, ?)",
+            (SLOT, eb_hash, written, tx_bounds, body, b"".join(stored)),
+        )
     con.commit()
     con.close()
     print(json.dumps({"slot": SLOT, "body": eb.hex(), "txs": [tx.hex() for tx in txs]}))
