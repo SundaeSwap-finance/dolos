@@ -50,8 +50,11 @@ where
         return Ok(HashMap::new());
     }
 
-    let chain_summary = dolos_cardano::eras::load_era_summary::<D>(domain.state())
-        .map_err(|e| Status::internal(format!("failed to load era summary: {e}")))?;
+    let chain_summary = super::run_blocking(domain, |domain| {
+        dolos_cardano::eras::load_era_summary::<D>(domain.state())
+            .map_err(|e| Status::internal(format!("failed to load era summary: {e}")))
+    })
+    .await?;
 
     let query = AsyncQueryFacade::new(domain.clone());
     let lookup_failed =

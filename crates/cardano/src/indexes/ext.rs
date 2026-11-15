@@ -4,9 +4,13 @@
 //! lookups to any `StateStore`, and `CardanoArchiveIndexExt`, which adds the
 //! history lookups to any `ArchiveStore`.
 
-use dolos_core::{ArchiveError, ArchiveStore, BlockSlot, StateError, StateStore, UtxoSet};
+use dolos_core::{
+    ArchiveError, ArchiveStore, BlockSlot, EntityKey, StateError, StateStore, UtxoSet,
+};
+use pallas::crypto::hash::Hash;
 
 use super::dimensions::{archive, utxo};
+use crate::model::{DatumState, DATUM_NS};
 
 /// Extension trait providing Cardano-specific live-UTxO queries.
 ///
@@ -52,6 +56,14 @@ pub trait CardanoStateIndexExt: StateStore {
     /// Get UTxOs that carry a script as their reference script.
     fn utxos_by_script_ref(&self, script_hash: &[u8]) -> Result<UtxoSet, StateError> {
         self.utxos_by_tag(utxo::SCRIPT_REF, script_hash)
+    }
+
+    /// Get the bytes of the datum with this hash.
+    fn datum(&self, datum_hash: &Hash<32>) -> Result<Option<Vec<u8>>, StateError> {
+        let datum: Option<DatumState> =
+            self.read_entity_typed(DATUM_NS, &EntityKey::from(*datum_hash))?;
+
+        Ok(datum.map(|x| x.bytes))
     }
 }
 
