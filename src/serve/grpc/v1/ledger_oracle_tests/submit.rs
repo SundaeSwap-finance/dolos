@@ -102,10 +102,16 @@ macro_rules! submit_routes {
             pub(in super::super) struct Watching(Stream);
 
             impl Watching {
-                /// Subscribes to the mempool of the domain.
+                /// Subscribes to the reference, bytes and stage of each transaction the
+                /// mempool of the domain receives.
                 pub(in super::super) async fn open(domain: &DomainAdapter) -> Self {
                     let service = SubmitServiceImpl::new(domain.clone());
-                    let request = s::WatchMempoolRequest::default();
+                    let mut request = s::WatchMempoolRequest::default();
+                    let paths = ["tx.ref", "tx.native_bytes", "tx.stage"].map(String::from);
+                    request
+                        .field_mask
+                        .get_or_insert_with(Default::default)
+                        .paths = paths.to_vec();
                     let stream = service.watch_mempool(Request::new(request)).await;
                     Watching(stream.unwrap().into_inner())
                 }
