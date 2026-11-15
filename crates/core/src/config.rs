@@ -4,7 +4,7 @@ use pallas::ledger::primitives::Epoch;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-use crate::{Cbor, Era, MempoolBound, TxoRef};
+use crate::{Cbor, ChainError, Era, Genesis, MempoolBound, TxoRef};
 
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
@@ -1124,7 +1124,7 @@ pub struct CustomUtxo {
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct CardanoConfig {
-    pub magic: u64,
+    pub magic: Option<u64>,
     pub is_testnet: bool,
     pub stop_epoch: Option<Epoch>,
 
@@ -1145,7 +1145,13 @@ impl Default for ChainConfig {
 }
 
 impl ChainConfig {
-    pub fn magic(&self) -> u64 {
+    pub fn magic(&self, genesis: &Genesis) -> Result<u64, ChainError> {
+        self.configured_magic()
+            .or(genesis.shelley.network_magic.map(u64::from))
+            .ok_or_else(|| ChainError::GenesisFieldMissing("network magic".into()))
+    }
+
+    pub fn configured_magic(&self) -> Option<u64> {
         match self {
             Self::Cardano(cfg) => cfg.magic,
         }
@@ -1153,7 +1159,7 @@ impl ChainConfig {
 
     pub fn set_magic(&mut self, magic: u64) {
         match self {
-            Self::Cardano(cfg) => cfg.magic = magic,
+            Self::Cardano(cfg) => cfg.magic = Some(magic),
         }
     }
 

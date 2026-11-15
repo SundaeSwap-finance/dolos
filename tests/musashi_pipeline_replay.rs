@@ -115,7 +115,7 @@ fn genesis() -> Arc<Genesis> {
 
 fn chain_config() -> CardanoConfig {
     CardanoConfig {
-        magic: NETWORK_MAGIC,
+        magic: Some(NETWORK_MAGIC),
         is_testnet: true,
         stop_epoch: None,
         custom_utxos: vec![],

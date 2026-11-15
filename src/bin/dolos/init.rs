@@ -173,7 +173,7 @@ impl From<&KnownNetwork> for PeerConfig {
 impl From<&KnownNetwork> for ChainConfig {
     fn from(value: &KnownNetwork) -> Self {
         ChainConfig::Cardano(CardanoConfig {
-            magic: value.magic(),
+            magic: Some(value.magic()),
             is_testnet: value.is_testnet(),
             ..Default::default()
         })
@@ -639,7 +639,11 @@ impl ConfigEditor {
     fn prompt_known_network(self) -> miette::Result<Self> {
         let options = KnownNetwork::VARIANTS.to_vec();
 
-        let selected = KnownNetwork::from_magic(self.0.chain.magic());
+        let selected = self
+            .0
+            .chain
+            .configured_magic()
+            .and_then(KnownNetwork::from_magic);
 
         let starting_cursor = selected
             .and_then(|x| options.iter().position(|y| y.eq(&x)))
@@ -671,7 +675,12 @@ impl ConfigEditor {
     fn prompt_remote_peer(self) -> miette::Result<Self> {
         let current = self.0.upstream.peer_address().unwrap_or_default();
 
-        let Some(network) = KnownNetwork::from_magic(self.0.chain.magic()) else {
+        let Some(network) = self
+            .0
+            .chain
+            .configured_magic()
+            .and_then(KnownNetwork::from_magic)
+        else {
             let value = Text::new("Which remote peer (relay) do you want to use?")
                 .with_default(current)
                 .prompt()

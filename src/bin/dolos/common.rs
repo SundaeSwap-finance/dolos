@@ -496,4 +496,88 @@ mod tests {
 
         assert!(result.is_ok(), "a signalled shutdown is not a failure");
     }
+
+    /// Writes the preview genesis files with `edit` applied to the shelley one
+    /// and a configuration naming them with `chain` in its chain section, and
+    /// loads both.
+    fn load_preview(
+        dir: &std::path::Path,
+        chain: &str,
+        edit: impl FnOnce(&mut serde_json::Value),
+    ) -> (RootConfig, Genesis) {
+        dolos_cardano::include::preview::save(dir).unwrap();
+        let shelley_path = dir.join("shelley.json");
+        let mut shelley: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&shelley_path).unwrap()).unwrap();
+        edit(&mut shelley);
+        std::fs::write(&shelley_path, shelley.to_string()).unwrap();
+
+        let path = |name: &str| toml::Value::String(dir.join(name).display().to_string());
+        let file = dir.join("dolos.toml");
+        std::fs::write(
+            &file,
+            format!(
+                r#"
+                [upstream]
+                peer_address = "unused.example:3001"
+
+                [storage]
+                path = {storage}
+
+                [genesis]
+                byron_path = {byron}
+                shelley_path = {shelley}
+                alonzo_path = {alonzo}
+                conway_path = {conway}
+
+                [chain]
+                type = "cardano"
+                is_testnet = true
+                {chain}
+                "#,
+                storage = path("data"),
+                byron = path("byron.json"),
+                shelley = path("shelley.json"),
+                alonzo = path("alonzo.json"),
+                conway = path("conway.json"),
+            ),
+        )
+        .unwrap();
+
+        let config = load_config(&Some(file)).unwrap();
+        let genesis = open_genesis_files(&config.genesis).unwrap();
+        (config, genesis)
+    }
+
+    #[test]
+    fn a_magic_the_config_states_wins_over_the_genesis() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, genesis) = load_preview(dir.path(), "magic = 164", |_| {});
+
+        assert_eq!(genesis.network_magic(), 2);
+        assert_eq!(config.chain.magic(&genesis).unwrap(), 164);
+    }
+
+    #[test]
+    fn a_config_without_magic_takes_the_genesis_network_magic() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, genesis) = load_preview(dir.path(), "", |_| {});
+
+        assert_eq!(genesis.network_magic(), 2);
+        assert_eq!(config.chain.magic(&genesis).unwrap(), 2);
+    }
+
+    #[test]
+    fn a_magic_neither_the_config_nor_the_genesis_states_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, genesis) = load_preview(dir.path(), "", |shelley| {
+            shelley.as_object_mut().unwrap().remove("networkMagic");
+        });
+
+        assert_eq!(genesis.shelley.network_magic, None);
+        assert!(matches!(
+            config.chain.magic(&genesis),
+            Err(ChainError::GenesisFieldMissing(field)) if field == "network magic"
+        ));
+    }
 }

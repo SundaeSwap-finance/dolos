@@ -85,7 +85,7 @@ fn fixture_from(case: &Path) -> (ToyDomain, Vec<u8>) {
     let domain = ToyDomain::new_with_genesis_and_config(
         Arc::new(genesis),
         CardanoConfig {
-            magic: 164,
+            magic: Some(164),
             is_testnet: true,
             stop_epoch: None,
             custom_utxos: vec![],

@@ -121,7 +121,7 @@ pub(crate) fn musashi_domain() -> ToyDomain {
     genesis.force_protocol = Some(11);
 
     let config = CardanoConfig {
-        magic: 164,
+        magic: Some(164),
         is_testnet: true,
         stop_epoch: None,
         custom_utxos: vec![],

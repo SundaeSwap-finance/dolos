@@ -50,7 +50,7 @@ fn musashi_bootstrap_uses_the_published_cost_models() {
     let domain = ToyDomain::new_with_genesis_and_config(
         Arc::new(genesis),
         CardanoConfig {
-            magic: 164,
+            magic: Some(164),
             is_testnet: true,
             stop_epoch: None,
             custom_utxos: vec![],

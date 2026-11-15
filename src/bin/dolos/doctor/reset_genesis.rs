@@ -11,7 +11,10 @@ pub struct Args {
 }
 
 fn infer_network(config: &RootConfig) -> Option<KnownNetwork> {
-    KnownNetwork::from_magic(config.chain.magic())
+    config
+        .chain
+        .configured_magic()
+        .and_then(KnownNetwork::from_magic)
 }
 
 pub fn run(config: &RootConfig, args: &Args) -> miette::Result<()> {

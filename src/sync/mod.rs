@@ -45,7 +45,10 @@ pub fn pipeline(
     retries: &Option<RetryConfig>,
 ) -> Result<Vec<gasket::runtime::Tether>, Error> {
     match upstream {
-        UpstreamConfig::Peer(cfg) => sync(config, chain.magic(), cfg, domain.clone(), retries),
+        UpstreamConfig::Peer(cfg) => {
+            let magic = chain.magic(&domain.genesis()).map_err(Error::config)?;
+            sync(config, magic, cfg, domain.clone(), retries)
+        }
         UpstreamConfig::Emulator(cfg) => devnet(cfg, domain.clone(), retries),
     }
 }

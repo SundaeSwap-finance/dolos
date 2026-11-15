@@ -1,4 +1,4 @@
-use dolos_core::config::RootConfig;
+use dolos_core::{config::RootConfig, Domain as _};
 use futures_util::stream::FuturesUnordered;
 use log::warn;
 use miette::{Context as _, IntoDiagnostic as _};
@@ -15,7 +15,11 @@ pub async fn run(config: RootConfig, _args: &Args) -> miette::Result<()> {
     let exit = crate::common::hook_exit_token();
 
     let drivers = FuturesUnordered::new();
-    let network_magic = config.chain.magic();
+    let network_magic = config
+        .chain
+        .magic(&domain.genesis())
+        .into_diagnostic()
+        .context("reading the network magic")?;
 
     dolos::serve::load_drivers(
         &drivers,

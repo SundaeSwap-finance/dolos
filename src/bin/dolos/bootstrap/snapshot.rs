@@ -53,12 +53,17 @@ impl Args {
 const DEFAULT_URL_TEMPLATE: &str =
     "https://dolos-snapshots.txpipe.cloud/${VERSION}/${NETWORK}/${VARIANT}/${POINT}.tar.gz";
 
-fn define_snapshot_url(config: &RootConfig, args: &Args) -> Option<String> {
+fn define_snapshot_url(config: &RootConfig, args: &Args) -> miette::Result<Option<String>> {
     if config.upstream.is_emulator() {
-        return None;
+        return Ok(None);
     }
 
-    let magic = config.chain.magic();
+    let genesis = crate::common::open_genesis_files(&config.genesis)?;
+    let magic = config
+        .chain
+        .magic(&genesis)
+        .into_diagnostic()
+        .context("reading the network magic")?;
 
     let download_url_template = config
         .snapshot
@@ -72,7 +77,7 @@ fn define_snapshot_url(config: &RootConfig, args: &Args) -> Option<String> {
         .replace("${POINT}", &args.point)
         .replace("${VARIANT}", &args.variant);
 
-    Some(snapshot_url)
+    Ok(Some(snapshot_url))
 }
 
 fn import_local_snapshot(config: &RootConfig, path: &PathBuf) -> miette::Result<()> {
@@ -104,7 +109,7 @@ fn fetch_snapshot(config: &RootConfig, args: &Args, feedback: &Feedback) -> miet
         .into_diagnostic()
         .context("Failed to create target directory")?;
 
-    let snapshot_url = define_snapshot_url(config, args).ok_or(miette::miette!(
+    let snapshot_url = define_snapshot_url(config, args)?.ok_or(miette::miette!(
         "can't find a valid snapshot for this configuration"
     ))?;
 
