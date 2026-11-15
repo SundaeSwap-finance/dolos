@@ -274,6 +274,25 @@ index fd504aac..fc162cc5 100644
                  ns.chain(p1).chain(p2).chain(p3).chain(p4).collect()
              }
  
+diff --git a/pallas-utxorpc/src/since_v1beta.rs b/pallas-utxorpc/src/since_v1beta.rs
+index 5c5c5498..df9742a5 100644
+--- a/pallas-utxorpc/src/since_v1beta.rs
++++ b/pallas-utxorpc/src/since_v1beta.rs
+@@ -41,7 +41,13 @@ macro_rules! impl_cardano_mapper_since_v1beta {
+                         u5c::Datum {
+                             hash: x.to_vec().into(),
+                             payload: witnessed.map(|d| self.map_plutus_datum(d)),
+-                            original_cbor: witnessed.map(|d| d.raw_cbor().to_vec().into()),
++                            original_cbor: if pallas_crypto::oracle_plant(
++                                "hash-datum-bytes-dropped",
++                            ) {
++                                None
++                            } else {
++                                witnessed.map(|d| d.raw_cbor().to_vec().into())
++                            },
+                         }
+                     }
+                 })
 diff --git a/pallas-utxorpc/src/v1/mod.rs b/pallas-utxorpc/src/v1/mod.rs
 index 40fb34e2..0d19c845 100644
 --- a/pallas-utxorpc/src/v1/mod.rs
@@ -287,10 +306,29 @@ index 40fb34e2..0d19c845 100644
                  .collect(),
              account_balance_intervals: tx
 diff --git a/pallas-utxorpc/src/v1alpha/mod.rs b/pallas-utxorpc/src/v1alpha/mod.rs
-index ce0755a2..f94c0435 100644
+index bf15fa19..78f51cbf 100644
 --- a/pallas-utxorpc/src/v1alpha/mod.rs
 +++ b/pallas-utxorpc/src/v1alpha/mod.rs
-@@ -224,7 +224,11 @@ impl<C: LedgerContext> Mapper<C> {
+@@ -91,10 +91,14 @@ impl<C: LedgerContext> Mapper<C> {
+                 u5c::Datum {
+                     hash: x.to_vec().into(),
+                     payload: witnessed.map(|d| self.map_plutus_datum(d)),
+-                    original_cbor: witnessed
+-                        .map(|d| d.raw_cbor().to_vec())
+-                        .unwrap_or_default()
+-                        .into(),
++                    original_cbor: if pallas_crypto::oracle_plant("hash-datum-bytes-dropped") {
++                        vec![].into()
++                    } else {
++                        witnessed
++                            .map(|d| d.raw_cbor().to_vec())
++                            .unwrap_or_default()
++                            .into()
++                    },
+                 }
+             }
+         })
+@@ -229,7 +233,11 @@ impl<C: LedgerContext> Mapper<C> {
                  total_collateral: u64_to_bigint(tx.total_collateral().unwrap_or_default()),
              }
              .into(),
@@ -304,7 +342,7 @@ index ce0755a2..f94c0435 100644
                  start: tx.validity_start().unwrap_or_default(),
                  ttl: tx.ttl().unwrap_or_default(),
 diff --git a/pallas-utxorpc/src/v1beta/mod.rs b/pallas-utxorpc/src/v1beta/mod.rs
-index c42b934c..00acf3c4 100644
+index 7b53d8a8..bfab0dc5 100644
 --- a/pallas-utxorpc/src/v1beta/mod.rs
 +++ b/pallas-utxorpc/src/v1beta/mod.rs
 @@ -132,7 +132,11 @@ impl<C: LedgerContext> Mapper<C> {
