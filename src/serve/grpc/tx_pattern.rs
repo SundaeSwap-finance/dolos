@@ -306,10 +306,32 @@ macro_rules! matchers {
                     .filter_map(|x| x.as_output.as_ref())
             };
             let outputs = || members.iter().flat_map(|x| x.outputs.iter());
+            let referenced = || {
+                members
+                    .iter()
+                    .flat_map(|x| x.reference_inputs.iter())
+                    .filter_map(|x| x.as_output.as_ref())
+            };
+            let collateral_inputs = || {
+                tx.collateral
+                    .iter()
+                    .flat_map(|x| x.collateral.iter())
+                    .filter_map(|x| x.as_output.as_ref())
+            };
+            let collateral_return = || {
+                tx.collateral
+                    .iter()
+                    .filter_map(|x| x.collateral_return.as_ref())
+            };
+            let moved = || {
+                inputs()
+                    .chain(collateral_inputs())
+                    .chain(collateral_return())
+                    .chain(outputs())
+            };
 
             let has_address_match = tx_pattern.has_address.as_ref().is_none_or(|addr_pattern| {
-                outputs_match_address(addr_pattern, inputs())
-                    || outputs_match_address(addr_pattern, outputs())
+                outputs_match_address(addr_pattern, moved().chain(referenced()))
             });
 
             let consumes_match = tx_pattern
@@ -321,10 +343,10 @@ macro_rules! matchers {
                 matches_asset(asset_pattern, members.iter().flat_map(|x| x.mint.iter()))
             });
 
-            let moves_asset_match = tx_pattern.moves_asset.as_ref().is_none_or(|asset_pattern| {
-                outputs_match_asset(asset_pattern, inputs())
-                    || outputs_match_asset(asset_pattern, outputs())
-            });
+            let moves_asset_match = tx_pattern
+                .moves_asset
+                .as_ref()
+                .is_none_or(|asset_pattern| outputs_match_asset(asset_pattern, moved()));
 
             let produces_match = tx_pattern
                 .produces

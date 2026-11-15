@@ -99,8 +99,12 @@ fn at_address_paying_to(paid: &Paid, payment_of: &[u8]) -> u5c::cardano::Address
     }
 }
 
-/// The references WatchTx answers for the block of `paid` under `pattern`.
-fn watch_tx_refs(paid: &Paid, pattern: u5c::cardano::TxPattern) -> Vec<Vec<u8>> {
+/// The references WatchTx answers for `block` over `context` under `pattern`.
+fn watch_tx_refs(
+    block: &RawBlock,
+    context: &impl ChainReads,
+    pattern: u5c::cardano::TxPattern,
+) -> Vec<Vec<u8>> {
     let request = u5c::watch::WatchTxRequest {
         predicate: Some(u5c::watch::TxPredicate {
             r#match: Some(u5c::watch::AnyChainTxPattern {
@@ -110,7 +114,7 @@ fn watch_tx_refs(paid: &Paid, pattern: u5c::cardano::TxPattern) -> Vec<Vec<u8>> 
         }),
         ..Default::default()
     };
-    super::super::watch::block_to_txs(&paid.block, &ToyDomain::new(None, None), &request)
+    super::super::watch::block_to_txs(block, context, &request)
         .map(|x| match x.chain {
             Some(u5c::watch::any_chain_tx::Chain::Cardano(tx)) => tx_hash(&tx),
             None => panic!("an unmasked answer holds its transaction"),
@@ -139,9 +143,151 @@ async fn watch_mempool_refs(
 /// `pattern`.
 async fn watch_answers(paid: &Paid, pattern: u5c::cardano::TxPattern) -> [Vec<Vec<u8>>; 2] {
     [
-        watch_tx_refs(paid, pattern.clone()),
+        watch_tx_refs(&paid.block, &ToyDomain::new(None, None), pattern.clone()),
         watch_mempool_refs(ToyDomain::new(None, None), &paid.tx, pattern).await,
     ]
+}
+
+/// A part of a transaction, besides its spent inputs and its outputs, that an
+/// address or asset pattern covers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Part {
+    Collateral,
+    CollateralReturn,
+    ReferenceInput,
+}
+
+/// A child of `parent` that spends and pays only the other address, and names
+/// the output at the paid address, or pays that address, in `part` alone, as a
+/// block of its own and as a mempool transaction.
+fn child_touching(parent: &Paid, part: Option<Part>) -> (RawBlock, MempoolTx) {
+    use pallas::codec::utils::NonEmptySet;
+    use pallas::ledger::primitives::conway::{Block, TransactionInput};
+
+    let (era, mut block): (u16, Block) = minicbor::decode(&parent.block).unwrap();
+    let body = &mut block.transaction_bodies[0];
+    let [at_address, at_elsewhere] = [0, 1].map(|i| body.outputs[i].clone());
+    let output = |index| TransactionInput {
+        transaction_id: parent.tx.hash(),
+        index,
+    };
+    let named_in = |covering| if part == Some(covering) { 0 } else { 1 };
+
+    body.inputs = vec![output(1)].into();
+    body.outputs = vec![at_elsewhere.clone()];
+    body.mint = None;
+    body.collateral = NonEmptySet::from_vec(vec![output(named_in(Part::Collateral))]);
+    body.collateral_return = Some(if part == Some(Part::CollateralReturn) {
+        at_address
+    } else {
+        at_elsewhere
+    });
+    body.reference_inputs = NonEmptySet::from_vec(vec![output(named_in(Part::ReferenceInput))]);
+
+    let raw = minicbor::to_vec((era, block)).unwrap();
+    let decoded = pallas::ledger::traverse::MultiEraBlock::decode(&raw).unwrap();
+    let tx = decoded.txs().remove(0);
+    let tx = MempoolTx::new(tx.hash(), EraCbor(tx.era().into(), tx.encode()), vec![]);
+    (std::sync::Arc::new(raw), tx)
+}
+
+/// A domain whose ledger holds the outputs of `parent`.
+fn ledger_holding_outputs_of(parent: &Paid) -> crate::adapters::DomainAdapter {
+    let decoded = MultiEraTx::decode_for_era(Era::Conway, parent.tx.payload().cbor()).unwrap();
+    let produced_utxo = decoded
+        .outputs()
+        .iter()
+        .enumerate()
+        .map(|(index, output)| {
+            (
+                TxoRef(decoded.hash(), index as TxoIdx),
+                std::sync::Arc::new(EraCbor(output.era().into(), output.encode())),
+            )
+        })
+        .collect();
+    let toy = ToyDomain::new(
+        Some(UtxoSetDelta {
+            produced_utxo,
+            ..Default::default()
+        }),
+        None,
+    );
+    crate::tests::toy_adapter(&toy)
+}
+
+/// A domain whose mempool holds `parent`.
+fn mempool_holding(parent: &Paid) -> ToyDomain {
+    let toy = ToyDomain::new(None, None);
+    toy.mempool().receive(parent.tx.clone()).unwrap();
+    toy
+}
+
+/// For each part, whether WatchTx, over a ledger holding the outputs of
+/// `parent`, and then WatchMempool, over a mempool holding `parent`, answer
+/// the child of `parent` touching it in that part under `pattern`.
+async fn admitted_by_part(
+    parent: &Paid,
+    parts: &[Option<Part>],
+    pattern: u5c::cardano::TxPattern,
+) -> Vec<(Option<Part>, [bool; 2])> {
+    let mut admitted = vec![];
+    for &part in parts {
+        let (block, tx) = child_touching(parent, part);
+        let answered = |refs: Vec<Vec<u8>>| match refs.as_slice() {
+            [] => false,
+            [only] if *only == tx.hash().to_vec() => true,
+            other => panic!("the answers name only the child: {other:?}"),
+        };
+        let watch_tx = watch_tx_refs(&block, &ledger_holding_outputs_of(parent), pattern.clone());
+        let watch_mempool = watch_mempool_refs(mempool_holding(parent), &tx, pattern.clone()).await;
+        admitted.push((part, [answered(watch_tx), answered(watch_mempool)]));
+    }
+    admitted
+}
+
+#[tokio::test]
+async fn watch_methods_match_has_address_on_collateral_and_reference_inputs() {
+    let parent = paid(true);
+    let pattern = u5c::cardano::TxPattern {
+        has_address: Some(at_address_paying_to(&parent, &parent.address)),
+        ..Default::default()
+    };
+    let parts = [
+        None,
+        Some(Part::Collateral),
+        Some(Part::CollateralReturn),
+        Some(Part::ReferenceInput),
+    ];
+    let expected: Vec<_> = parts
+        .iter()
+        .map(|&part| (part, [part.is_some(); 2]))
+        .collect();
+
+    assert_eq!(admitted_by_part(&parent, &parts, pattern).await, expected);
+}
+
+#[tokio::test]
+async fn watch_methods_match_moves_asset_on_collateral_but_not_a_reference_input() {
+    let parent = paid(true);
+    let pattern = u5c::cardano::TxPattern {
+        moves_asset: holding_at_address(&parent).asset,
+        ..Default::default()
+    };
+    let parts = [
+        None,
+        Some(Part::ReferenceInput),
+        Some(Part::Collateral),
+        Some(Part::CollateralReturn),
+    ];
+    let expected: Vec<_> = parts
+        .iter()
+        .map(|&part| {
+            let moved = matches!(part, Some(Part::Collateral | Part::CollateralReturn));
+            (part, [moved; 2])
+        })
+        .collect();
+
+    assert_eq!(admitted_by_part(&parent, &parts, pattern).await, expected);
 }
 
 #[tokio::test]
