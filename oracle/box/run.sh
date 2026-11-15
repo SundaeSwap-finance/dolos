@@ -11,6 +11,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/lib.sh"
 . "$HERE/value.sh"
 . "$HERE/amaru.sh"
+. "$HERE/n2n.sh"
 trap finish EXIT
 case ${1:-} in
   quick | done) ;;
@@ -91,7 +92,20 @@ judge_arms() {
   verdicts="$verdicts $fix_arms $(value_verdicts)"
 }
 
-# Judges the head, the control and every arm, and records the commit when every verdict passes.
+# Runs the node to node leg when its inputs differ from those of its last passing run, printing its lines and returning its verdict on the last line, the leg not run as n2n=passed-on-these-inputs.
+n2n_verdicts() {
+  inputs=$(n2n_inputs "$commit")
+  if leg_due "$LAST_N2N" "$inputs"; then
+    n2n_leg >"$OUT/n2n.out" 2>&1 || true
+    leg_verdicts n2n 's/^N2N \(n2n-head=[A-Z]*\).*/\1/p' "$LAST_N2N" "$inputs" >&2
+    echo "$checked"
+  else
+    echo "N2N due=no $inputs" >&2
+    echo n2n=passed-on-these-inputs
+  fi
+}
+
+# Judges the head, the control, every arm and the node to node leg, and records the commit when every verdict passes.
 done_run() {
   mkdir -p "$OUT"
   require_free
@@ -100,6 +114,7 @@ done_run() {
   reset_scratch
   commit=$(git -C "$ROOT/$SCRATCH" rev-parse HEAD)
   judge_arms
+  verdicts="$verdicts $(n2n_verdicts)"
   echo "DONE tier=done $verdicts commit=$commit logs=$OUT"
   record_pass "$commit" "$verdicts"
 }

@@ -34,7 +34,7 @@ use super::{
     show_input,
 };
 
-fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> T {
+pub(super) fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> T {
     let path = dir.join(name);
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("LIVE {} {e}", path.display()));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("LIVE {} {e}", path.display()))
@@ -42,7 +42,7 @@ fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> T {
 
 /// The files in the reads directory whose names start with the prefix, in name
 /// order.
-fn files(dir: &Path, prefix: &str) -> Vec<String> {
+pub(super) fn files(dir: &Path, prefix: &str) -> Vec<String> {
     let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("LIVE {} {e}", dir.display()));
     let mut names: Vec<String> = entries
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())

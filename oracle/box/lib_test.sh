@@ -804,7 +804,7 @@ records_of() {
 arms_pass='head=PASS control=CLEAN colret=CAUGHT'
 # Must not fire: a done run that passes writes last-done, with every passing word a done run prints. Must fire: a verdict word the pass rule does not name.
 expect done_passed "$(records_of "$arms_pass")" "exit=0 last-done=c"
-expect done_every_passing_word "$(records_of "$arms_pass ctx=HELD fix-arms=PASS value=passed-on-these-inputs")" \
+expect done_every_passing_word "$(records_of "$arms_pass ctx=HELD fix-arms=PASS value=passed-on-these-inputs n2n=passed-on-these-inputs")" \
   "exit=0 last-done=c"
 expect done_unnamed_word "$(records_of "$arms_pass coin=UNREACHED")" "exit=1 last-done=absent"
 

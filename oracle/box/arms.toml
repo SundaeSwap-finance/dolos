@@ -254,3 +254,7 @@ server-fault-as-client = ["test=serve::grpc::convert::tests::each_submit_error_a
 stored-decode-as-client = ["test=validate::evaluation_tests::a_stored_output_that_fails_to_decode_is_a_server_fault", "test=validate::evaluation_tests::a_stored_output_of_an_unknown_era_is_a_server_fault"]
 evaluation-fault-as-client = ["test=validate::evaluation_tests::an_evaluation_the_server_cannot_build_is_a_server_fault"]
 dijkstra-witnesses-refused = ["test=methods::tests::a_dijkstra_submission_takes_its_witnesses"]
+n2n-magic-wrong = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests::the_node_accepts_the_proposal_at_the_leios_version"]
+n2n-v16-four-fields = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests::the_node_accepts_the_proposal_at_the_leios_version"]
+n2n-leios-minimum-above-node = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests::a_recorded_endorser_block_is_fetched_as_dolos_serves_it"]
+n2n-fetched-tx-dropped = ["test=serve::grpc::v1::ledger_oracle_tests::n2n::tests::a_recorded_endorser_block_is_fetched_as_dolos_serves_it"]

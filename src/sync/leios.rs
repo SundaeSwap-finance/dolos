@@ -299,6 +299,17 @@ pub trait LeiosTransport {
     async fn next_event(&mut self) -> InitiatorEvent;
 }
 
+#[async_trait::async_trait(?Send)]
+impl<T: LeiosTransport + ?Sized> LeiosTransport for &mut T {
+    fn issue(&mut self, command: InitiatorCommand) {
+        (**self).issue(command)
+    }
+
+    async fn next_event(&mut self) -> InitiatorEvent {
+        (**self).next_event().await
+    }
+}
+
 type LeiosNetwork = Manager<TcpInterface<AnyMessage>, InitiatorBehavior, AnyMessage>;
 
 /// The real transport: one TCP connection driven by the network manager.
@@ -309,16 +320,42 @@ pub struct ManagerTransport {
 }
 
 impl ManagerTransport {
-    fn spawn(network: LeiosNetwork) -> Self {
+    /// A transport to the Leios peer at `address` that passes on the events
+    /// `forward` selects.
+    pub fn connect(
+        address: &str,
+        network_magic: u64,
+        forward: fn(&InitiatorEvent) -> bool,
+    ) -> Result<Self, Error> {
+        let behavior = InitiatorBehavior {
+            handshake: HandshakeBehavior::new(HandshakeConfig {
+                supported_version: proposal(network_magic),
+            }),
+            ..Default::default()
+        };
+
+        let mut network = Manager::new(TcpInterface::new(), behavior);
+
+        let peer = address
+            .parse()
+            .map_err(|_| Error::BadAddress(address.to_string()))?;
+
+        network.execute(InitiatorCommand::IncludePeer(peer));
+
         let (commands, issued) = mpsc::unbounded_channel();
         let (emitted, events) = mpsc::unbounded_channel();
 
-        Self {
+        Ok(Self {
             commands,
             events,
-            driver: tokio::spawn(drive(network, issued, emitted)),
-        }
+            driver: tokio::spawn(drive(network, issued, emitted, forward)),
+        })
     }
+}
+
+/// The versions and version data a Leios peer is offered on `network_magic`.
+pub(crate) fn proposal(network_magic: u64) -> VersionTable {
+    VersionTable::v11_and_above_with_query(network_magic, false)
 }
 
 /// Runs `network` until its transport is dropped, with housekeeping on every
@@ -327,6 +364,7 @@ async fn drive(
     mut network: LeiosNetwork,
     mut issued: mpsc::UnboundedReceiver<InitiatorCommand>,
     emitted: mpsc::UnboundedSender<InitiatorEvent>,
+    forward: fn(&InitiatorEvent) -> bool,
 ) {
     let mut ticker = interval(HOUSEKEEPING_TICK);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -345,7 +383,7 @@ async fn drive(
                 // dispatching a queued request to the interface, and has no
                 // event for the client yet.
                 match event {
-                    Some(event) if read_by_fetch(&event) => {
+                    Some(event) if forward(&event) => {
                         if emitted.send(event).is_err() {
                             return;
                         }
@@ -405,23 +443,8 @@ pub struct LeiosClient<T = ManagerTransport> {
 
 impl LeiosClient<ManagerTransport> {
     pub fn new(address: &str, network_magic: u64) -> Result<Self, Error> {
-        let behavior = InitiatorBehavior {
-            handshake: HandshakeBehavior::new(HandshakeConfig {
-                supported_version: VersionTable::v11_and_above_with_query(network_magic, false),
-            }),
-            ..Default::default()
-        };
-
-        let mut network = Manager::new(TcpInterface::new(), behavior);
-
-        let peer = address
-            .parse()
-            .map_err(|_| Error::BadAddress(address.to_string()))?;
-
-        network.execute(InitiatorCommand::IncludePeer(peer));
-
         Ok(Self::with_transport(
-            ManagerTransport::spawn(network),
+            ManagerTransport::connect(address, network_magic, read_by_fetch)?,
             address.to_string(),
             TXS_PER_REQUEST,
             FETCH_TIMEOUT,
@@ -864,7 +887,7 @@ pub(crate) mod tests {
     ///
     /// The announcement carries the body's own hash, because a fetch is only
     /// answered when the body it gets back is the body that was committed to.
-    fn real_eb() -> (Vec<u8>, Vec<Vec<u8>>, AnnouncedEndorserBlock) {
+    pub(crate) fn real_eb() -> (Vec<u8>, Vec<Vec<u8>>, AnnouncedEndorserBlock) {
         let body = hex::decode(include_str!("../../test_data/dijkstra-eb3.ebbody").trim()).unwrap();
 
         let eb_txs: Vec<Vec<u8>> = include_str!("../../test_data/dijkstra-eb3.ebtxs")
@@ -1802,7 +1825,7 @@ pub(crate) mod tests {
     /// A leios-fetch responder on a local port that serves one endorser block
     /// and answers each leios-notify request with an offer, counting the
     /// offers.
-    async fn endorser_block_responder(
+    pub(crate) async fn endorser_block_responder(
         body: Vec<u8>,
         eb_txs: Vec<Vec<u8>>,
     ) -> (std::net::SocketAddr, Arc<AtomicUsize>) {
