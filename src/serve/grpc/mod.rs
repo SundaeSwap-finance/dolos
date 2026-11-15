@@ -16,6 +16,7 @@ mod predicate;
 mod read_counting;
 mod selection;
 mod stream;
+mod tx_pattern;
 mod v1;
 mod v1alpha;
 mod v1beta;
