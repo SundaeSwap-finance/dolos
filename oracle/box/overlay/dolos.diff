@@ -15,10 +15,10 @@ index b01b8971..b175c21d 100644
          .with(Val::EpochLength(epoch_length as u64))
          .with(Val::SlotLength(slot_length as u64))
 diff --git a/crates/cardano/src/indexes/query.rs b/crates/cardano/src/indexes/query.rs
-index 365138a5..8a0a5252 100644
+index c7b3141e..0d5ce3ff 100644
 --- a/crates/cardano/src/indexes/query.rs
 +++ b/crates/cardano/src/indexes/query.rs
-@@ -530,6 +530,10 @@ where
+@@ -526,6 +526,10 @@ where
  fn datum_in_block(block: &MultiEraBlock, datum_hash: Hash<32>) -> Option<PlutusData> {
      for tx in block.txs() {
          let searched = crate::pallas_extras::for_each_applied_tx(&tx, |tx| {
@@ -29,7 +29,7 @@ index 365138a5..8a0a5252 100644
              // Check witnesses
              if let Some(plutus_data) = tx.find_plutus_data(&datum_hash) {
                  return Err(plutus_data.clone().unwrap());
-@@ -563,6 +567,11 @@ fn datum_in_block(block: &MultiEraBlock, datum_hash: Hash<32>) -> Option<PlutusD
+@@ -559,6 +563,11 @@ fn datum_in_block(block: &MultiEraBlock, datum_hash: Hash<32>) -> Option<PlutusD
  fn script_in_block(block: &MultiEraBlock, script_hash: Hash<28>) -> Option<ScriptData> {
      for tx in block.txs() {
          let searched = crate::pallas_extras::for_each_applied_tx(&tx, |tx| {
@@ -526,10 +526,10 @@ index 6a010719..b24b47e5 100644
          let resolved = if refs.is_empty() {
              Some(UtxoMap::new())
 diff --git a/src/serve/grpc/v1/query.rs b/src/serve/grpc/v1/query.rs
-index d41af2a1..8c4a7eea 100644
+index b02dea73..4a8dce78 100644
 --- a/src/serve/grpc/v1/query.rs
 +++ b/src/serve/grpc/v1/query.rs
-@@ -801,6 +801,9 @@ async fn into_u5c_utxo<S: Domain>(
+@@ -830,6 +830,9 @@ fn into_u5c_utxo<S: Domain>(
  
      let parsed_output = MultiEraOutput::try_from(body)?;
      let mut parsed = mapper.map_tx_output(&parsed_output, None);
@@ -540,10 +540,10 @@ index d41af2a1..8c4a7eea 100644
      // If the output has a datum hash, try to fetch the datum value from storage
      if let Some(DatumOption::Hash(datum_hash)) = parsed_output.datum() {
 diff --git a/src/serve/grpc/v1/submit.rs b/src/serve/grpc/v1/submit.rs
-index e460fd9a..f24a9546 100644
+index 203acd5d..979ddf41 100644
 --- a/src/serve/grpc/v1/submit.rs
 +++ b/src/serve/grpc/v1/submit.rs
-@@ -84,7 +84,10 @@ fn tx_eval_to_u5c<R>(
+@@ -85,7 +85,10 @@ fn tx_eval_to_u5c<R>(
                  memory: acc.memory.checked_add(eval.units.mem)?,
              })
          }),
@@ -555,7 +555,7 @@ index e460fd9a..f24a9546 100644
          ..Default::default()
      };
      if result.ex_units.is_none() {
-@@ -116,6 +119,9 @@ fn tx_eval_to_u5c<R>(
+@@ -117,6 +120,9 @@ fn tx_eval_to_u5c<R>(
              MultiEraRedeemerTag::Reward => RedeemerPurpose::Reward,
              MultiEraRedeemerTag::Vote => RedeemerPurpose::Vote,
              MultiEraRedeemerTag::Propose => RedeemerPurpose::Propose,
@@ -565,7 +565,7 @@ index e460fd9a..f24a9546 100644
              MultiEraRedeemerTag::Guarding => RedeemerPurpose::Guarding,
              other => return unrepresentable(format!("{other:?}[{}]", entry.index)),
          };
-@@ -132,11 +138,15 @@ fn tx_eval_to_u5c<R>(
+@@ -133,11 +139,15 @@ fn tx_eval_to_u5c<R>(
                  entry
                      .failure_message
                      .as_deref()
@@ -582,7 +582,7 @@ index e460fd9a..f24a9546 100644
          let (payload, original_cbor) = held
              .map(|r| (r.payload, r.original_cbor))
              .unwrap_or_default();
-@@ -151,6 +161,9 @@ fn tx_eval_to_u5c<R>(
+@@ -152,6 +162,9 @@ fn tx_eval_to_u5c<R>(
              original_cbor,
          });
      }
@@ -593,10 +593,10 @@ index e460fd9a..f24a9546 100644
  }
  
 diff --git a/src/serve/grpc/v1alpha/submit.rs b/src/serve/grpc/v1alpha/submit.rs
-index d0abfc88..0e8f4f6c 100644
+index a18eaa03..bab519a9 100644
 --- a/src/serve/grpc/v1alpha/submit.rs
 +++ b/src/serve/grpc/v1alpha/submit.rs
-@@ -143,9 +143,16 @@ fn tx_eval_to_u5c<R>(
+@@ -144,9 +144,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
              payload,
              index: entry.index,
@@ -617,10 +617,10 @@ index d0abfc88..0e8f4f6c 100644
              original_cbor,
          });
 diff --git a/src/serve/grpc/v1alpha/watch.rs b/src/serve/grpc/v1alpha/watch.rs
-index b3f07291..d4ed3362 100644
+index 17e56920..ac857eed 100644
 --- a/src/serve/grpc/v1alpha/watch.rs
 +++ b/src/serve/grpc/v1alpha/watch.rs
-@@ -386,7 +386,11 @@ fn block_to_txs<C: ChainReads>(
+@@ -387,7 +387,11 @@ fn block_to_txs<C: ChainReads>(
      txs.into_iter().map(move |x| u5c::watch::AnyChainTx {
          chain: Some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
          block: Some(u5c::watch::AnyChainBlock {
@@ -634,10 +634,10 @@ index b3f07291..d4ed3362 100644
                  .clone()
                  .map(u5c::watch::any_chain_block::Chain::Cardano),
 diff --git a/src/serve/grpc/v1beta/submit.rs b/src/serve/grpc/v1beta/submit.rs
-index cc73fa5b..6e7f3c30 100644
+index 81c38bc0..d37cde3d 100644
 --- a/src/serve/grpc/v1beta/submit.rs
 +++ b/src/serve/grpc/v1beta/submit.rs
-@@ -143,9 +143,16 @@ fn tx_eval_to_u5c<R>(
+@@ -144,9 +144,16 @@ fn tx_eval_to_u5c<R>(
              purpose: purpose as i32,
              payload,
              index: entry.index,
@@ -657,7 +657,7 @@ index cc73fa5b..6e7f3c30 100644
              }),
              original_cbor,
          });
-@@ -189,7 +196,11 @@ where
+@@ -192,7 +199,11 @@ where
  
          info!(tx.hash = %hash, "accepted grpc transaction into mempool");
          Ok(Response::new(SubmitTxResponse {
@@ -671,10 +671,10 @@ index cc73fa5b..6e7f3c30 100644
      }
  
 diff --git a/src/serve/grpc/v1beta/sync.rs b/src/serve/grpc/v1beta/sync.rs
-index d6a37be0..94a26919 100644
+index c2fa5a49..1ab08846 100644
 --- a/src/serve/grpc/v1beta/sync.rs
 +++ b/src/serve/grpc/v1beta/sync.rs
-@@ -35,8 +35,15 @@ fn raw_to_anychain<C: ChainReads>(
+@@ -36,8 +36,15 @@ fn raw_to_anychain<C: ChainReads>(
          chain: if mask.chain {
              let block = MultiEraBlock::decode(body).unwrap();
              let prepared = BlockContext::new(context.clone(), &block);
@@ -693,10 +693,10 @@ index d6a37be0..94a26919 100644
              None
          },
 diff --git a/src/serve/grpc/v1beta/watch.rs b/src/serve/grpc/v1beta/watch.rs
-index ca38cfe0..cdedd9ce 100644
+index 1b5ced59..884ac1b8 100644
 --- a/src/serve/grpc/v1beta/watch.rs
 +++ b/src/serve/grpc/v1beta/watch.rs
-@@ -378,7 +378,11 @@ fn block_to_txs<C: ChainReads>(
+@@ -379,7 +379,11 @@ fn block_to_txs<C: ChainReads>(
      txs.into_iter().map(move |x| u5c::watch::AnyChainTx {
          chain: Some(u5c::watch::any_chain_tx::Chain::Cardano(x)),
          block: Some(u5c::watch::AnyChainBlock {
