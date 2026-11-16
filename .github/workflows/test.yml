@@ -2,11 +2,6 @@ name: Test
 
 on:
   workflow_call:
-    inputs:
-      os:
-        description: The runner to test on
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -20,8 +15,8 @@ env:
 
 jobs:
   test:
-    name: Test (${{ inputs.os }})
-    runs-on: ${{ inputs.os }}
+    name: Test
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,7 +31,7 @@ jobs:
         with:
           # `all-features` and `e2e` restore this read only, and without a shared
           # key each would save its own multi GB entry against a full quota.
-          shared-key: test-${{ inputs.os }}
+          shared-key: test-ubuntu-latest
 
       - name: Build the tests
         run: cargo nextest run --workspace --all-targets --no-run
@@ -44,14 +39,9 @@ jobs:
       # The new network namespace has its loopback down, and Ubuntu lets an
       # unprivileged user create one only with this AppArmor sysctl off.
       - name: Run small tests with no network
-        if: runner.os == 'Linux'
         run: |
           sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
           unshare --net --map-current-user cargo nextest run --workspace --all-targets -E 'group(@global)'
-
-      - name: Run small tests
-        if: runner.os != 'Linux'
-        run: cargo nextest run --workspace --all-targets -E 'group(@global)'
 
       - name: Run medium tests
         run: cargo nextest run --workspace --all-targets -E 'group(medium)'

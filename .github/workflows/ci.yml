@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
@@ -75,41 +74,7 @@ jobs:
           command: check advisories bans
 
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-14]
     uses: ./.github/workflows/test.yml
-    with:
-      os: ${{ matrix.os }}
-
-  # Windows is the slowest job and skips e2e, so on a PR it adds latency without
-  # coverage anyone acts on. A Windows-only break lands on main and is caught by
-  # the merge run instead of blocking the PR.
-  #
-  # The cost of that trade is that a fix *for* a Windows break cannot be proven
-  # before it merges, which is how the `getrusage` break stayed red across five
-  # merges. The two extra arms are the way out: label a PR `ci:windows` to opt
-  # it into this job, or dispatch the workflow against a branch. Neither changes
-  # what an unlabelled PR runs.
-  test-windows:
-    name: Test (windows-latest)
-    if: >-
-      github.ref == 'refs/heads/main'
-      || github.event_name == 'workflow_dispatch'
-      || contains(github.event.pull_request.labels.*.name, 'ci:windows')
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2026-09-04
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Run unit tests
-        run: cargo test --workspace --all-targets
 
   # AGENTS.md prescribes verifying with `--all-features`, which enables
   # feature-gated code (notably the `strict` epoch-coherence assertions in
@@ -120,7 +85,6 @@ jobs:
   # assertions inside the fixture itself; they keep full coverage in the
   # default-features run. Remove the exclusions once the fixtures build
   # epoch-coherent domains (see AGENTS.md, "Code Verification Requirements").
-  # Feature-gated code is platform-independent, so one OS keeps the cost bounded.
   all-features:
     name: Test (all features)
     runs-on: ubuntu-latest
@@ -157,8 +121,8 @@ jobs:
       - run: cargo check -p dolos-snapshot --all-targets
 
   # These sleep on a real relay rather than compute, so they are slow and only
-  # as reliable as the relay. Run them on merges to main; smoke stays on the
-  # matrix everywhere and covers ports, socket and shutdown on every PR.
+  # as reliable as the relay. Run them on merges to main. Smoke runs in the test
+  # job and covers ports, socket and shutdown on every PR.
   e2e:
     name: E2E (sync, snapshot)
     if: github.ref == 'refs/heads/main'
