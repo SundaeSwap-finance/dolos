@@ -2428,6 +2428,17 @@ fn held_records(corpus: &Corpus) -> BTreeSet<RecordId> {
         .collect()
 }
 
+/// The kept IC runs that hold the `named` records, with the committed manifest
+/// entries that name a record those runs hold.
+fn runs_holding(named: BTreeSet<RecordId>) -> (Corpus, Manifests) {
+    let corpus = load(CorpusKind::Ic)
+        .select(&named)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let held = held_records(&corpus);
+    let manifests = Manifests::committed().within(|id| held.contains(id));
+    (corpus, manifests)
+}
+
 /// The records a comma separated list names.
 fn named_records<T: FromStr<Err = String> + Ord>(list: &str) -> BTreeSet<T> {
     let names = list.split(',').map(str::trim).filter(|s| !s.is_empty());
@@ -2935,8 +2946,11 @@ async fn the_collateral_return_supp9_spends_is_served() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn the_vote_delegation_ic551_keeps_is_known() {
-    let corpus = load(CorpusKind::Ic);
-    let manifests = Manifests::committed();
+    let id = RecordId {
+        corpus: CorpusKind::Ic,
+        n: 551,
+    };
+    let (corpus, manifests) = runs_holding(BTreeSet::from([id]));
     let intact = judge(&corpus, &manifests, &Edits::default()).await;
     let text = intact.state.to_string();
     let line = "\nKNOWN row=S18 ids=ic#551 accounts account=";
@@ -2944,10 +2958,6 @@ async fn the_vote_delegation_ic551_keeps_is_known() {
     assert!(intact.state.accounts.disagree.is_empty(), "{text}");
     assert!(intact.state.known_stale.is_empty(), "{text}");
     let mut deleted = manifests;
-    let id = RecordId {
-        corpus: CorpusKind::Ic,
-        n: 551,
-    };
     deleted.known.remove(&(Locus::Accounts, id)).unwrap();
     let deleted = judge(&corpus, &deleted, &Edits::default()).await;
     let text = deleted.state.to_string();
@@ -3133,8 +3143,16 @@ async fn a_witnessed_datum_changed_in_its_last_byte_prints_datum_differ() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn a_seeded_reward_changed_by_one_prints_accounts_disagree() {
-    let corpus = load(CorpusKind::Ic);
-    let manifests = Manifests::committed();
+    let first = load(CorpusKind::Ic)
+        .kept()
+        .map(|run| &run.records()[0])
+        .find(|record| !record.accounts_pre.is_empty())
+        .map(|record| RecordId {
+            corpus: CorpusKind::Ic,
+            n: record.n,
+        })
+        .expect("a kept run seeds an account");
+    let (corpus, manifests) = runs_holding(BTreeSet::from([first]));
     let intact = judge(&corpus, &manifests, &Edits::default()).await;
     assert!(intact.state.accounts.compared > 0, "{intact}");
     let before: BTreeSet<String> = shown(&intact.state.accounts.disagree).into_iter().collect();
