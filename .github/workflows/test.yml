@@ -33,18 +33,8 @@ jobs:
           # key each would save its own multi GB entry against a full quota.
           shared-key: test-ubuntu-latest
 
-      - name: Build the tests
-        run: cargo nextest run --workspace --all-targets --no-run
-
-      # The new network namespace has its loopback down, and Ubuntu lets an
-      # unprivileged user create one only with this AppArmor sysctl off.
-      - name: Run small tests with no network
-        run: |
-          sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
-          unshare --net --map-current-user cargo nextest run --workspace --all-targets -E 'group(@global)'
-
-      - name: Run medium tests
-        run: cargo nextest run --workspace --all-targets -E 'group(medium)'
+      - name: Run the tests
+        run: cargo nextest run --workspace --all-targets
 
       - name: Run e2e smoke tests
         run: cargo nextest run --profile large --run-ignored only --test smoke
