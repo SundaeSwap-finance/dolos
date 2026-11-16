@@ -41,8 +41,57 @@ jobs:
           cargo test --release -p dolos --lib -- serve::grpc::v1::ledger_oracle_tests:: --ignored --test-threads=1 --skip serve::grpc::v1::ledger_oracle_tests::ledger_oracle --skip serve::grpc::v1::ledger_oracle_tests::n2n:: --skip serve::grpc::v1::ledger_oracle_tests::endorser:: | tee self.log
           grep -Eq '^test result: ok. [1-9][0-9]* passed' self.log
 
+  pallas-ci:
+    name: Require pallas CI at the pinned commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # A pull request run tests a merge commit, so only a push run tests the pinned commit.
+      - name: Find a successful pallas CI push run for each pallas commit in Cargo.lock
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pins=$(python3 - <<'EOF'
+          import re, sys, tomllib
+          with open("Cargo.lock", "rb") as f:
+              packages = tomllib.load(f)["package"]
+          pins = set()
+          for p in packages:
+              if p["name"] != "pallas" and not p["name"].startswith("pallas-"):
+                  continue
+              m = re.fullmatch(r"git\+https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:\?[^#]*)?#([0-9a-f]{40})", p.get("source", ""))
+              if m is None:
+                  sys.exit(f"{p['name']} {p['version']} is not pinned to a GitHub commit: {p.get('source', 'a path dependency')}")
+              pins.add(m.groups())
+          if not pins:
+              sys.exit("Cargo.lock has no pallas package")
+          for repo, sha in sorted(pins):
+              print(repo, sha)
+          EOF
+          )
+          failed=0
+          while read -r repo sha; do
+            select="[.workflow_runs[] | select(.head_sha == \"$sha\" and .path == \".github/workflows/ci.yml\" and .event == \"push\" and .conclusion == \"success\")][0].html_url // \"\""
+            if ! url=$(gh api "repos/$repo/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&status=success" --jq "$select"); then
+              echo "::error::pallas $repo@$sha: its CI runs could not be read"
+              failed=1
+            elif [ -z "$url" ]; then
+              echo "::error::pallas $repo@$sha has no successful CI push run"
+              failed=1
+            else
+              echo "pallas $repo@$sha passed CI in $url"
+            fi
+          done <<< "$pins"
+          exit "$failed"
+
   build:
-    needs: [test, judge]
+    needs: [test, judge, pallas-ci]
     continue-on-error: true
 
     strategy:
