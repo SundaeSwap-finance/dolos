@@ -29,14 +29,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-09-04
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.151
       - uses: Swatinem/rust-cache@v2
         with:
           # `all-features` and `e2e` restore this read only, and without a shared
           # key each would save its own multi GB entry against a full quota.
           shared-key: test-${{ inputs.os }}
 
-      - name: Run unit tests
-        run: cargo test --workspace --all-targets
+      - name: Build the tests
+        run: cargo nextest run --workspace --all-targets --no-run
+
+      # The new network namespace has its loopback down, and Ubuntu lets an
+      # unprivileged user create one only with this AppArmor sysctl off.
+      - name: Run small tests with no network
+        if: runner.os == 'Linux'
+        run: |
+          sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
+          unshare --net --map-current-user cargo nextest run --workspace --all-targets -E 'group(@global)'
+
+      - name: Run small tests
+        if: runner.os != 'Linux'
+        run: cargo nextest run --workspace --all-targets -E 'group(@global)'
+
+      - name: Run medium tests
+        run: cargo nextest run --workspace --all-targets -E 'group(medium)'
 
       - name: Run e2e smoke tests
-        run: cargo test --test smoke -- --ignored
+        run: cargo nextest run --profile large --run-ignored only --test smoke

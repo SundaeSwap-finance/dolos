@@ -1,0 +1,101 @@
+# A test is small unless the medium override names it, and an ignored test is large.
+
+[test-groups]
+medium = { max-threads = "num-cpus" }
+shared-ports = { max-threads = 1 }
+
+# Small: at most 60 s, and CI on Linux runs it with no network.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 1 }
+
+# Medium: at most 300 s, and it may use loopback.
+[[profile.default.overrides]]
+test-group = "medium"
+slow-timeout = { period = "300s", terminate-after = 1 }
+filter = '''
+(binary_id(dolos) & (
+    test(=serve::grpc::v1::ledger_oracle_tests::dijkstra_field::tests::a_served_transaction_dropping_a_held_deposit_fails_with_its_record_and_path)
+  | test(=serve::grpc::v1::ledger_oracle_tests::dijkstra_field::tests::every_field_v1_maps_from_an_accepted_record_agrees_with_its_bytes)
+  | test(=serve::grpc::v1::ledger_oracle_tests::dijkstra_field::tests::unsetting_a_field_some_record_holds_disagrees_at_that_field_alone)
+  | test(=serve::grpc::v1::ledger_oracle_tests::endorser::an_endorser_block_no_fetched_block_claims_stops_the_pull)
+  | test(=serve::grpc::v1::ledger_oracle_tests::endorser::served_endorser_transactions_are_the_nodes)
+  | test(=serve::grpc::v1::ledger_oracle_tests::eval::a_draft_keeps_the_signed_body_and_drops_its_key_witnesses_and_budgets)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::declared_budget_and_estimation_are_distinct)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::failing_guard_is_reported_by_rpc)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::missing_child_guard_redeemer_is_not_silent)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::missing_guard_redeemer_is_not_silent)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::missing_guard_script_and_redeemer_are_reported)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::missing_reference_input_is_reported)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::missing_script_is_reported)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::native_and_key_only_transactions_need_no_plutus_redeemers)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::nonzero_guard_index_is_preserved)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::original_bad_guard_datum_is_rejected)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::original_guards_reach_admission_evaluation_estimation_rpc)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::reference_input_provides_guard_code)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::top_level_guards_without_a_plutus_script_are_admitted)
+  | test(=serve::grpc::v1::ledger_oracle_tests::guarding::wrong_guard_index_is_reported)
+  | test(=serve::grpc::v1::ledger_oracle_tests::missing_script_or_redeemer::a_script_credential_with_no_script_is_refused)
+  | test(=serve::grpc::v1::ledger_oracle_tests::missing_script_or_redeemer::a_script_spend_with_no_redeemer_is_refused)
+  | test(=serve::grpc::v1::ledger_oracle_tests::missing_script_or_redeemer::a_sub_transaction_script_spend_with_no_redeemer_is_refused)
+  | test(=serve::grpc::v1::ledger_oracle_tests::n2n::tests::a_recorded_endorser_block_is_fetched_as_dolos_serves_it)
+  | test(=serve::grpc::v1::ledger_oracle_tests::n2n::tests::a_session_with_a_leios_peer_passes)
+  | test(=serve::grpc::v1::ledger_oracle_tests::output::tests::the_mapped_form_of_every_corpus_output_agrees_with_its_bytes_at_every_version)
+  | test(=serve::grpc::v1::ledger_oracle_tests::replay::replayed_state_at_each_epoch_start_is_the_ledgers)
+  | test(=sync::apply::tests::a_tick_prunes_at_most_its_rounds)
+  | test(=sync::apply::tests::ticks_bring_the_wal_inside_max_rollback_while_blocks_arrive)
+  | test(=sync::leios::tests::a_dropped_client_closes_its_connection)
+  | test(=sync::leios::tests::a_fetch_after_a_blocked_thread_still_answers)
+  | test(=sync::leios::tests::a_fetch_after_an_idle_gap_longer_than_the_peer_allows_still_answers)
+  | test(=sync::leios::tests::offers_made_between_fetches_are_not_held)
+  | test(=sync::leios::tests::the_proxy_closes_a_connection_its_client_leaves_silent)
+  | test(=sync::pull::tests::the_parent_at_a_reset_point_is_fetched_over_blockfetch)
+  | test(=sync::submit::tests::musashi_recording_peer_receives_original_signed_bytes)
+  | test(=sync::submit::tests::recovery_ephemeral_after_ack)
+  | test(=sync::submit::tests::recovery_ephemeral_before_ack)
+  | test(=sync::submit::tests::recovery_ephemeral_body_send)
+  | test(=sync::submit::tests::recovery_ephemeral_id_send)
+  | test(=sync::submit::tests::recovery_redb_after_ack)
+  | test(=sync::submit::tests::recovery_redb_before_ack)
+  | test(=sync::submit::tests::recovery_redb_body_send)
+  | test(=sync::submit::tests::recovery_redb_id_send)
+))
+| (binary_id(dolos-minibf) & (
+    test(=mapping::anchor_tests::anchor_body_accepts_size_limit)
+  | test(=mapping::anchor_tests::anchor_body_rejects_oversized_content_length)
+  | test(=mapping::anchor_tests::anchor_body_rejects_oversized_stream)
+  | test(=mapping::anchor_tests::anchor_candidate_accepts_valid_json_and_hash)
+  | test(=mapping::anchor_tests::anchor_candidate_rejects_hash_mismatch)
+  | test(=mapping::anchor_tests::anchor_candidate_rejects_invalid_json)
+))
+| (binary_id(ledger-oracle-judge) & (
+    test(=corpus::tests::a_leaf_outside_the_class_table_fails_the_load)
+  | test(=corpus::tests::a_record_in_no_kept_run_is_refused)
+  | test(=corpus::tests::a_record_the_decoder_refused_listing_redeemers_fails_the_load)
+  | test(=corpus::tests::a_record_without_its_pool_vote_or_governance_state_fails_the_load)
+  | test(=corpus::tests::a_record_without_pparams_fails_the_load)
+  | test(=corpus::tests::a_redeemer_without_its_arguments_fails_the_load)
+  | test(=corpus::tests::a_refused_record_without_failure_names_fails_the_load)
+  | test(=corpus::tests::cbor_reader_input_totals_equal_an_independent_reader)
+  | test(=corpus::tests::committed_corpora_carry_the_arguments_of_each_context_the_ledger_built)
+  | test(=corpus::tests::committed_corpora_list_no_redeemer_for_bytes_the_decoder_refused)
+  | test(=corpus::tests::committed_corpora_load_into_their_runs)
+  | test(=corpus::tests::leaving_out_a_record_in_no_kept_run_is_refused)
+  | test(=run::tests::a_run_cut_at_an_epoch_change_starts_from_the_utxo_the_previous_record_left)
+  | test(=run::tests::every_record_of_the_corpus_is_in_a_run)
+))
+| (binary_id(xtask::minibf_perf) & (
+    test(=http_calibration_checks_responses_and_refuses_tip_changes)
+))
+| (binary_id(xtask::perf_cli) & (
+    test(=paired_runner_uses_minibf_command_and_shared_report)
+))
+'''
+
+# The e2e daemon tests number their ports from a counter in the test process.
+[[profile.default.overrides]]
+test-group = "shared-ports"
+filter = 'binary_id(dolos::smoke) | binary_id(dolos::snapshot) | (binary_id(dolos::sync) & test(/^daemon_syncs_for_/))'
+
+# Large: at most 900 s, run with `--profile large --run-ignored only`.
+[profile.large]
+slow-timeout = { period = "900s", terminate-after = 1 }
