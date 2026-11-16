@@ -26,7 +26,7 @@ macro_rules! named {
             /// Every member, in the order a run prints them.
             pub const ALL: [$enum; [$(stringify!($member)),*].len()] = [$($enum::$member),*];
 
-            /// The name verdict lines and the arms manifest give the member.
+            /// The name verdict lines give the member.
             pub fn name(self) -> &'static str {
                 match self {
                     $($enum::$member => $name),*

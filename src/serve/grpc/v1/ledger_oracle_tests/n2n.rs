@@ -611,7 +611,7 @@ fn reads(var: &str) -> (PathBuf, String, u64) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "talks node to node with the peer LIVE_DIR/peer names and judges it against the FetchBlock answers oracle/box/n2n.sh wrote there"]
+#[ignore = "talks node to node with the peer LIVE_DIR/peer names and judges it against the FetchBlock answers LIVE_DIR holds"]
 async fn n2n() {
     let (dir, peer, magic) = reads("LIVE_DIR");
     let natives = served_natives(&dir);

@@ -531,8 +531,6 @@ struct Manifests {
 
 impl Manifests {
     fn committed() -> Self {
-        // An arm catch naming no judge or axis fails every run here.
-        manifest::catches().unwrap_or_else(|e| panic!("{e}"));
         Manifests {
             declared: manifest::declared().unwrap_or_else(|e| panic!("{e}")),
             known: manifest::known().unwrap_or_else(|e| panic!("{e}")).records,
