@@ -41,11 +41,12 @@ What this branch adds on top of upstream. None of it is posted upstream yet.
 
 It needs a pallas that decodes the Dijkstra era and speaks the Leios fetch mini
 protocol, which upstream pallas does not. The workspace takes pallas from the
-branch `leios-musashi` of github.com/geofflittle/pallas, by commit:
+branch `leios-musashi` of github.com/SundaeSwap-finance/pallas, by the commit
+`Cargo.toml` names:
 
 ```toml
 [workspace.dependencies]
-pallas = { git = "https://github.com/geofflittle/pallas", rev = "3c595fbdc4ad3c2cbc897b92ef880f1553d4cd61", features = ["hardano", "phase2", "unstable", "network2"] }
+pallas = { git = "https://github.com/SundaeSwap-finance/pallas", rev = "<commit>", features = ["hardano", "phase2", "unstable", "network2"] }
 ```
 
 Cargo reads the features from the dependency entry. A `features` key written
