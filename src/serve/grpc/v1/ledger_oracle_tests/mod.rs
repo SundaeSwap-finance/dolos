@@ -2672,22 +2672,19 @@ async fn every_layer_accepts_the_sha2_256_mk_nil_data_and_wide_integer_records_i
 #[ignore = "judges Dolos against the committed ledger corpora, run in release"]
 async fn deleting_one_declared_entry_prints_unsupported_unexpected() {
     let intact = judge_supp(|_| ()).await;
-    let refused: BTreeSet<RecordId> = intact
-        .validation
-        .refuse_unsupported
-        .iter()
-        .map(|(id, _)| *id)
-        .collect();
     let (record, Feature(label)) = Manifests::committed()
         .declared
         .into_iter()
-        .find(|(id, _)| id.corpus == CorpusKind::Supp && !refused.contains(id))
-        .expect("a declared record the ledger accepts");
+        .find(|(id, _)| id.corpus == CorpusKind::Supp)
+        .expect("a declared supp record");
+    let unexpected = format!(" label={label}");
     assert!(
-        intact.validation.unsupported_expected.contains_key(&label),
+        intact
+            .validation
+            .refuse_unsupported
+            .contains(&(record, format!("label={label}"))),
         "{intact}"
     );
-    let unexpected = format!(" label={label}");
     let shown = record.to_string();
     assert!(
         !fails_with(&intact, Judge::Validation, &shown, &unexpected),

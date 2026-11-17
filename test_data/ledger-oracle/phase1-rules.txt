@@ -52,7 +52,7 @@ refused[DijkstraInputWithoutDatum] | leaves UnspendableUTxONoDatumHash,SubUnspen
 refused[DijkstraMalformedGuardDatum] | leaves MalformedGuardDatums,SubMalformedGuardDatums | reads top.k24,sub.k24
 refused[DijkstraPointerInCollateralReturn] | leaves PtrPresentInCollateralReturn | reads top.k16
 refused[DijkstraBootstrapAttributesTooLarge] | leaves OutputBootAddrAttrsTooBig,SubOutputBootAddrAttrsTooBig | reads top.k1,sub.k1
-refused[DijkstraInvalidMetadata] | leaves DecoderErrorDeserialiseFailure | reads top.aux,sub.aux
+refused[DijkstraInvalidMetadata] | leaves InvalidMetadata,SubInvalidMetadata | reads top.aux,sub.aux
 refused[DijkstraMalformedScript] | leaves MalformedScriptWitnesses,SubMalformedScriptWitnesses,MalformedReferenceScripts,SubMalformedReferenceScripts | reads top.w3,sub.w3,top.w6,sub.w6,top.w7,sub.w7,top.w8,sub.w8
 refused[DijkstraInvalidCertificate("account balance is not zero")] | leaves StakeKeyHasNonZeroAccountBalanceDELEG | reads top.k4,sub.k4
 refused[DijkstraInvalidCertificate("already registered")] | leaves DelegAccountAlreadyRegistered | reads top.k4,sub.k4
@@ -116,6 +116,7 @@ refused[DijkstraMalformed("empty voting procedures")] | leaves DecoderErrorDeser
 refused[DijkstraMalformed("empty withdrawals")] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads top.k5,sub.k5
 refused[DijkstraMalformed("execution units")] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads top.w5,sub.w5
 refused[DijkstraMalformed("key witness")] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads top.w0,sub.w0
+refused[DijkstraMalformed("metadata")] | leaves DecoderErrorDeserialiseFailure | reads top.aux,sub.aux
 refused[DijkstraMalformed("multi-asset value")] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads top.k1,sub.k1,top.k9,sub.k9
 refused[DijkstraMalformed("protocol parameter update")] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads top.k20,sub.k20 | excluded the site decodes the map encoding of a typed update, whose keys are integers command: git -C pallas show 2b7bd3fb:pallas-primitives/src/dijkstra/model.rs | grep -n -B1 'pub struct ProtocolParamUpdate'
 refused[DijkstraMalformed("zero donation")] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads top.k22,sub.k22
@@ -136,7 +137,6 @@ refused[DijkstraScriptContext("treasury donation")] | leaves CollectErrors | rea
 refused[DijkstraScriptContext("treasury value")] | leaves CollectErrors | reads top.w5,sub.w5
 refused[DijkstraScriptContext("votes")] | leaves CollectErrors | reads top.w5,sub.w5
 unsupported[auxiliary fields] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads top.aux,sub.aux
-unsupported[auxiliary scripts] | unrepresentable because it marks a construct the validator does not implement rather than a ledger rule
 unsupported[body fields] | leaves DecoderErrorDeserialiseFailure,DecoderErrorCustom | reads every
 unsupported[duplicate collateral inputs] | leaves DecoderErrorDeserialiseFailure | reads top.k13
 unsupported[duplicate inputs] | leaves DecoderErrorDeserialiseFailure | reads every

@@ -637,6 +637,8 @@ leaf:MissingTxBodyMetadataHash 1
 leaf:SubMissingTxBodyMetadataHash 1
 leaf:ConflictingMetadataHash 1
 leaf:SubConflictingMetadataHash 1
+leaf:InvalidMetadata 1
+leaf:SubInvalidMetadata 1
 leaf:OutsideValidityIntervalUTxO 20
 leaf:SubOutsideValidityIntervalUTxO 4
 leaf:SubWrongNetwork 3
@@ -797,7 +799,7 @@ rule:refused[DijkstraInvalidGovernance("voter_may_not_vote_on_the_action")].acce
 rule:refused[DijkstraInvalidGovernance("zero_treasury_withdrawals")].refused 4
 rule:refused[DijkstraInvalidGovernance("zero_treasury_withdrawals")].accepted 316
 rule:refused[DijkstraInvalidMetadata].refused 2
-rule:refused[DijkstraInvalidMetadata].accepted 2
+rule:refused[DijkstraInvalidMetadata].accepted 3
 rule:refused[DijkstraInvalidWithdrawal("account_missing_from_the_original_state")].refused 6
 rule:refused[DijkstraInvalidWithdrawal("account_missing_from_the_original_state")].accepted 47
 rule:refused[DijkstraInvalidWithdrawal("amount_exceeds_the_balance")].refused 4
@@ -843,6 +845,8 @@ rule:refused[DijkstraMalformed("execution_units")].refused 1
 rule:refused[DijkstraMalformed("execution_units")].accepted 816
 rule:refused[DijkstraMalformed("key_witness")].refused 2
 rule:refused[DijkstraMalformed("key_witness")].accepted 11488
+rule:refused[DijkstraMalformed("metadata")].refused 2
+rule:refused[DijkstraMalformed("metadata")].accepted 3
 rule:refused[DijkstraMalformed("multi-asset_value")].refused 5
 rule:refused[DijkstraMalformed("multi-asset_value")].accepted 11488
 rule:refused[DijkstraMalformed("protocol_parameter_update")].accepted 316
@@ -967,7 +971,6 @@ rule:refused[PostAlonzo(VKWrongSignature)].refused 2
 rule:refused[PostAlonzo(VKWrongSignature)].accepted 11488
 rule:unsupported[auxiliary_fields].refused 1
 rule:unsupported[auxiliary_fields].accepted 2
-rule:unsupported[auxiliary_scripts].unrepresentable 3
 rule:unsupported[body_fields].refused 2
 rule:unsupported[body_fields].accepted 11488
 rule:unsupported[duplicate_collateral_inputs].refused 1

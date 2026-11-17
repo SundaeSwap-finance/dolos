@@ -442,7 +442,8 @@ fn validation_class(v: &ValidationError) -> DolosClass {
         V::DijkstraMalformedScript => C::Script,
         V::DijkstraMalformedGuardDatum => C::Datum,
         V::DijkstraPointerInCollateralReturn => C::Collateral,
-        V::DijkstraMalformed(_) | V::DijkstraInvalidMetadata => C::Decoding,
+        V::DijkstraMalformed(_) => C::Decoding,
+        V::DijkstraInvalidMetadata => C::Metadata,
         V::DijkstraInvalidWithdrawal(_) | V::DijkstraInvalidAccount(_) => C::AccountAndWithdrawal,
         V::DijkstraInvalidCertificate(_)
         | V::DijkstraInvalidGovernance(_)
@@ -527,7 +528,10 @@ mod tests {
 
     #[test]
     fn a_refusal_kind_names_the_rule_with_its_label_and_without_its_values() {
-        use pallas::{crypto::hash::Hash, ledger::validate::utils::CertificateFailure};
+        use pallas::{
+            crypto::hash::Hash,
+            ledger::validate::utils::{CertificateFailure, MalformedField},
+        };
         let cases = [
             (
                 ValidationError::DijkstraInvalidCertificate(
@@ -570,6 +574,16 @@ mod tests {
                 ValidationError::DijkstraTreasuryValueMismatch,
                 "DijkstraTreasuryValueMismatch",
                 DolosClass::Rule(RefusalClass::CertificateAndGovernance),
+            ),
+            (
+                ValidationError::DijkstraMalformed(MalformedField::Metadata),
+                "DijkstraMalformed(\"metadata\")",
+                DolosClass::Rule(RefusalClass::Decoding),
+            ),
+            (
+                ValidationError::DijkstraInvalidMetadata,
+                "DijkstraInvalidMetadata",
+                DolosClass::Rule(RefusalClass::Metadata),
             ),
         ];
         for (error, kind, class) in cases {
