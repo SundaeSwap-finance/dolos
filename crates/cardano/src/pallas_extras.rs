@@ -1390,8 +1390,6 @@ mod tests {
         matches!(block.block_body.transactions, MaybeIndefArray::Indef(_))
     }
 
-    /// The must-not case, a block of up to 23 transactions keeps a definite
-    /// header.
     #[test]
     fn up_to_twenty_three_inlined_transactions_keep_a_definite_header() {
         for count in [0, 1, 23] {
@@ -1399,8 +1397,6 @@ mod tests {
         }
     }
 
-    /// The must-fire case, a block of more than 23 transactions takes the
-    /// indefinite header the node writes.
     #[test]
     fn more_than_twenty_three_inlined_transactions_take_an_indefinite_header() {
         for count in [24, 67] {

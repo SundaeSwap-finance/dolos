@@ -853,8 +853,7 @@ fn map_era_summary(
     }
 }
 
-/// The summary of each era, the active one carrying the parameters a client is
-/// served for the current chain.
+/// The era summaries, the active one with the parameters ReadParams serves.
 fn map_era_summaries<'a, C: LedgerContext>(
     mapper: &interop::Mapper<C>,
     eras: impl Iterator<Item = &'a dolos_cardano::EraSummary>,
@@ -1704,7 +1703,7 @@ mod live_params_tests {
         assert!(models.plutus_v4.is_none());
     }
 
-    /// The parameters the active Dijkstra era summary carries for `set`.
+    /// The parameters of the active Dijkstra era summary mapped from `set`.
     fn active_era_params(set: &PParamsSet) -> u5c::cardano::PParams {
         let boundary = dolos_cardano::EraBoundary {
             epoch: 0,
@@ -1728,8 +1727,6 @@ mod live_params_tests {
             .expect("the Dijkstra era is active")
     }
 
-    /// The active Dijkstra era is summarised with the PlutusV4 cost model and
-    /// the retirement epoch bound ReadParams serves.
     #[test]
     fn a_dijkstra_era_summary_serves_the_plutus_v4_cost_model_and_bound() {
         let expected = node_plutus_v4();
@@ -1754,8 +1751,6 @@ mod live_params_tests {
         );
     }
 
-    /// The must-not case. A Dijkstra era whose set names no PlutusV4 vector is
-    /// summarised with none.
     #[test]
     fn a_dijkstra_era_summary_with_no_plutus_v4_model_serves_none() {
         let set = live_set(Some(node_retirement_bound()));

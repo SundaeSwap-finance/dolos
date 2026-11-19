@@ -854,8 +854,7 @@ fn map_era_summary(
     }
 }
 
-/// The summary of each era, the active one carrying the parameters a client is
-/// served for the current chain.
+/// The era summaries, the active one with the parameters ReadParams serves.
 fn map_era_summaries<'a, C: LedgerContext>(
     mapper: &interop::Mapper<C>,
     eras: impl Iterator<Item = &'a dolos_cardano::EraSummary>,
@@ -3436,7 +3435,7 @@ mod live_params_tests {
         }
     }
 
-    /// The parameters each era summary carries for a set at `protocol`.
+    /// A set at `protocol` and the parameters in each era summary for it.
     fn summary_params(protocol: u16) -> (PParamsSet, Vec<Option<u5c::cardano::PParams>>) {
         let set = live_set(&node()).with(Val::ProtocolVersion((protocol.into(), 0)));
         let eras = [era(10, 0), era(12, 1)];
@@ -3462,8 +3461,8 @@ mod live_params_tests {
         assert_eq!(served[0], None, "only the active era carries parameters");
     }
 
-    /// The must-not case. An active Conway era is summarised with the Conway
-    /// parameters ReadParams serves, and no Dijkstra field.
+    /// An active Conway era is summarised with the Conway parameters
+    /// ReadParams serves, and no Dijkstra field.
     #[test]
     fn a_conway_era_summary_serves_the_conway_parameters() {
         let (set, served) = summary_params(10);

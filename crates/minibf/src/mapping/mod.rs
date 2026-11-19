@@ -3198,15 +3198,11 @@ mod certificate_tests {
         );
     }
 
-    /// The must-not case. A Conway transaction serves each certificate in the
-    /// view that names its kind.
     #[test]
     fn a_conway_transaction_serves_its_certificates() {
         assert_serves_every_certificate(&served(&conway_block()));
     }
 
-    /// The must-fire case. A Dijkstra transaction with the same certificates
-    /// is served exactly as the Conway one is.
     #[test]
     fn a_dijkstra_transaction_serves_its_certificates_as_conway_does() {
         let dijkstra = served(&dijkstra_block());
