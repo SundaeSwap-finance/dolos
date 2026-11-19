@@ -853,6 +853,21 @@ fn map_era_summary(
     }
 }
 
+/// The summary of each era, the active one carrying the parameters a client is
+/// served for the current chain.
+fn map_era_summaries<'a, C: LedgerContext>(
+    mapper: &interop::Mapper<C>,
+    eras: impl Iterator<Item = &'a dolos_cardano::EraSummary>,
+    pparams: &dolos_cardano::PParamsSet,
+) -> Result<Vec<u5c::cardano::EraSummary>, ChainError> {
+    let active_protocol = pparams.protocol_major_or_default();
+    let active_params = map_live_params(mapper, pparams)?;
+
+    Ok(eras
+        .map(|era| map_era_summary(era, active_protocol, &active_params))
+        .collect())
+}
+
 fn into_u5c_utxo<S: Domain>(
     txo: &TxoRef,
     body: &EraCbor,
@@ -1150,14 +1165,9 @@ where
 
             let active_pparams = dolos_cardano::load_effective_pparams::<D>(domain.state())
                 .map_err(|e| Status::internal(format!("failed to load current pparams: {e}")))?;
-            let active_protocol = active_pparams.protocol_major_or_default();
-            let active_params =
-                mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(&active_pparams));
 
-            let summaries = chain_summary
-                .iter_all()
-                .map(|era| map_era_summary(era, active_protocol, &active_params))
-                .collect();
+            let summaries = map_era_summaries(&mapper, chain_summary.iter_all(), &active_pparams)
+                .map_err(into_status)?;
 
             Ok(u5c::query::ReadEraSummaryResponse {
                 summary: Some(u5c::query::read_era_summary_response::Summary::Cardano(
@@ -1692,5 +1702,66 @@ mod live_params_tests {
         let models = served.cost_models.unwrap_or_default();
 
         assert!(models.plutus_v4.is_none());
+    }
+
+    /// The parameters the active Dijkstra era summary carries for `set`.
+    fn active_era_params(set: &PParamsSet) -> u5c::cardano::PParams {
+        let boundary = dolos_cardano::EraBoundary {
+            epoch: 0,
+            slot: 0,
+            timestamp: 0,
+        };
+        let eras = [dolos_cardano::EraSummary {
+            start: boundary,
+            end: None,
+            epoch_length: 432000,
+            slot_length: 1,
+            protocol: 12,
+        }];
+
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+        let summaries = map_era_summaries(&mapper, eras.iter(), set).unwrap();
+
+        summaries[0]
+            .protocol_params
+            .clone()
+            .expect("the Dijkstra era is active")
+    }
+
+    /// The active Dijkstra era is summarised with the PlutusV4 cost model and
+    /// the retirement epoch bound ReadParams serves.
+    #[test]
+    fn a_dijkstra_era_summary_serves_the_plutus_v4_cost_model_and_bound() {
+        let expected = node_plutus_v4();
+        let bound = node_retirement_bound();
+        let set =
+            live_set(Some(bound)).with(Val::CostModelsUnknown(std::collections::BTreeMap::from([
+                (
+                    dolos_cardano::pallas_extras::PLUTUS_V4_COST_MODEL_KEY,
+                    expected.clone(),
+                ),
+            ])));
+
+        let served = active_era_params(&set);
+
+        assert_eq!(served.pool_retirement_epoch_bound, bound);
+        assert_eq!(
+            served
+                .cost_models
+                .and_then(|x| x.plutus_v4)
+                .map(|x| x.values),
+            Some(expected)
+        );
+    }
+
+    /// The must-not case. A Dijkstra era whose set names no PlutusV4 vector is
+    /// summarised with none.
+    #[test]
+    fn a_dijkstra_era_summary_with_no_plutus_v4_model_serves_none() {
+        let set = live_set(Some(node_retirement_bound()));
+
+        let served = active_era_params(&set);
+
+        assert!(served.cost_models.unwrap_or_default().plutus_v4.is_none());
     }
 }

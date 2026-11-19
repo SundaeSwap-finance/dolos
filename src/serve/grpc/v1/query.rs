@@ -854,6 +854,21 @@ fn map_era_summary(
     }
 }
 
+/// The summary of each era, the active one carrying the parameters a client is
+/// served for the current chain.
+fn map_era_summaries<'a, C: LedgerContext>(
+    mapper: &interop::Mapper<C>,
+    eras: impl Iterator<Item = &'a dolos_cardano::EraSummary>,
+    pparams: &dolos_cardano::PParamsSet,
+) -> Result<Vec<u5c::cardano::EraSummary>, ChainError> {
+    let active_protocol = pparams.protocol_major_or_default();
+    let active_params = map_live_params(mapper, pparams)?;
+
+    Ok(eras
+        .map(|era| map_era_summary(era, active_protocol, &active_params))
+        .collect())
+}
+
 fn into_u5c_utxo<S: Domain>(
     txo: &TxoRef,
     body: &EraCbor,
@@ -1232,14 +1247,9 @@ where
 
             let active_pparams = dolos_cardano::load_effective_pparams::<D>(domain.state())
                 .map_err(|e| Status::internal(format!("failed to load current pparams: {e}")))?;
-            let active_protocol = active_pparams.protocol_major_or_default();
-            let active_params =
-                mapper.map_pparams(dolos_cardano::utils::pparams_to_pallas(&active_pparams));
 
-            let summaries = chain_summary
-                .iter_all()
-                .map(|era| map_era_summary(era, active_protocol, &active_params))
-                .collect();
+            let summaries = map_era_summaries(&mapper, chain_summary.iter_all(), &active_pparams)
+                .map_err(into_status)?;
 
             Ok(u5c::query::ReadEraSummaryResponse {
                 summary: Some(u5c::query::read_era_summary_response::Summary::Cardano(
@@ -3408,5 +3418,59 @@ mod live_params_tests {
             dijkstra_fields.iter().all(|(_, value)| value == "no value"),
             "a Conway set was served {dijkstra_fields:?}"
         );
+    }
+
+    fn era(protocol: u16, start_epoch: u64) -> dolos_cardano::EraSummary {
+        let boundary = |epoch: u64| dolos_cardano::EraBoundary {
+            epoch,
+            slot: epoch * 432000,
+            timestamp: epoch * 432000,
+        };
+
+        dolos_cardano::EraSummary {
+            start: boundary(start_epoch),
+            end: (protocol < 12).then(|| boundary(start_epoch + 1)),
+            epoch_length: 432000,
+            slot_length: 1,
+            protocol,
+        }
+    }
+
+    /// The parameters each era summary carries for a set at `protocol`.
+    fn summary_params(protocol: u16) -> (PParamsSet, Vec<Option<u5c::cardano::PParams>>) {
+        let set = live_set(&node()).with(Val::ProtocolVersion((protocol.into(), 0)));
+        let eras = [era(10, 0), era(12, 1)];
+        let mapper = interop::Mapper::new(ToyDomain::new(None, None));
+
+        let summaries = map_era_summaries(&mapper, eras.iter(), &set).unwrap();
+
+        (
+            set,
+            summaries.into_iter().map(|x| x.protocol_params).collect(),
+        )
+    }
+
+    /// The active Dijkstra era is summarised with the parameters ReadParams
+    /// serves for the same set, Dijkstra fields included.
+    #[test]
+    fn a_dijkstra_era_summary_serves_the_dijkstra_parameters() {
+        let (set, served) = summary_params(12);
+
+        let active = served[1].as_ref().expect("the Dijkstra era is active");
+
+        assert_eq!(served_fields(active), served_fields(&serve(&set)));
+        assert_eq!(served[0], None, "only the active era carries parameters");
+    }
+
+    /// The must-not case. An active Conway era is summarised with the Conway
+    /// parameters ReadParams serves, and no Dijkstra field.
+    #[test]
+    fn a_conway_era_summary_serves_the_conway_parameters() {
+        let (set, served) = summary_params(10);
+
+        let active = served[0].as_ref().expect("the Conway era is active");
+
+        assert_eq!(served_fields(active), served_fields(&serve(&set)));
+        assert_eq!(served[1], None, "only the active era carries parameters");
     }
 }
