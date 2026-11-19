@@ -176,18 +176,33 @@ pub struct CertifiedPayload {
 /// Keying by slot rather than by position is what stops a short or reordered
 /// block batch from moving one block's transactions onto another.
 #[derive(Debug, Default)]
-pub struct PendingPayloads(BTreeMap<u64, Option<CertifiedPayload>>);
+pub struct PendingPayloads(BTreeMap<u64, Payload>);
+
+/// The endorser block a certification names, owed until its fetch returns.
+#[derive(Debug)]
+enum Payload {
+    Owed(AnnouncedEndorserBlock),
+    Fetched(CertifiedPayload),
+}
 
 impl PendingPayloads {
-    /// Records that the block at this slot certifies an endorser block, before
+    /// Records that the block at this slot certifies `endorser_block`, before
     /// anything has been fetched for it.
-    pub fn expect(&mut self, certifying_slot: u64) {
-        self.0.entry(certifying_slot).or_insert(None);
+    pub fn expect(&mut self, certifying_slot: u64, endorser_block: AnnouncedEndorserBlock) {
+        self.0
+            .entry(certifying_slot)
+            .or_insert(Payload::Owed(endorser_block));
     }
 
     /// Fills in the payload for a certification already recorded.
     pub fn deliver(&mut self, certifying_slot: u64, payload: CertifiedPayload) {
-        self.0.insert(certifying_slot, Some(payload));
+        self.0.insert(certifying_slot, Payload::Fetched(payload));
+    }
+
+    /// Forgets every certification made by a block after `slot`, the slot of
+    /// the point a rollback kept as the tip.
+    pub fn roll_back_to(&mut self, slot: u64) {
+        self.0.retain(|certifying_slot, _| *certifying_slot <= slot);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -200,11 +215,13 @@ impl PendingPayloads {
 
     /// The certifications whose endorser block has not been fetched, oldest
     /// first, so a caller can go and get them.
-    pub fn outstanding(&self) -> Vec<u64> {
+    pub fn outstanding(&self) -> Vec<(u64, AnnouncedEndorserBlock)> {
         self.0
             .iter()
-            .filter(|(_, payload)| payload.is_none())
-            .map(|(slot, _)| *slot)
+            .filter_map(|(slot, payload)| match payload {
+                Payload::Owed(endorser_block) => Some((*slot, endorser_block.clone())),
+                Payload::Fetched(_) => None,
+            })
             .collect()
     }
 
@@ -238,10 +255,10 @@ impl PendingPayloads {
 
             match self.0.remove(&slot) {
                 None => out.push(cbor),
-                Some(None) => {
+                Some(Payload::Owed(_)) => {
                     return Err(Error::Unfetched { slot });
                 }
-                Some(Some(payload)) => {
+                Some(Payload::Fetched(payload)) => {
                     if own > 0 {
                         return Err(Error::CertifiesAndCarries { slot, count: own });
                     }
@@ -269,8 +286,8 @@ impl PendingPayloads {
     pub fn refuse_undelivered(&self) -> Result<(), Error> {
         match self.0.iter().next() {
             None => Ok(()),
-            Some((slot, None)) => Err(Error::Unfetched { slot: *slot }),
-            Some((slot, Some(payload))) => Err(Error::Undelivered {
+            Some((slot, Payload::Owed(_))) => Err(Error::Unfetched { slot: *slot }),
+            Some((slot, Payload::Fetched(payload))) => Err(Error::Undelivered {
                 slot: *slot,
                 hash: payload.endorser_block.hash.to_string(),
             }),
@@ -1264,7 +1281,7 @@ pub(crate) mod tests {
         );
 
         let mut pending = PendingPayloads::default();
-        pending.expect(certifying_slot);
+        pending.expect(certifying_slot, payload().endorser_block);
         pending.deliver(certifying_slot, payload());
 
         let out = pending
@@ -1322,7 +1339,7 @@ pub(crate) mod tests {
         let certifying = certifying_block();
         let slot = MultiEraBlock::decode(&certifying).unwrap().slot();
         let mut pending = PendingPayloads::default();
-        pending.expect(slot);
+        pending.expect(slot, payload().endorser_block);
         pending.deliver(
             slot,
             CertifiedPayload {
@@ -1385,7 +1402,7 @@ pub(crate) mod tests {
         let certifying = certifying_block();
         let slot = MultiEraBlock::decode(&certifying).unwrap().slot();
         let mut pending = PendingPayloads::default();
-        pending.expect(slot);
+        pending.expect(slot, payload().endorser_block);
         pending.deliver(
             slot,
             CertifiedPayload {
@@ -1548,7 +1565,7 @@ pub(crate) mod tests {
         let slot = MultiEraBlock::decode(&certifying).unwrap().slot();
         assert_eq!(slot, 491, "fixture precondition");
         let mut pending = PendingPayloads::default();
-        pending.expect(slot);
+        pending.expect(slot, payload().endorser_block);
         pending.deliver(
             slot,
             CertifiedPayload {
@@ -1656,7 +1673,7 @@ pub(crate) mod tests {
         assert!(own > 0, "fixture precondition");
 
         let mut pending = PendingPayloads::default();
-        pending.expect(slot);
+        pending.expect(slot, payload().endorser_block);
         pending.deliver(slot, payload());
 
         match pending.apply(vec![plain.clone()]) {
@@ -1675,7 +1692,7 @@ pub(crate) mod tests {
     #[test]
     fn a_payload_no_block_claimed_is_refused() {
         let mut pending = PendingPayloads::default();
-        pending.expect(999_999);
+        pending.expect(999_999, payload().endorser_block);
         pending.deliver(999_999, payload());
 
         let out = pending.apply(vec![plain_block()]).unwrap();
@@ -1715,9 +1732,12 @@ pub(crate) mod tests {
         let slot = MultiEraBlock::decode(&certifying).unwrap().slot();
 
         let mut pending = PendingPayloads::default();
-        pending.expect(slot);
+        pending.expect(slot, payload().endorser_block);
 
-        assert_eq!(pending.outstanding(), vec![slot]);
+        assert_eq!(
+            pending.outstanding(),
+            vec![(slot, payload().endorser_block)]
+        );
 
         let err = pending
             .apply(vec![plain_block(), certifying.clone()])
@@ -1730,7 +1750,7 @@ pub(crate) mod tests {
 
         // The same block, with the endorser block delivered, resolves.
         let mut pending = PendingPayloads::default();
-        pending.expect(slot);
+        pending.expect(slot, payload().endorser_block);
         pending.deliver(slot, payload());
         assert!(pending.outstanding().is_empty());
 
@@ -1747,7 +1767,7 @@ pub(crate) mod tests {
     #[test]
     fn both_kinds_of_leftover_are_refused_and_say_which() {
         let mut unfetched = PendingPayloads::default();
-        unfetched.expect(4242);
+        unfetched.expect(4242, payload().endorser_block);
 
         match unfetched.refuse_undelivered().expect_err("must refuse") {
             Error::Unfetched { slot } => assert_eq!(slot, 4242),
@@ -1755,7 +1775,7 @@ pub(crate) mod tests {
         }
 
         let mut unapplied = PendingPayloads::default();
-        unapplied.expect(4242);
+        unapplied.expect(4242, payload().endorser_block);
         unapplied.deliver(4242, payload());
 
         match unapplied.refuse_undelivered().expect_err("must refuse") {

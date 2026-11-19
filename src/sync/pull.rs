@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use dolos_cardano::consensus::{ChainFragment, RollbackResult};
@@ -122,7 +121,6 @@ fn to_traverse(header: &HeaderContent) -> Result<MultiEraHeader<'_>, WorkerError
 /// leaves a debt a later pass retries.
 fn record_certification(
     payloads: &mut PendingPayloads,
-    outstanding: &mut BTreeMap<u64, AnnouncedEndorserBlock>,
     certifying_slot: u64,
     certified: Option<AnnouncedEndorserBlock>,
 ) -> bool {
@@ -137,10 +135,26 @@ fn record_certification(
         "a ranking block certifies an endorser block"
     );
 
-    payloads.expect(certifying_slot);
-    outstanding.insert(certifying_slot, eb);
+    payloads.expect(certifying_slot, eb);
 
     true
+}
+
+/// Rolls the fragment back to `point` and forgets the certifications of the
+/// blocks the rollback removed.
+fn roll_back(
+    chain: &mut ChainFragment,
+    payloads: &mut PendingPayloads,
+    point: &ChainPoint,
+) -> RollbackResult {
+    let result = chain.roll_back(point);
+
+    match &result {
+        RollbackResult::Handled => payloads.roll_back_to(point.slot()),
+        RollbackResult::OutOfScope(_) => *payloads = PendingPayloads::default(),
+    }
+
+    result
 }
 
 // ============================================================================
@@ -218,10 +232,6 @@ pub struct Worker {
     /// certified them to arrive from blockfetch, and the certifications still
     /// owed one.
     payloads: PendingPayloads,
-
-    /// Which endorser block each recorded certification is owed, so a fetch
-    /// that failed can be tried again.
-    outstanding: BTreeMap<u64, AnnouncedEndorserBlock>,
 }
 
 impl Worker {
@@ -283,7 +293,7 @@ impl Worker {
 
                     let chain_point = ChainPoint::from(point);
 
-                    match self.chain.roll_back(&chain_point) {
+                    match roll_back(&mut self.chain, &mut self.payloads, &chain_point) {
                         RollbackResult::OutOfScope(point) => {
                             return Ok(PullResult::Rollback(point))
                         }
@@ -352,12 +362,7 @@ impl Worker {
             WorkerError::Panic
         })?;
 
-        let owed = record_certification(
-            &mut self.payloads,
-            &mut self.outstanding,
-            header.slot(),
-            certified,
-        );
+        let owed = record_certification(&mut self.payloads, header.slot(), certified);
 
         if !owed {
             return Ok(());
@@ -379,11 +384,7 @@ impl Worker {
             return Ok(());
         };
 
-        for slot in self.payloads.outstanding() {
-            let Some(eb) = self.outstanding.get(&slot).cloned() else {
-                continue;
-            };
-
+        for (slot, eb) in self.payloads.outstanding() {
             let txs = match client.fetch(&eb).await {
                 Ok(txs) => txs,
                 Err(err) => {
@@ -410,7 +411,6 @@ impl Worker {
                 "endorser block fetched"
             );
 
-            self.outstanding.remove(&slot);
             self.payloads.deliver(
                 slot,
                 CertifiedPayload {
@@ -543,7 +543,6 @@ impl gasket::framework::Worker<Stage> for Worker {
             leios,
             held,
             payloads: PendingPayloads::default(),
-            outstanding: BTreeMap::new(),
         };
 
         Ok(worker)
@@ -575,15 +574,10 @@ impl gasket::framework::Worker<Stage> for Worker {
         match self.pull_headers(max_headers, stage).await? {
             PullResult::Blocks(points) => self.fetch_and_flush(&points, stage).await?,
             PullResult::Rollback(point) => {
-                // A rollback invalidates anything fetched for a block that is
-                // no longer on the chain, and the next header
-                // names the block stored at the rollback point
-                // as its parent. The endorser transactions of a
-                // rolled back block are undone with it, because
-                // they are part of the block bytes the log holds.
-                self.payloads = PendingPayloads::default();
-                self.outstanding.clear();
-
+                // The next header names the block stored at the rollback point
+                // as its parent. The endorser transactions of a rolled back
+                // block are undone with it, because they are part of the block
+                // bytes the log holds.
                 if self.leios.is_some() {
                     let peer = &mut self.peer_session;
                     self.held =
@@ -800,13 +794,7 @@ mod tests {
         assert_eq!(certified, None);
 
         let mut payloads = PendingPayloads::default();
-        let mut outstanding = BTreeMap::new();
-        assert!(!record_certification(
-            &mut payloads,
-            &mut outstanding,
-            1_209_609,
-            certified
-        ));
+        assert!(!record_certification(&mut payloads, 1_209_609, certified));
         assert!(payloads.is_empty());
     }
 
@@ -839,15 +827,105 @@ mod tests {
             );
 
             let mut payloads = PendingPayloads::default();
-            let mut outstanding = BTreeMap::new();
             assert!(record_certification(
                 &mut payloads,
-                &mut outstanding,
                 1_202_752,
-                certified
+                certified.clone()
             ));
-            assert_eq!(payloads.outstanding(), vec![1_202_752]);
+            assert_eq!(
+                payloads.outstanding(),
+                vec![(1_202_752, certified.unwrap())]
+            );
         }
+    }
+
+    fn at(slot: u64, byte: u8) -> ChainPoint {
+        ChainPoint::Specific(slot, BlockHash::new([byte; 32]))
+    }
+
+    fn endorser_block(slot: u64, byte: u8) -> AnnouncedEndorserBlock {
+        AnnouncedEndorserBlock {
+            slot,
+            hash: BlockHash::new([byte; 32]),
+            size: 1,
+        }
+    }
+
+    /// A fragment of three pulled blocks after slot 100, where the blocks at
+    /// 120 and 130 certify, and the endorser block certified at 130 has been
+    /// fetched.
+    fn certifying_fragment() -> (ChainFragment, PendingPayloads) {
+        let mut chain = ChainFragment::start(at(100, 0));
+
+        for (slot, byte) in [(110, 1), (120, 2), (130, 3)] {
+            chain.roll_forward(at(slot, byte), None).unwrap();
+        }
+
+        let mut payloads = PendingPayloads::default();
+        record_certification(&mut payloads, 120, Some(endorser_block(110, 0xa)));
+        record_certification(&mut payloads, 130, Some(endorser_block(120, 0xb)));
+        payloads.deliver(
+            130,
+            CertifiedPayload {
+                endorser_block: endorser_block(120, 0xb),
+                txs: vec![vec![0x80]],
+            },
+        );
+
+        (chain, payloads)
+    }
+
+    /// A rollback inside the pulled fragment keeps the certification of the
+    /// block at the rollback point and forgets the one of the block after it.
+    #[test]
+    fn a_rollback_inside_the_fragment_forgets_the_removed_blocks_certifications() {
+        let (mut chain, mut payloads) = certifying_fragment();
+
+        let result = roll_back(&mut chain, &mut payloads, &at(120, 2));
+
+        assert!(matches!(result, RollbackResult::Handled));
+        assert_eq!(
+            payloads.outstanding(),
+            vec![(120, endorser_block(110, 0xa))],
+            "the certification at the rollback point is still owed"
+        );
+        assert_eq!(
+            payloads.len(),
+            1,
+            "the endorser block fetched for the rolled back block at 130 is gone"
+        );
+    }
+
+    /// A block that replaces a rolled back one at the same slot owes the
+    /// endorser block it certifies, not the one fetched for the block it
+    /// replaced.
+    #[test]
+    fn a_replacing_block_owes_its_own_endorser_block() {
+        let (mut chain, mut payloads) = certifying_fragment();
+
+        roll_back(&mut chain, &mut payloads, &at(120, 2));
+        chain.roll_forward(at(130, 4), None).unwrap();
+        record_certification(&mut payloads, 130, Some(endorser_block(120, 0xc)));
+
+        assert_eq!(
+            payloads.outstanding(),
+            vec![
+                (120, endorser_block(110, 0xa)),
+                (130, endorser_block(120, 0xc))
+            ]
+        );
+    }
+
+    /// A rollback to a point before the pulled fragment forgets every
+    /// certification, since every block that made one is gone.
+    #[test]
+    fn a_rollback_before_the_fragment_forgets_every_certification() {
+        let (mut chain, mut payloads) = certifying_fragment();
+
+        let result = roll_back(&mut chain, &mut payloads, &at(90, 9));
+
+        assert!(matches!(result, RollbackResult::OutOfScope(_)));
+        assert!(payloads.is_empty());
     }
 
     /// A certificate whose parent is not held is refused, since the
