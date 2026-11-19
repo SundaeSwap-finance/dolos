@@ -577,9 +577,19 @@ pub fn inline_endorser_transactions(
         .map(|tx| minicbor::decode::<dijkstra::BlockTransaction>(tx))
         .collect::<Result<_, _>>()?;
 
-    block.block_body.transactions = MaybeIndefArray::Def(replacement);
+    block.block_body.transactions = ledger_list(replacement);
 
     Ok(minicbor::to_vec((era, block)).expect("write to a vec"))
+}
+
+/// The list header the ledger writes, definite up to 23 elements and indefinite
+/// above.
+fn ledger_list<T>(items: Vec<T>) -> MaybeIndefArray<T> {
+    if items.len() <= 23 {
+        MaybeIndefArray::Def(items)
+    } else {
+        MaybeIndefArray::Indef(items)
+    }
 }
 
 #[cfg(test)]
@@ -1368,5 +1378,33 @@ mod tests {
         let mut expected = before;
         expected[5].1 = false;
         assert_eq!(after, expected);
+    }
+
+    /// Whether the block that inlines the first `count` endorser transactions
+    /// writes its transaction array with an indefinite length header.
+    fn inlined_header_is_indefinite(count: usize) -> bool {
+        let (block, txs) = certifying_block_and_endorser_txs();
+        let inlined = inline_endorser_transactions(block, &txs[..count]).unwrap();
+        let (_, block): (u16, dijkstra::Block) = minicbor::decode(&inlined).unwrap();
+
+        matches!(block.block_body.transactions, MaybeIndefArray::Indef(_))
+    }
+
+    /// The must-not case, a block of up to 23 transactions keeps a definite
+    /// header.
+    #[test]
+    fn up_to_twenty_three_inlined_transactions_keep_a_definite_header() {
+        for count in [0, 1, 23] {
+            assert!(!inlined_header_is_indefinite(count), "{count} transactions");
+        }
+    }
+
+    /// The must-fire case, a block of more than 23 transactions takes the
+    /// indefinite header the node writes.
+    #[test]
+    fn more_than_twenty_three_inlined_transactions_take_an_indefinite_header() {
+        for count in [24, 67] {
+            assert!(inlined_header_is_indefinite(count), "{count} transactions");
+        }
     }
 }
