@@ -44,7 +44,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # A pull request run tests a merge commit, so only a push run tests the pinned commit.
       - name: Find a successful pallas CI push run for each pallas commit in Cargo.lock
         shell: bash
         env:
@@ -68,20 +67,7 @@ jobs:
               print(repo, sha)
           EOF
           )
-          failed=0
-          while read -r repo sha; do
-            select="[.workflow_runs[] | select(.head_sha == \"$sha\" and .path == \".github/workflows/ci.yml\" and .event == \"push\" and .conclusion == \"success\")][0].html_url // \"\""
-            if ! url=$(gh api "repos/$repo/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&status=success" --jq "$select"); then
-              echo "::error::pallas $repo@$sha: its CI runs could not be read"
-              failed=1
-            elif [ -z "$url" ]; then
-              echo "::error::pallas $repo@$sha has no successful CI push run"
-              failed=1
-            else
-              echo "pallas $repo@$sha passed CI in $url"
-            fi
-          done <<< "$pins"
-          exit "$failed"
+          bash .github/scripts/require-pallas-ci.sh <<< "$pins"
 
   build:
     continue-on-error: true
