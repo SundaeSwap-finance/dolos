@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use dolos_core::{BlockHash, BlockSlot, ChainPoint, RawBlock};
 use pallas::{
-    codec::utils::{Bytes, KeepRaw},
+    codec::utils::{Bytes, KeepRaw, MaybeIndefArray, Nullable},
     crypto::hash::Hash,
     ledger::{
         primitives::{
             alonzo,
             conway::{Block, Header, HeaderBody, OperationalCert, WitnessSet},
-            VrfCert,
+            dijkstra, VrfCert,
         },
         traverse::{ComputeHash, Era},
     },
@@ -157,6 +157,79 @@ pub fn make_conway_block_with_tx(
     let wrapper = (CONWAY_BLOCK_WRAPPER, block);
 
     let raw_bytes = pallas::codec::minicbor::to_vec(&wrapper).unwrap();
+    let chain_point = ChainPoint::Specific(slot, hash);
+
+    (chain_point, Arc::new(raw_bytes))
+}
+
+/// Hard fork combinator variant index for a Dijkstra block.
+const DIJKSTRA_BLOCK_WRAPPER: u16 = 8;
+
+/// A Dijkstra ranking block at `slot` holding the one successful transaction
+/// given.
+pub fn make_dijkstra_block_with_tx(
+    slot: BlockSlot,
+    tx_body: dijkstra::TransactionBody<'static>,
+) -> (ChainPoint, RawBlock) {
+    let header_body = dijkstra::HeaderBody {
+        block_number: 1,
+        slot,
+        prev_hash: Some(Hash::from([9u8; 32])),
+        issuer_vkey: Bytes::from(vec![0x10, 0x11]),
+        vrf_vkey: Bytes::from(vec![0x12, 0x13]),
+        vrf_result: VrfCert(Bytes::from(vec![0x14]), Bytes::from(vec![0x15])),
+        block_body_size: 0,
+        block_body_hash: Hash::from([0u8; 32]),
+        operational_cert: OperationalCert {
+            operational_cert_hot_vkey: Bytes::from(vec![0x16]),
+            operational_cert_sequence_number: 1,
+            operational_cert_kes_period: 0,
+            operational_cert_sigma: Bytes::from(vec![0x17]),
+        },
+        header_version_info: dijkstra::HeaderVersionInfo {
+            highest_supported_major_version: 12,
+            self_reported_software_tag: 0,
+        },
+        block_body_contains_leios_cert: false,
+        eb_announcement: Nullable::Null,
+    };
+
+    let header = dijkstra::Header {
+        header_body,
+        body_signature: Bytes::from(vec![0x18]),
+    };
+
+    let witness_set = dijkstra::WitnessSet {
+        vkeywitness: None,
+        native_script: None,
+        bootstrap_witness: None,
+        plutus_v1_script: None,
+        plutus_data: None,
+        redeemer: None,
+        plutus_v2_script: None,
+        plutus_v3_script: None,
+        plutus_v4_script: None,
+    };
+
+    let transaction = dijkstra::BlockTransaction {
+        transaction_body: KeepRaw::from(tx_body),
+        transaction_witness_set: KeepRaw::from(witness_set),
+        auxiliary_data: Nullable::Null,
+        success: true,
+    };
+
+    let block = dijkstra::Block {
+        header: KeepRaw::from(header),
+        block_body: dijkstra::BlockBody {
+            transactions: MaybeIndefArray::Def(vec![transaction]),
+            leios_certificate: Nullable::Null,
+            peras_certificate: Nullable::Null,
+        },
+    };
+
+    let hash = block.header.compute_hash();
+
+    let raw_bytes = pallas::codec::minicbor::to_vec((DIJKSTRA_BLOCK_WRAPPER, block)).unwrap();
     let chain_point = ChainPoint::Specific(slot, hash);
 
     (chain_point, Arc::new(raw_bytes))

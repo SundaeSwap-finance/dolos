@@ -10,14 +10,14 @@ use pallas::{
     ledger::{
         addresses::{Address, Network, ShelleyPaymentPart, StakeAddress, StakePayload},
         primitives::{
-            alonzo::{self, Certificate as AlonzoCert},
-            conway::{Certificate as ConwayCert, DRep, DatumOption},
+            alonzo,
+            conway::{DRep, DatumOption},
             Epoch, ExUnitPrices, ExUnits, PlutusData, StakeCredential,
         },
         traverse::{
-            ComputeHash, MultiEraBlock, MultiEraCert, MultiEraInput, MultiEraOutput,
-            MultiEraRedeemer, MultiEraRedeemerTag, MultiEraScriptRef, MultiEraTx, MultiEraValue,
-            OriginalHash,
+            ComputeHash, MultiEraBlock, MultiEraCert, MultiEraCertKind, MultiEraInput,
+            MultiEraOutput, MultiEraRedeemer, MultiEraRedeemerTag, MultiEraScriptRef, MultiEraTx,
+            MultiEraValue, OriginalHash,
         },
     },
 };
@@ -26,7 +26,6 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    ops::Deref,
     sync::{Arc, LazyLock},
     time::Duration,
 };
@@ -1567,23 +1566,8 @@ impl<'a> TxModelBuilder<'a> {
             .tx()?
             .certs()
             .iter()
-            .filter_map(|cert| match cert {
-                MultiEraCert::AlonzoCompatible(cow) => {
-                    if let AlonzoCert::PoolRegistration { operator, .. } = *(**cow).clone() {
-                        Some(operator)
-                    } else {
-                        None
-                    }
-                }
-                MultiEraCert::Conway(cow) => {
-                    if let ConwayCert::PoolRegistration { operator, .. } = *(**cow).clone() {
-                        Some(operator)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
+            .filter_map(|cert| pallas_extras::cert_as_pool_registration(cert))
+            .map(|registration| registration.operator)
             .filter_map(|operator| {
                 match facade.read_cardano_entity::<PoolState>(operator.as_slice()) {
                     Ok(Some(state)) => Some(Ok((operator, state))),
@@ -1601,36 +1585,12 @@ impl<'a> TxModelBuilder<'a> {
             .tx()?
             .certs()
             .iter()
-            .filter_map(|cert| match cert {
-                MultiEraCert::AlonzoCompatible(cow) => {
-                    if let AlonzoCert::PoolRegistration {
-                        operator,
-                        ref pool_metadata,
-                        ..
-                    } = *(**cow).clone()
-                    {
-                        pool_metadata
-                            .as_ref()
-                            .map(|meta| (operator, meta.url.clone(), meta.hash.clone()))
-                    } else {
-                        None
-                    }
-                }
-                MultiEraCert::Conway(cow) => {
-                    if let ConwayCert::PoolRegistration {
-                        operator,
-                        ref pool_metadata,
-                        ..
-                    } = *(**cow).clone()
-                    {
-                        pool_metadata
-                            .as_ref()
-                            .map(|meta| (operator, meta.url.clone(), meta.hash.clone()))
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
+            .filter_map(|cert| pallas_extras::cert_as_pool_registration(cert))
+            .filter_map(|registration| {
+                let operator = registration.operator;
+                registration
+                    .pool_metadata
+                    .map(|meta| (operator, meta.url, meta.hash))
             })
             .collect_vec();
 
@@ -1886,41 +1846,13 @@ impl<'a> IntoModel<TxContentUtxo> for TxModelBuilder<'a> {
     }
 }
 
-macro_rules! match_certs {
-    ($tx:expr, "alonzo", $cert:ident) => {
-        $tx.certs()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, x)| x.as_alonzo().map(|x| (index, x)))
-            .filter(|(_, x)| matches!(x, AlonzoCert::$cert { .. }))
-    };
-
-    ($tx:expr, "conway", $cert:ident) => {
-        $tx.certs()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, x)| x.as_conway().map(|x| (index, x)))
-            .filter(|(_, x)| matches!(x, ConwayCert::$cert { .. }))
-    };
-}
-
 macro_rules! count_certs {
-    ($tx:expr, "alonzo", $cert:ident) => {{
-        let alonzo = match_certs!($tx, "alonzo", $cert).count();
-        alonzo
-    }};
-
-    ($tx:expr, "conway", $cert:ident) => {{
-        let conway = match_certs!($tx, "conway", $cert).count();
-        conway
-    }};
-
-    ($tx:expr, $cert:ident) => {{
-        let alonzo = match_certs!($tx, "alonzo", $cert).count();
-        let conway = match_certs!($tx, "conway", $cert).count();
-
-        alonzo + conway
-    }};
+    ($tx:expr, $kind:ident) => {
+        $tx.certs()
+            .iter()
+            .filter(|cert| matches!(cert.kind(), Some(MultiEraCertKind::$kind(..))))
+            .count()
+    };
 }
 
 impl IntoModel<TxContent> for TxModelBuilder<'_> {
@@ -1966,7 +1898,7 @@ impl IntoModel<TxContent> for TxModelBuilder<'_> {
             valid_contract: tx.is_valid(),
             block_time: try_into_or_500!(block_time),
             withdrawal_count: tx.withdrawals().collect::<Vec<_>>().len() as i32,
-            mir_cert_count: count_certs!(tx, "alonzo", MoveInstantaneousRewardsCert) as i32,
+            mir_cert_count: count_certs!(tx, MoveInstantaneousRewards) as i32,
             delegation_count: count_certs!(tx, StakeDelegation) as i32,
             stake_cert_count: count_certs!(tx, StakeRegistration) as i32,
             pool_update_count: count_certs!(tx, PoolRegistration) as i32,
@@ -2393,36 +2325,18 @@ impl IntoModel<Vec<TxContentDelegationsInner>> for TxModelBuilder<'_> {
             .map(|(a, _)| (a + 1) as i32)
             .unwrap_or_default();
 
-        let items =
-            certs
-                .into_iter()
-                .enumerate()
-                .filter_map(|(index, cert)| match cert {
-                    MultiEraCert::AlonzoCompatible(cert) => {
-                        match &**cert {
-                            AlonzoCert::StakeDelegation(cred, pool) => Some(
-                                build_delegation_inner(index, cred, pool, network, active_epoch),
-                            ),
-                            _ => None,
-                        }
-                    }
-                    MultiEraCert::Conway(cert) => {
-                        match &**cert {
-                            ConwayCert::StakeDelegation(cred, pool) => Some(
-                                build_delegation_inner(index, cred, pool, network, active_epoch),
-                            ),
-                            ConwayCert::StakeRegDeleg(cred, pool, _) => Some(
-                                build_delegation_inner(index, cred, pool, network, active_epoch),
-                            ),
-                            ConwayCert::StakeVoteRegDeleg(cred, pool, _, _) => Some(
-                                build_delegation_inner(index, cred, pool, network, active_epoch),
-                            ),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                })
-                .try_collect()?;
+        let items = certs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cert)| match cert.kind()? {
+                MultiEraCertKind::StakeDelegation(cred, pool)
+                | MultiEraCertKind::StakeRegDeleg(cred, pool, _)
+                | MultiEraCertKind::StakeVoteRegDeleg(cred, pool, _, _) => Some(
+                    build_delegation_inner(index, cred, pool, network, active_epoch),
+                ),
+                _ => None,
+            })
+            .try_collect()?;
 
         Ok(items)
     }
@@ -2430,13 +2344,9 @@ impl IntoModel<Vec<TxContentDelegationsInner>> for TxModelBuilder<'_> {
 
 fn build_mir_inners(
     index: usize,
-    mir: &alonzo::Certificate,
+    mir: &alonzo::MoveInstantaneousReward,
     network: Network,
 ) -> Result<Vec<TxContentMirsInner>, StatusCode> {
-    let AlonzoCert::MoveInstantaneousRewardsCert(mir) = mir else {
-        return Ok(vec![]);
-    };
-
     let pot = match mir.source {
         alonzo::InstantaneousRewardSource::Reserves => Pot::Reserve,
         alonzo::InstantaneousRewardSource::Treasury => Pot::Treasury,
@@ -2476,8 +2386,16 @@ impl IntoModel<Vec<TxContentMirsInner>> for TxModelBuilder<'_> {
 
         let network = self.network.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        let items = match_certs!(tx, "alonzo", MoveInstantaneousRewardsCert)
-            .map(|(index, cert)| build_mir_inners(index, cert, network))
+        let items = tx
+            .certs()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cert)| match cert.kind()? {
+                MultiEraCertKind::MoveInstantaneousRewards(mir) => {
+                    Some(build_mir_inners(index, mir, network))
+                }
+                _ => None,
+            })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
@@ -2493,35 +2411,20 @@ impl IntoModel<Vec<TxContentPoolRetiresInner>> for TxModelBuilder<'_> {
     fn into_model(self) -> Result<Vec<TxContentPoolRetiresInner>, StatusCode> {
         let tx = self.tx()?;
 
-        let alonzo = match_certs!(tx, "alonzo", PoolRetirement)
+        let items = tx
+            .certs()
+            .iter()
+            .enumerate()
             .filter_map(|(index, cert)| {
-                let AlonzoCert::PoolRetirement(pool, epoch) = cert else {
-                    return None;
-                };
+                let retirement = pallas_extras::cert_as_pool_retirement(cert)?;
 
                 Some(TxContentPoolRetiresInner {
-                    pool_id: bech32_pool(pool.as_slice()).ok()?,
+                    pool_id: bech32_pool(retirement.operator.as_slice()).ok()?,
                     cert_index: index as i32,
-                    retiring_epoch: *epoch as i32,
+                    retiring_epoch: retirement.epoch as i32,
                 })
             })
-            .collect::<Vec<_>>();
-
-        let conway = match_certs!(tx, "conway", PoolRetirement)
-            .filter_map(|(index, cert)| {
-                let ConwayCert::PoolRetirement(pool, epoch) = cert else {
-                    return None;
-                };
-
-                Some(TxContentPoolRetiresInner {
-                    pool_id: bech32_pool(pool.as_slice()).ok()?,
-                    cert_index: index as i32,
-                    retiring_epoch: *epoch as i32,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let items = alonzo.into_iter().chain(conway).collect();
+            .collect();
 
         Ok(items)
     }
@@ -2595,122 +2498,28 @@ struct PoolUpdateModelBuilder {
 }
 
 impl PoolUpdateModelBuilder {
-    pub fn extract_operator(cert: &MultiEraCert) -> Option<Hash<28>> {
-        match cert {
-            MultiEraCert::AlonzoCompatible(cow) => match *(**cow).clone() {
-                AlonzoCert::PoolRegistration { operator, .. } => Some(operator),
-                _ => None,
-            },
-            MultiEraCert::Conway(cow) => match *(**cow).clone() {
-                ConwayCert::PoolRegistration { operator, .. } => Some(operator),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-    fn new_from_alonzo(
-        cert: AlonzoCert,
-        cert_index: usize,
-        network: Network,
-        current_epoch: i32,
-        is_registration: bool,
-    ) -> Option<Self> {
-        let AlonzoCert::PoolRegistration {
-            operator,
-            vrf_keyhash,
-            pledge,
-            cost,
-            margin,
-            reward_account,
-            pool_owners,
-            relays,
-            pool_metadata,
-        } = cert
-        else {
-            return None;
-        };
-
-        Some(Self {
-            operator,
-            vrf_keyhash,
-            pledge,
-            cost,
-            margin,
-            reward_account,
-            pool_owners,
-            relays,
-            pool_metadata,
-            cert_index,
-            network,
-            current_epoch,
-            offchain_pool_metadata: None,
-            is_registration,
-        })
-    }
-
-    fn new_from_conway(
-        cert: ConwayCert,
-        cert_index: usize,
-        network: Network,
-        current_epoch: i32,
-        is_registration: bool,
-    ) -> Option<Self> {
-        let ConwayCert::PoolRegistration {
-            operator,
-            vrf_keyhash,
-            pledge,
-            cost,
-            margin,
-            reward_account,
-            pool_owners,
-            relays,
-            pool_metadata,
-        } = cert
-        else {
-            return None;
-        };
-
-        Some(Self {
-            operator,
-            vrf_keyhash,
-            pledge,
-            cost,
-            margin,
-            reward_account,
-            pool_owners: pool_owners.to_vec(),
-            relays,
-            pool_metadata,
-            cert_index,
-            network,
-            current_epoch,
-            offchain_pool_metadata: None,
-            is_registration,
-        })
-    }
-
     fn new(
-        cert: MultiEraCert,
+        registration: pallas_extras::MultiEraPoolRegistration,
         cert_index: usize,
         network: Network,
         current_epoch: i32,
         is_registration: bool,
-    ) -> Option<Self> {
-        match cert {
-            MultiEraCert::AlonzoCompatible(cow) => Self::new_from_alonzo(
-                (**cow).clone(),
-                cert_index,
-                network,
-                current_epoch,
-                is_registration,
-            ),
-            MultiEraCert::Conway(cow) => Self::new_from_conway(
-                (**cow).clone(),
-                cert_index,
-                network,
-                current_epoch,
-                is_registration,
-            ),
-            _ => None,
+    ) -> Self {
+        Self {
+            operator: registration.operator,
+            vrf_keyhash: registration.vrf_keyhash,
+            pledge: registration.pledge,
+            cost: registration.cost,
+            margin: registration.margin,
+            reward_account: registration.reward_account.into(),
+            pool_owners: registration.pool_owners,
+            relays: registration.relays,
+            pool_metadata: registration.pool_metadata,
+            cert_index,
+            network,
+            current_epoch,
+            offchain_pool_metadata: None,
+            is_registration,
         }
     }
 
@@ -2793,25 +2602,21 @@ impl IntoModel<Vec<TxContentPoolCertsInner>> for TxModelBuilder<'_> {
             .into_iter()
             .enumerate()
             .filter_map(|(cert_index, cert)| {
-                let is_registration = PoolUpdateModelBuilder::extract_operator(&cert)
-                    .map(|operator| {
-                        self.affected_pools
-                            .get(&operator)
-                            .map(|state| state.register_slot == self.block.slot())
-                            .unwrap_or(true)
-                    })
+                let registration = pallas_extras::cert_as_pool_registration(&cert)?;
+                let is_registration = self
+                    .affected_pools
+                    .get(&registration.operator)
+                    .map(|state| state.register_slot == self.block.slot())
                     .unwrap_or(true);
-                let builder = PoolUpdateModelBuilder::new(
-                    cert,
+                let mut builder = PoolUpdateModelBuilder::new(
+                    registration,
                     cert_index,
                     network,
                     epoch as i32,
                     is_registration,
                 );
-                builder.map(|mut x| {
-                    x.with_offchain(self.pool_metadata.get(&x.operator).cloned());
-                    x
-                })
+                builder.with_offchain(self.pool_metadata.get(&builder.operator).cloned());
+                Some(builder)
             })
             .map(|builder| builder.into_model())
             .try_collect()?;
@@ -2829,63 +2634,24 @@ struct StakeCertModelBuilder {
 
 impl StakeCertModelBuilder {
     fn new(cert: MultiEraCert, cert_index: usize, network: Network) -> Option<Self> {
-        match cert {
-            MultiEraCert::AlonzoCompatible(cow) => match cow.deref().deref() {
-                AlonzoCert::StakeRegistration(stake_credential) => Some(Self {
-                    stake_credential: stake_credential.clone(),
-                    is_registration: true,
-                    cert_index,
-                    network,
-                }),
-                AlonzoCert::StakeDeregistration(stake_credential) => Some(Self {
-                    stake_credential: stake_credential.clone(),
-                    is_registration: false,
-                    cert_index,
-                    network,
-                }),
-                _ => None,
-            },
-            MultiEraCert::Conway(cow) => match cow.deref().deref() {
-                ConwayCert::StakeRegistration(stake_credential) => Some(Self {
-                    stake_credential: stake_credential.clone(),
-                    is_registration: true,
-                    cert_index,
-                    network,
-                }),
-                ConwayCert::StakeDeregistration(stake_credential) => Some(Self {
-                    stake_credential: stake_credential.clone(),
-                    is_registration: false,
-                    cert_index,
-                    network,
-                }),
-                ConwayCert::Reg(stake_credential, _) => Some(Self {
-                    stake_credential: stake_credential.clone(),
-                    is_registration: true,
-                    cert_index,
-                    network,
-                }),
-                ConwayCert::StakeRegDeleg(stake_credential, _, _) => Some(Self {
-                    stake_credential: stake_credential.clone(),
-                    is_registration: true,
-                    cert_index,
-                    network,
-                }),
-                ConwayCert::StakeVoteRegDeleg(stake_credential, _, _, _) => Some(Self {
-                    stake_credential: stake_credential.clone(),
-                    is_registration: true,
-                    cert_index,
-                    network,
-                }),
-                ConwayCert::UnReg(stake_credential, _) => Some(Self {
-                    stake_credential: stake_credential.clone(),
-                    is_registration: false,
-                    cert_index,
-                    network,
-                }),
-                _ => None,
-            },
-            _ => None,
-        }
+        let (stake_credential, is_registration) = match cert.kind()? {
+            MultiEraCertKind::StakeRegistration(stake_credential)
+            | MultiEraCertKind::Reg(stake_credential, _)
+            | MultiEraCertKind::StakeRegDeleg(stake_credential, _, _)
+            | MultiEraCertKind::StakeVoteRegDeleg(stake_credential, _, _, _) => {
+                (stake_credential, true)
+            }
+            MultiEraCertKind::StakeDeregistration(stake_credential)
+            | MultiEraCertKind::UnReg(stake_credential, _) => (stake_credential, false),
+            _ => return None,
+        };
+
+        Some(Self {
+            stake_credential: stake_credential.clone(),
+            is_registration,
+            cert_index,
+            network,
+        })
     }
 }
 
@@ -3214,5 +2980,238 @@ mod required_signers_tests {
         let tx = MultiEraTx::DijkstraSub(Box::new(Cow::Owned(sub)), true);
 
         assert_eq!(served(&tx), Err(key_hash(8).to_string()));
+    }
+}
+
+#[cfg(test)]
+mod certificate_tests {
+    use dolos_cardano::{model::EraSummary, EraBoundary};
+    use dolos_core::RawBlock;
+    use pallas::codec::utils::{MaybeIndefArray, NonEmptySet, Set};
+    use pallas::ledger::primitives::{conway, dijkstra, RationalNumber};
+
+    use super::*;
+
+    const SLOT: u64 = 10;
+    const DEPOSIT: u64 = 2_000_000;
+    const RETIRING_EPOCH: u64 = 300;
+
+    fn credential() -> StakeCredential {
+        StakeCredential::AddrKeyhash(Hash::from([1u8; 28]))
+    }
+
+    fn pool() -> Hash<28> {
+        Hash::from([2u8; 28])
+    }
+
+    fn reward_account() -> Bytes {
+        [vec![0xe0], vec![3u8; 28]].concat().into()
+    }
+
+    fn margin() -> RationalNumber {
+        RationalNumber {
+            numerator: 1,
+            denominator: 10,
+        }
+    }
+
+    fn owners() -> Vec<Hash<28>> {
+        vec![Hash::from([4u8; 28])]
+    }
+
+    fn dijkstra_block() -> RawBlock {
+        let certificates = vec![
+            dijkstra::Certificate::Reg(credential(), DEPOSIT),
+            dijkstra::Certificate::StakeDelegation(credential(), pool()),
+            dijkstra::Certificate::PoolRegistration {
+                operator: pool(),
+                vrf_keyhash: Hash::from([5u8; 32]),
+                bls_key: None,
+                pledge: 1_000,
+                cost: 340_000_000,
+                margin: margin(),
+                reward_account: reward_account(),
+                pool_owners: dijkstra::Set::from(owners()),
+                relays: vec![],
+                pool_metadata: None,
+            },
+            dijkstra::Certificate::PoolRetirement(pool(), RETIRING_EPOCH),
+            dijkstra::Certificate::UnReg(credential(), DEPOSIT),
+        ];
+
+        let body = dijkstra::TransactionBody {
+            inputs: dijkstra::Set::from(vec![]),
+            outputs: MaybeIndefArray::Def(vec![]),
+            fee: 170_000,
+            ttl: None,
+            certificates: dijkstra::NonEmptySet::try_from(certificates).ok(),
+            withdrawals: None,
+            auxiliary_data_hash: None,
+            validity_interval_start: None,
+            mint: None,
+            script_data_hash: None,
+            collateral: None,
+            guards: None,
+            network_id: None,
+            collateral_return: None,
+            total_collateral: None,
+            reference_inputs: None,
+            voting_procedures: None,
+            proposal_procedures: None,
+            treasury_value: None,
+            donation: None,
+            sub_transactions: None,
+            required_top_level_guards: None,
+            direct_deposits: None,
+            account_balance_intervals: None,
+            starting_account_balance_intervals: None,
+        };
+
+        dolos_testing::blocks::make_dijkstra_block_with_tx(SLOT, body).1
+    }
+
+    fn conway_block() -> RawBlock {
+        let certificates = vec![
+            conway::Certificate::Reg(credential(), DEPOSIT),
+            conway::Certificate::StakeDelegation(credential(), pool()),
+            conway::Certificate::PoolRegistration {
+                operator: pool(),
+                vrf_keyhash: Hash::from([5u8; 32]),
+                pledge: 1_000,
+                cost: 340_000_000,
+                margin: margin(),
+                reward_account: reward_account(),
+                pool_owners: Set::from(owners()),
+                relays: vec![],
+                pool_metadata: None,
+            },
+            conway::Certificate::PoolRetirement(pool(), RETIRING_EPOCH),
+            conway::Certificate::UnReg(credential(), DEPOSIT),
+        ];
+
+        let body = conway::TransactionBody {
+            inputs: Set::from(vec![]),
+            outputs: vec![],
+            fee: 170_000,
+            ttl: None,
+            certificates: NonEmptySet::from_vec(certificates),
+            withdrawals: None,
+            auxiliary_data_hash: None,
+            validity_interval_start: None,
+            mint: None,
+            script_data_hash: None,
+            collateral: None,
+            required_signers: None,
+            network_id: None,
+            collateral_return: None,
+            total_collateral: None,
+            reference_inputs: None,
+            voting_procedures: None,
+            proposal_procedures: None,
+            treasury_value: None,
+            donation: None,
+        };
+
+        dolos_testing::blocks::make_conway_block_with_tx(SLOT, body, None, true).1
+    }
+
+    fn chain() -> ChainSummary {
+        let mut chain = ChainSummary::default();
+
+        chain.append_era(
+            12,
+            EraSummary {
+                start: EraBoundary {
+                    epoch: 0,
+                    slot: 0,
+                    timestamp: 0,
+                },
+                end: None,
+                epoch_length: 100,
+                slot_length: 1,
+                protocol: 12,
+            },
+        );
+
+        chain
+    }
+
+    /// The certificate views minibf serves for the one transaction of a block.
+    #[derive(Debug, PartialEq)]
+    struct Served {
+        counts: [i32; 4],
+        stake_addresses: Vec<TxContentStakeAddrInner>,
+        delegations: Vec<TxContentDelegationsInner>,
+        pool_updates: Vec<TxContentPoolCertsInner>,
+        pool_retirements: Vec<TxContentPoolRetiresInner>,
+    }
+
+    fn served(raw: &RawBlock) -> Served {
+        let block = MultiEraBlock::decode(&raw[..]).unwrap();
+        let hash = block.txs()[0].hash();
+
+        let builder = || {
+            TxModelBuilder::new(&raw[..], hash.as_slice())
+                .unwrap()
+                .with_chain(chain())
+                .with_network(Network::Testnet)
+        };
+
+        let content: TxContent = builder().into_model().unwrap();
+
+        Served {
+            counts: [
+                content.stake_cert_count,
+                content.delegation_count,
+                content.pool_update_count,
+                content.pool_retire_count,
+            ],
+            stake_addresses: builder().into_model().unwrap(),
+            delegations: builder().into_model().unwrap(),
+            pool_updates: builder().into_model().unwrap(),
+            pool_retirements: builder().into_model().unwrap(),
+        }
+    }
+
+    fn assert_serves_every_certificate(served: &Served) {
+        assert_eq!(served.counts[1..], [1, 1, 1]);
+        assert_eq!(
+            served
+                .stake_addresses
+                .iter()
+                .map(|x| (x.cert_index, x.registration))
+                .collect::<Vec<_>>(),
+            vec![(0, true), (4, false)]
+        );
+        assert_eq!(served.delegations.len(), 1);
+        assert_eq!(served.delegations[0].cert_index, 1);
+        assert_eq!(served.pool_updates.len(), 1);
+        assert_eq!(served.pool_updates[0].cert_index, 2);
+        assert_eq!(served.pool_updates[0].pledge, "1000");
+        assert_eq!(
+            served
+                .pool_retirements
+                .iter()
+                .map(|x| (x.cert_index, x.retiring_epoch))
+                .collect::<Vec<_>>(),
+            vec![(3, RETIRING_EPOCH as i32)]
+        );
+    }
+
+    /// The must-not case. A Conway transaction serves each certificate in the
+    /// view that names its kind.
+    #[test]
+    fn a_conway_transaction_serves_its_certificates() {
+        assert_serves_every_certificate(&served(&conway_block()));
+    }
+
+    /// The must-fire case. A Dijkstra transaction with the same certificates
+    /// is served exactly as the Conway one is.
+    #[test]
+    fn a_dijkstra_transaction_serves_its_certificates_as_conway_does() {
+        let dijkstra = served(&dijkstra_block());
+
+        assert_serves_every_certificate(&dijkstra);
+        assert_eq!(dijkstra, served(&conway_block()));
     }
 }

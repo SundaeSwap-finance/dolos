@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, ops::Deref};
+use std::collections::BTreeSet;
 
 use axum::{
     extract::{Path, Query, State},
@@ -34,12 +34,9 @@ use pallas::{
     ledger::{
         addresses::{Address, Network, StakeAddress, StakePayload},
         primitives::Epoch,
-        traverse::{MultiEraBlock, MultiEraCert, MultiEraTx},
+        traverse::{MultiEraBlock, MultiEraCert, MultiEraCertKind, MultiEraTx},
     },
 };
-
-use pallas::ledger::primitives::alonzo::Certificate as AlonzoCert;
-use pallas::ledger::primitives::conway::Certificate as ConwayCert;
 
 use crate::{
     error::Error,
@@ -621,16 +618,8 @@ fn build_delegation<D: Domain>(
     tx: &MultiEraTx,
     cert: &MultiEraCert,
 ) -> Result<Option<AccountDelegationContentInner>, StatusCode> {
-    let (cred, pool) = match cert {
-        MultiEraCert::AlonzoCompatible(cert) => match cert.deref().deref() {
-            AlonzoCert::StakeDelegation(cred, pool) => (cred, pool),
-            _ => return Ok(None),
-        },
-        MultiEraCert::Conway(cert) => match cert.deref().deref() {
-            ConwayCert::StakeDelegation(cred, pool) => (cred, pool),
-            _ => return Ok(None),
-        },
-        _ => return Ok(None),
+    let Some(MultiEraCertKind::StakeDelegation(cred, pool)) = cert.kind() else {
+        return Ok(None);
     };
 
     let address = mapping::stake_cred_to_address(cred, ctx.network);
@@ -672,21 +661,17 @@ fn build_registration<D: Domain>(
             .to_string())
     };
 
-    let (cred, is_registration, deposit) = match cert {
-        MultiEraCert::AlonzoCompatible(cert) => match cert.deref().deref() {
-            AlonzoCert::StakeRegistration(cred) => (cred, true, Some(key_deposit()?)),
-            AlonzoCert::StakeDeregistration(cred) => (cred, false, None),
-            _ => return Ok(None),
-        },
-        MultiEraCert::Conway(cert) => match cert.deref().deref() {
-            ConwayCert::StakeRegistration(cred) => (cred, true, Some(key_deposit()?)),
-            ConwayCert::StakeDeregistration(cred) => (cred, false, None),
-            ConwayCert::Reg(cred, coin) => (cred, true, Some(coin.to_string())),
-            ConwayCert::UnReg(cred, _) => (cred, false, None),
-            ConwayCert::StakeRegDeleg(cred, _, coin) => (cred, true, Some(coin.to_string())),
-            ConwayCert::StakeVoteRegDeleg(cred, _, _, coin) => (cred, true, Some(coin.to_string())),
-            _ => return Ok(None),
-        },
+    let (cred, is_registration, deposit) = match cert.kind() {
+        Some(MultiEraCertKind::StakeRegistration(cred)) => (cred, true, Some(key_deposit()?)),
+        Some(MultiEraCertKind::StakeDeregistration(cred)) => (cred, false, None),
+        Some(MultiEraCertKind::Reg(cred, coin)) => (cred, true, Some(coin.to_string())),
+        Some(MultiEraCertKind::UnReg(cred, _)) => (cred, false, None),
+        Some(MultiEraCertKind::StakeRegDeleg(cred, _, coin)) => {
+            (cred, true, Some(coin.to_string()))
+        }
+        Some(MultiEraCertKind::StakeVoteRegDeleg(cred, _, _, coin)) => {
+            (cred, true, Some(coin.to_string()))
+        }
         _ => return Ok(None),
     };
 
