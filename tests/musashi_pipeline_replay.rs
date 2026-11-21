@@ -808,6 +808,7 @@ fn with_listing_verdict(cbor: &[u8], success: bool) -> Vec<u8> {
 fn a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let mut answers = vec![];
+    let mut past_the_first = 0;
 
     for (entry, harvested) in &block_fixtures() {
         if sub_transactions(&MultiEraBlock::decode(harvested).unwrap()).is_empty() {
@@ -819,7 +820,8 @@ fn a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent() {
             let block = MultiEraBlock::decode(&cbor).unwrap();
             let query = AsyncQueryFacade::new(replay(entry, &cbor, true).domain);
 
-            for (_, _, _, sub) in sub_transactions(&block) {
+            for (_, _, position, sub) in sub_transactions(&block) {
+                past_the_first += usize::from(position > 0);
                 let hash = sub_hash(sub);
                 let answer = runtime.block_on(query.tx_cbor(hash.to_vec())).unwrap();
                 let read = answer
@@ -837,6 +839,10 @@ fn a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent() {
     }
 
     assert!(!answers.is_empty(), "no fixture lists a sub transaction");
+    assert!(
+        past_the_first > 0,
+        "no fixture lists a sub transaction after the first in its list"
+    );
 
     for (name, answer, expected) in answers {
         assert_eq!(answer, expected, "{name}: tx_cbor");
