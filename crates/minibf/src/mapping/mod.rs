@@ -3029,7 +3029,7 @@ mod certificate_tests {
                 bls_key: None,
                 pledge: 1_000,
                 cost: 340_000_000,
-                margin: margin(),
+                margin: margin().try_into().unwrap(),
                 reward_account: reward_account(),
                 pool_owners: dijkstra::Set::from(owners()),
                 relays: vec![],

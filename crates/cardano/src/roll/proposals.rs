@@ -61,7 +61,7 @@ fn set_dijkstra_pparams(update: &MultiEraParamUpdate, set: &mut PParamsSet) {
         ($($getter:ident => $variant:ident),*) => {
             $(
                 if let ParamRead::Proposed(value) = update.$getter() {
-                    set.set(PParamValue::$variant(value));
+                    set.set(PParamValue::$variant(value.into()));
                 }
             )*
         };
@@ -92,7 +92,7 @@ fn set_dijkstra_pparams(update: &MultiEraParamUpdate, set: &mut PParamsSet) {
     );
 
     if let ParamRead::Proposed(cap) = update.max_pledge_leverage() {
-        set.set(PParamValue::MaxPledgeLeverage(cap.into()));
+        set.set(PParamValue::MaxPledgeLeverage(cap.map(Into::into).into()));
     }
 
     if let ParamRead::Proposed(round) = update.peras_bootstrap_round() {

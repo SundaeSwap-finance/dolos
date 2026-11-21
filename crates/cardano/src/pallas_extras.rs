@@ -720,7 +720,9 @@ mod dijkstra_certificate_tests {
             margin: RationalNumber {
                 numerator: 3,
                 denominator: 100,
-            },
+            }
+            .try_into()
+            .unwrap(),
             reward_account: vec![0xe0].into(),
             pool_owners: vec![CRED.parse::<Hash<28>>().unwrap()].into(),
             relays: vec![],
