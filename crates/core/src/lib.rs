@@ -183,37 +183,27 @@ impl<'a> TryFrom<&'a EraCbor> for MultiEraTx<'a> {
 pub enum TxCbor {
     /// A top level transaction, with its era.
     Tx(EraCbor),
-    /// A Dijkstra sub transaction, with the validity flag of the transaction
-    /// that lists it.
-    DijkstraSub(Cbor, bool),
-}
-
-impl From<&MultiEraTx<'_>> for TxCbor {
-    fn from(tx: &MultiEraTx<'_>) -> Self {
-        match tx {
-            MultiEraTx::DijkstraSub(_, success) => TxCbor::DijkstraSub(tx.encode(), *success),
-            _ => TxCbor::Tx(EraCbor(tx.era().into(), tx.encode())),
-        }
-    }
+    /// A Dijkstra sub transaction, as the transaction that lists it and its
+    /// position in that list.
+    DijkstraSub { top: Cbor, index: usize },
 }
 
 impl<'a> TryFrom<&'a TxCbor> for MultiEraTx<'a> {
     type Error = pallas::ledger::traverse::Error;
 
     fn try_from(value: &'a TxCbor) -> Result<Self, Self::Error> {
-        use pallas::ledger::traverse::Error;
+        use pallas::ledger::traverse::{Era, Error};
 
         match value {
             TxCbor::Tx(EraCbor(era, cbor)) => {
                 MultiEraTx::decode_for_era((*era).try_into()?, cbor).map_err(Error::invalid_cbor)
             }
-            TxCbor::DijkstraSub(cbor, success) => {
-                let sub = minicbor::decode(cbor).map_err(Error::invalid_cbor)?;
-                Ok(MultiEraTx::DijkstraSub(
-                    Box::new(std::borrow::Cow::Owned(sub)),
-                    *success,
-                ))
-            }
+            TxCbor::DijkstraSub { top, index } => MultiEraTx::decode_for_era(Era::Dijkstra, top)
+                .map_err(Error::invalid_cbor)?
+                .sub_transactions()
+                .into_iter()
+                .nth(*index)
+                .ok_or_else(|| Error::invalid_cbor(format!("no sub transaction at {index}"))),
         }
     }
 }

@@ -16,7 +16,7 @@ use pallas::ledger::traverse::{
 
 use crate::{
     archive::ArchiveStore, ArchiveError, BlockBody, BlockHash, BlockHeight, BlockSlot, ChainError,
-    ChainPoint, Domain, DomainError, TagDimension, TxCbor, TxHash, TxOrder, TxRange,
+    ChainPoint, Domain, DomainError, EraCbor, TagDimension, TxCbor, TxHash, TxOrder, TxRange,
 };
 
 /// Lightweight block metadata for a transaction, extracted via a single decode.
@@ -67,6 +67,28 @@ pub fn tx_by_hash<'b>(
     hash: &[u8],
 ) -> Option<(TxOrder, MultiEraTx<'b>)> {
     tx_in(&block.txs(), hash)
+}
+
+/// The bytes of the transaction of a block whose hash is the one given, a sub
+/// transaction included.
+pub fn tx_cbor_by_hash(block: &MultiEraBlock<'_>, hash: &[u8]) -> Option<TxCbor> {
+    block.txs().iter().find_map(|tx| {
+        let index = tx
+            .sub_transactions()
+            .iter()
+            .position(|sub| sub.hash().as_slice() == hash);
+
+        match index {
+            Some(index) => Some(TxCbor::DijkstraSub {
+                top: tx.encode(),
+                index,
+            }),
+            None if tx.hash().as_slice() == hash => {
+                Some(TxCbor::Tx(EraCbor(tx.era().into(), tx.encode())))
+            }
+            None => None,
+        }
+    })
 }
 
 /// The transaction of `txs` whose hash is the one given, a sub transaction
@@ -588,11 +610,7 @@ where
 
         let block = MultiEraBlock::decode(raw.as_slice())
             .map_err(|e| DomainError::ChainError(ChainError::DecodingError(e)))?;
-        if let Some((_, tx)) = tx_by_hash(&block, &tx_hash) {
-            return Ok(Some(TxCbor::from(&tx)));
-        }
-
-        Ok(None)
+        Ok(tx_cbor_by_hash(&block, &tx_hash))
     }
 
     pub async fn slots_by_tag(

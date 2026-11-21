@@ -1130,10 +1130,9 @@ where
                             .map(|s| s * 1000)
                             .unwrap_or(0),
                     }),
-                    chain: Some(u5c::query::any_chain_tx::Chain::Cardano(match tx.top() {
-                        Some(top) => mapper.map_sub_tx(tx.tx(), top),
-                        None => mapper.map_tx(tx.tx()),
-                    })),
+                    chain: Some(u5c::query::any_chain_tx::Chain::Cardano(
+                        mapper.map_tx(tx.tx()),
+                    )),
                 }),
                 ledger_tip: cursor,
             })

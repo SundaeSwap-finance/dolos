@@ -229,8 +229,8 @@ fn tx_eval_to_u5c<R>(
         };
         let named = |msg| u5c::cardano::EvalReport {
             msg,
-            purpose: Some(purpose as i32),
-            index: Some(entry.index),
+            purpose: purpose as i32,
+            index: entry.index,
         };
         if !entry.success {
             result.errors.push(named(format!(

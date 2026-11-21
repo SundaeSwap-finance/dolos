@@ -2796,8 +2796,6 @@ impl IntoModel<HashMap<String, serde_json::Value>> for PlutusDataWrapper {
 
 #[cfg(test)]
 mod required_signers_tests {
-    use std::borrow::Cow;
-
     use pallas::codec::utils::{KeepRaw, MaybeIndefArray, Nullable};
     use pallas::ledger::primitives::dijkstra;
     use pallas::ledger::traverse::Era;
@@ -2899,6 +2897,21 @@ mod required_signers_tests {
         }
     }
 
+    /// The bytes of a top level transaction whose body lists only `sub`.
+    fn listing(sub: dijkstra::SubTransaction<'static>) -> Vec<u8> {
+        let mut body = body(None);
+        body.sub_transactions = dijkstra::NonEmptySet::from_vec(vec![sub]);
+
+        let tx = dijkstra::BlockTransaction {
+            transaction_body: KeepRaw::from(body),
+            transaction_witness_set: KeepRaw::from(witness_set()),
+            auxiliary_data: Nullable::Null,
+            success: true,
+        };
+
+        minicbor::to_vec(tx).unwrap()
+    }
+
     fn served(tx: &MultiEraTx) -> Result<Vec<String>, String> {
         let signers = tx.required_signers();
 
@@ -2963,10 +2976,13 @@ mod required_signers_tests {
     /// own body.
     #[test]
     fn a_dijkstra_sub_transaction_serves_the_key_credentials_it_guards_itself_with() {
-        let sub = sub_tx(Some(credential_guards(vec![StakeCredential::AddrKeyhash(
-            key_hash(4),
-        )])));
-        let tx = MultiEraTx::DijkstraSub(Box::new(Cow::Owned(sub)), true);
+        let cbor = listing(sub_tx(Some(credential_guards(vec![
+            StakeCredential::AddrKeyhash(key_hash(4)),
+        ]))));
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &cbor)
+            .unwrap()
+            .sub_transactions()
+            .remove(0);
 
         assert_eq!(served(&tx), Ok(vec![key_hash(4).to_string()]));
     }
@@ -2974,10 +2990,13 @@ mod required_signers_tests {
     /// The must-fire case for a sub transaction.
     #[test]
     fn a_dijkstra_sub_transaction_guarded_by_a_script_is_refused_and_names_the_script() {
-        let sub = sub_tx(Some(credential_guards(vec![StakeCredential::ScriptHash(
-            key_hash(8),
-        )])));
-        let tx = MultiEraTx::DijkstraSub(Box::new(Cow::Owned(sub)), true);
+        let cbor = listing(sub_tx(Some(credential_guards(vec![
+            StakeCredential::ScriptHash(key_hash(8)),
+        ]))));
+        let tx = MultiEraTx::decode_for_era(Era::Dijkstra, &cbor)
+            .unwrap()
+            .sub_transactions()
+            .remove(0);
 
         assert_eq!(served(&tx), Err(key_hash(8).to_string()));
     }

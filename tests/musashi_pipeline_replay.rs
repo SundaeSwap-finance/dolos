@@ -129,11 +129,16 @@ fn sync_config(lenient: bool) -> SyncConfig {
 }
 
 /// Each sub transaction the block's top level transactions list, with the
-/// index of the one that lists it and the verdict on it, read from the block's
-/// own fields.
+/// index of the one that lists it, that transaction and the sub transaction's
+/// position in its list, read from the block's own fields.
 fn sub_transactions<'a>(
     block: &'a MultiEraBlock,
-) -> Vec<(usize, bool, &'a dijkstra::SubTransaction<'a>)> {
+) -> Vec<(
+    usize,
+    &'a dijkstra::BlockTransaction<'a>,
+    usize,
+    &'a dijkstra::SubTransaction<'a>,
+)> {
     let Some(block) = block.as_dijkstra() else {
         return vec![];
     };
@@ -148,7 +153,8 @@ fn sub_transactions<'a>(
                 .sub_transactions
                 .iter()
                 .flat_map(|subs| subs.iter())
-                .map(move |sub| (index, tx.success, sub))
+                .enumerate()
+                .map(move |(position, sub)| (index, tx, position, sub))
         })
         .collect()
 }
@@ -172,8 +178,8 @@ fn produced(block: &MultiEraBlock) -> Vec<(TxoRef, Vec<u8>)> {
         }
     }
 
-    for (_, success, sub) in sub_transactions(block) {
-        if !success {
+    for (_, top, _, sub) in sub_transactions(block) {
+        if !top.success {
             continue;
         }
 
@@ -198,8 +204,8 @@ fn consumed(block: &MultiEraBlock) -> Vec<TxoRef> {
         }
     }
 
-    for (_, success, sub) in sub_transactions(block) {
-        if !success {
+    for (_, top, _, sub) in sub_transactions(block) {
+        if !top.success {
             continue;
         }
 
@@ -221,7 +227,7 @@ fn tx_hashes(block: &MultiEraBlock) -> Vec<Hash<32>> {
         .chain(
             sub_transactions(block)
                 .into_iter()
-                .map(|(_, _, sub)| sub_hash(sub)),
+                .map(|(_, _, _, sub)| sub_hash(sub)),
         )
         .collect()
 }
@@ -573,7 +579,7 @@ fn probes(block: &MultiEraBlock) -> Vec<Probe> {
     let txs = block.txs();
     let subs = sub_transactions(block);
 
-    let mut indexes: BTreeSet<usize> = subs.iter().map(|(index, _, _)| *index).collect();
+    let mut indexes: BTreeSet<usize> = subs.iter().map(|(index, _, _, _)| *index).collect();
 
     if let Some(last) = txs.len().checked_sub(1) {
         indexes.extend([0, last]);
@@ -587,11 +593,14 @@ fn probes(block: &MultiEraBlock) -> Vec<Probe> {
         outputs: txs[index].outputs().len(),
     });
 
-    let subs = subs.into_iter().map(|(index, success, sub)| Probe {
+    let subs = subs.into_iter().map(|(index, top, position, sub)| Probe {
         hash: sub_hash(sub),
         index,
         bytes: minicbor::to_vec(sub).unwrap(),
-        cbor: TxCbor::DijkstraSub(minicbor::to_vec(sub).unwrap(), success),
+        cbor: TxCbor::DijkstraSub {
+            top: minicbor::to_vec(top).unwrap(),
+            index: position,
+        },
         outputs: sub.sub_transaction_body.outputs.len(),
     });
 
@@ -713,13 +722,16 @@ fn every_lookup_by_hash_finds_each_sub_transaction() {
 fn a_sub_transaction_answer_keeps_the_verdict_it_was_given() {
     let mut answers = vec![];
 
-    for (_, cbor) in &block_fixtures() {
-        let block = MultiEraBlock::decode(cbor).unwrap();
+    for (_, harvested) in &block_fixtures() {
+        for success in [false, true] {
+            let cbor = with_listing_verdict(harvested, success);
+            let block = MultiEraBlock::decode(&cbor).unwrap();
 
-        for (_, _, sub) in sub_transactions(&block) {
-            for success in [false, true] {
-                let tx = MultiEraTx::from_dijkstra_sub(sub, success);
-                let answer = TxCbor::from(&tx);
+            for (_, top, position, sub) in sub_transactions(&block) {
+                let answer = TxCbor::DijkstraSub {
+                    top: minicbor::to_vec(top).unwrap(),
+                    index: position,
+                };
                 let read = MultiEraTx::try_from(&answer).unwrap();
 
                 answers.push(((read.hash(), read.is_valid()), (sub_hash(sub), success)));
@@ -731,6 +743,42 @@ fn a_sub_transaction_answer_keeps_the_verdict_it_was_given() {
 
     for (read, given) in answers {
         assert_eq!(read, given);
+    }
+}
+
+/// A sub transaction answer whose position is past the list of the
+/// transaction it names is refused, not read as some other transaction.
+#[test]
+fn a_sub_transaction_answer_past_the_list_is_refused() {
+    let mut answers = vec![];
+
+    for (_, cbor) in &block_fixtures() {
+        let block = MultiEraBlock::decode(cbor).unwrap();
+
+        for (_, top, position, sub) in sub_transactions(&block) {
+            let listed = top
+                .transaction_body
+                .sub_transactions
+                .iter()
+                .flat_map(|subs| subs.iter())
+                .count();
+            let bytes = minicbor::to_vec(top).unwrap();
+            let read = |index| {
+                let answer = TxCbor::DijkstraSub {
+                    top: bytes.clone(),
+                    index,
+                };
+                MultiEraTx::try_from(&answer).ok().map(|tx| tx.hash())
+            };
+
+            answers.push(((read(position), read(listed)), (Some(sub_hash(sub)), None)));
+        }
+    }
+
+    assert!(!answers.is_empty(), "no fixture lists a sub transaction");
+
+    for (read, expected) in answers {
+        assert_eq!(read, expected);
     }
 }
 
@@ -771,15 +819,18 @@ fn a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent() {
             let block = MultiEraBlock::decode(&cbor).unwrap();
             let query = AsyncQueryFacade::new(replay(entry, &cbor, true).domain);
 
-            for (_, _, sub) in sub_transactions(&block) {
+            for (_, _, _, sub) in sub_transactions(&block) {
                 let hash = sub_hash(sub);
                 let answer = runtime.block_on(query.tx_cbor(hash.to_vec())).unwrap();
-                let expected = TxCbor::DijkstraSub(minicbor::to_vec(sub).unwrap(), success);
+                let read = answer
+                    .as_ref()
+                    .and_then(|answer| MultiEraTx::try_from(answer).ok())
+                    .map(|tx| (tx.hash(), tx.is_valid()));
 
                 answers.push((
                     format!("{} {hash} {success}", entry.name),
-                    answer,
-                    Some(expected),
+                    read,
+                    Some((hash, success)),
                 ));
             }
         }
@@ -913,7 +964,7 @@ fn paid_to(block: &MultiEraBlock, address: &str) -> Vec<(Hash<32>, usize, u64)> 
 
     let subs = sub_transactions(block)
         .into_iter()
-        .flat_map(|(index, success, sub)| paid(&MultiEraTx::from_dijkstra_sub(sub, success), index))
+        .flat_map(|(index, top, _, sub)| paid(&MultiEraTx::from_dijkstra_sub(sub, top), index))
         .collect::<Vec<_>>();
 
     top_level.into_iter().chain(subs).collect()
@@ -934,9 +985,9 @@ fn minibf_address_routes_count_each_sub_transaction() {
 
         let paid_by_sub: BTreeSet<String> = subs
             .iter()
-            .filter(|(_, success, _)| *success)
-            .flat_map(|(_, _, sub)| {
-                MultiEraTx::from_dijkstra_sub(sub, true)
+            .filter(|(_, top, _, _)| top.success)
+            .flat_map(|(_, top, _, sub)| {
+                MultiEraTx::from_dijkstra_sub(sub, top)
                     .produces()
                     .into_iter()
                     .map(|(_, output)| output.address().unwrap().to_string())
@@ -957,7 +1008,10 @@ fn minibf_address_routes_count_each_sub_transaction() {
             .iter()
             .enumerate()
             .map(|(index, tx)| (tx.hash(), index))
-            .chain(subs.iter().map(|(index, _, sub)| (sub_hash(sub), *index)))
+            .chain(
+                subs.iter()
+                    .map(|(index, _, _, sub)| (sub_hash(sub), *index)),
+            )
             .collect();
 
         runtime.block_on(async {
@@ -1050,8 +1104,8 @@ fn minibf_block_routes_count_each_sub_transaction() {
 
         let by_subs: Vec<(Hash<32>, String, u64)> = subs
             .iter()
-            .flat_map(|(_, success, sub)| {
-                let tx = MultiEraTx::from_dijkstra_sub(sub, *success);
+            .flat_map(|(_, top, _, sub)| {
+                let tx = MultiEraTx::from_dijkstra_sub(sub, top);
                 tx.produces()
                     .into_iter()
                     .map(|(_, output)| {
@@ -1273,7 +1327,7 @@ fn outputs_by_ref(block: &MultiEraBlock) -> HashMap<TxoRef, (String, u64)> {
 
     let subs = sub_transactions(block)
         .into_iter()
-        .flat_map(|(_, success, sub)| entry(&MultiEraTx::from_dijkstra_sub(sub, success)));
+        .flat_map(|(_, top, _, sub)| entry(&MultiEraTx::from_dijkstra_sub(sub, top)));
 
     block.txs().iter().flat_map(entry).chain(subs).collect()
 }
@@ -1516,7 +1570,7 @@ fn minikupo_matches_the_outputs_of_a_sub_transaction() {
         .into_iter()
         .collect();
 
-    let (index, _, sub) = sub_transactions(&first_block)
+    let (index, _, _, sub) = sub_transactions(&first_block)
         .into_iter()
         .next()
         .expect("the earlier block lists no sub transaction");

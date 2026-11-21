@@ -1216,14 +1216,20 @@ mod treasury_donation_tests {
     const DIJKSTRA_SUB_WITHOUT_DONATION: &str =
         "83a20081825820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000180a0f6";
 
+    /// The sub transaction `sub`, read from a top level transaction whose body
+    /// lists only it at key 23.
+    fn dijkstra_sub(sub: &str) -> MultiEraTx<'static> {
+        let body = "a40081825820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00018002001781";
+        dijkstra_tx(&format!("84{body}{sub}a0f6f5"))
+            .sub_transactions()
+            .remove(0)
+    }
+
     /// The must-fire case for a sub transaction: its body key 22 reads as its
     /// donation.
     #[test]
     fn a_sub_transaction_donation_is_read() {
-        let bytes = hex::decode(DIJKSTRA_SUB_WITH_DONATION).unwrap();
-        let sub: pallas::ledger::primitives::dijkstra::SubTransaction =
-            pallas::codec::minicbor::decode(&bytes).unwrap();
-        let tx = MultiEraTx::from_dijkstra_sub(&sub, true);
+        let tx = dijkstra_sub(DIJKSTRA_SUB_WITH_DONATION);
 
         assert!(matches!(tx, MultiEraTx::DijkstraSub(..)));
         assert_eq!(tx_treasury_donation(&tx), Some(1_000_000));
@@ -1234,10 +1240,7 @@ mod treasury_donation_tests {
     /// donation.
     #[test]
     fn a_sub_transaction_without_a_donation_reports_none() {
-        let bytes = hex::decode(DIJKSTRA_SUB_WITHOUT_DONATION).unwrap();
-        let sub: pallas::ledger::primitives::dijkstra::SubTransaction =
-            pallas::codec::minicbor::decode(&bytes).unwrap();
-        let tx = MultiEraTx::from_dijkstra_sub(&sub, true);
+        let tx = dijkstra_sub(DIJKSTRA_SUB_WITHOUT_DONATION);
 
         assert!(matches!(tx, MultiEraTx::DijkstraSub(..)));
         assert_eq!(tx_treasury_donation(&tx), None);
