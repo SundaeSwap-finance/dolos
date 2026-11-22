@@ -894,13 +894,48 @@ mod tests {
         inline_v1alpha.datum.as_mut().unwrap().original_cbor = None;
         let cases = [
             ("v1 without bytes, carried", &bytes, &v1_without, witnessed),
-            ("v1beta with bytes, carried", &bytes, &v1beta_with, witnessed),
-            ("v1alpha with bytes, carried", &bytes, &v1alpha_with, witnessed),
-            ("v1beta without bytes, stored", &bytes, &v1beta_without, Datums::Stored),
-            ("v1alpha without bytes, stored", &bytes, &v1alpha_without, Datums::Stored),
-            ("v1beta without bytes, none carried", &bytes, &v1beta_without, UNWITNESSED),
-            ("v1beta inline without bytes", &inline, &inline_v1beta, UNWITNESSED),
-            ("v1alpha inline without bytes", &inline, &inline_v1alpha, UNWITNESSED),
+            (
+                "v1beta with bytes, carried",
+                &bytes,
+                &v1beta_with,
+                witnessed,
+            ),
+            (
+                "v1alpha with bytes, carried",
+                &bytes,
+                &v1alpha_with,
+                witnessed,
+            ),
+            (
+                "v1beta without bytes, stored",
+                &bytes,
+                &v1beta_without,
+                Datums::Stored,
+            ),
+            (
+                "v1alpha without bytes, stored",
+                &bytes,
+                &v1alpha_without,
+                Datums::Stored,
+            ),
+            (
+                "v1beta without bytes, none carried",
+                &bytes,
+                &v1beta_without,
+                UNWITNESSED,
+            ),
+            (
+                "v1beta inline without bytes",
+                &inline,
+                &inline_v1beta,
+                UNWITNESSED,
+            ),
+            (
+                "v1alpha inline without bytes",
+                &inline,
+                &inline_v1alpha,
+                UNWITNESSED,
+            ),
         ];
         let agreeing: Vec<_> = cases
             .iter()
