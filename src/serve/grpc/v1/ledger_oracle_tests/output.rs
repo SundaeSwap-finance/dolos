@@ -186,12 +186,35 @@ pub(super) enum ServedBytes {
     Stated(Option<Vec<u8>>),
 }
 
+/// The parts a version states of the datum it resolves a datum hash to from
+/// the witness datums of a transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DatumParts {
+    /// Its bytes and value.
+    Whole,
+    /// Its value without its bytes, a difference the owner accepted on
+    /// 2026-11-21 for the versions before v1.
+    WithoutBytes,
+}
+
+impl DatumParts {
+    /// The bytes a datum stated in these parts holds, given its own bytes.
+    pub(super) fn bytes<T>(self, bytes: Option<T>) -> Option<T> {
+        match self {
+            DatumParts::Whole => bytes,
+            DatumParts::WithoutBytes => None,
+        }
+    }
+}
+
 /// The fields of a served output in terms every version of the spec states
 /// them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ServedOutput {
     /// Whether the version states a native guard clause.
     guards: bool,
+    /// The parts the version states of a datum resolved from witness datums.
+    witnessed: DatumParts,
     pub(super) bytes: ServedBytes,
     address: Vec<u8>,
     coin: Option<Integer>,
@@ -227,10 +250,11 @@ impl DatumBytes {
         Hasher::<256>::hash(&self.cbor).as_slice() == hash
     }
 
-    /// Whether a served datum states these bytes, their value and `hash`.
-    fn served_as(&self, hash: &[u8], served: &ServedDatum) -> bool {
+    /// Whether a served datum states `hash`, the value of these bytes and the
+    /// bytes themselves where `parts` holds them.
+    fn served_as(&self, hash: &[u8], served: &ServedDatum, parts: DatumParts) -> bool {
         served.hash == hash
-            && served.original_cbor.as_deref() == Some(self.cbor.as_slice())
+            && served.original_cbor.as_deref() == parts.bytes(Some(self.cbor.as_slice()))
             && served.payload.as_ref().and_then(Option::as_ref) == Some(&self.data)
     }
 }
@@ -256,9 +280,15 @@ enum LedgerDatum {
 
 impl LedgerDatum {
     /// Whether a served datum states this datum, its hash, bytes and value for
-    /// an inline datum, and for a datum hash its hash with the bytes and value
-    /// of the datum `datums` resolves it to, or none when they resolve none.
-    fn agrees(&self, served: Option<&ServedDatum>, datums: Datums<'_>) -> bool {
+    /// an inline datum, and for a datum hash its hash with the value of the
+    /// datum `datums` resolves it to and its bytes unless `witnessed` omits
+    /// them from a witness datum, or none when they resolve none.
+    fn agrees(
+        &self,
+        served: Option<&ServedDatum>,
+        datums: Datums<'_>,
+        witnessed: DatumParts,
+    ) -> bool {
         match (self, served) {
             (LedgerDatum::None, None) => true,
             (LedgerDatum::None, Some(d)) => {
@@ -267,19 +297,24 @@ impl LedgerDatum {
             (LedgerDatum::Hash(_) | LedgerDatum::Inline { .. }, None) => false,
             (LedgerDatum::Hash(hash), Some(d)) => {
                 let stored;
-                let resolved = match datums {
-                    Datums::Witnessed(witnessed) => witnessed.iter().find(|w| w.hashes_to(hash)),
+                let (resolved, parts) = match datums {
+                    Datums::Witnessed(carried) => {
+                        (carried.iter().find(|w| w.hashes_to(hash)), witnessed)
+                    }
                     Datums::Stored => {
                         stored = d.original_cbor.as_deref().and_then(DatumBytes::decode);
-                        stored.as_ref().filter(|s| s.hashes_to(hash))
+                        let resolved = stored.as_ref().filter(|s| s.hashes_to(hash));
+                        (resolved, DatumParts::Whole)
                     }
                 };
                 match resolved {
-                    Some(datum) => datum.served_as(hash, d),
+                    Some(datum) => datum.served_as(hash, d, parts),
                     None => d.hash == *hash && d.payload.is_none() && d.original_cbor.is_none(),
                 }
             }
-            (LedgerDatum::Inline { hash, datum }, Some(d)) => datum.served_as(hash, d),
+            (LedgerDatum::Inline { hash, datum }, Some(d)) => {
+                datum.served_as(hash, d, DatumParts::Whole)
+            }
         }
     }
 }
@@ -395,7 +430,9 @@ pub(super) fn differing(
         ),
         (
             OutputField::Datum,
-            ledger.datum.agrees(served.datum.as_ref(), datums),
+            ledger
+                .datum
+                .agrees(served.datum.as_ref(), datums, served.witnessed),
         ),
         (OutputField::Script, script),
     ];
@@ -411,13 +448,19 @@ macro_rules! served_output {
         guards: $guards:literal,
         pubkey: $pubkey:ident,
         $(guard: $guard:ident,)?
+        witnessed: $witnessed:ident,
         bytes: |$o:ident| $bytes:expr,
         datum_cbor: |$d:ident| $cbor:expr,
         quantity: |$a:ident| $quantity:expr $(,)?
     ) => {
         pub(super) mod $version {
-            use super::{Data, Integer, Native, Script, ServedBytes, ServedDatum, ServedOutput};
+            use super::{
+                Data, DatumParts, Integer, Native, Script, ServedBytes, ServedDatum, ServedOutput,
+            };
             use crate::serve::grpc::$version::spec::cardano;
+
+            /// The parts this version states of a datum resolved from witness datums.
+            pub(in super::super) const WITNESSED: DatumParts = DatumParts::$witnessed;
 
             /// The integer a served big integer states, none when the message states none.
             pub(in super::super) fn integer(value: &cardano::BigInt) -> Option<Integer> {
@@ -512,6 +555,7 @@ macro_rules! served_output {
                 });
                 ServedOutput {
                     guards: $guards,
+                    witnessed: WITNESSED,
                     bytes: $bytes,
                     address: $o.address.to_vec(),
                     coin: $o.coin.as_ref().and_then(integer),
@@ -529,6 +573,7 @@ served_output!(
     guards: true,
     pubkey: ScriptPubkeyHash,
     guard: ScriptRequireGuard,
+    witnessed: Whole,
     bytes: |o| ServedBytes::Stated(o.original_cbor.as_ref().map(|b| b.to_vec())),
     datum_cbor: |d| d.original_cbor.as_ref().map(|c| c.to_vec()),
     quantity: |a| integer(a.quantity.as_ref()?),
@@ -538,6 +583,7 @@ served_output!(
     v1beta,
     guards: false,
     pubkey: ScriptPubkeyHash,
+    witnessed: WithoutBytes,
     bytes: |o| ServedBytes::Stated(o.original_cbor.as_ref().map(|b| b.to_vec())),
     datum_cbor: |d| d.original_cbor.as_ref().map(|c| c.to_vec()),
     quantity: |a| integer(a.quantity.as_ref()?),
@@ -547,6 +593,7 @@ served_output!(
     v1alpha,
     guards: false,
     pubkey: ScriptPubkey,
+    witnessed: WithoutBytes,
     bytes: |o| ServedBytes::NoField,
     datum_cbor: |d| (!d.original_cbor.is_empty()).then(|| d.original_cbor.to_vec()),
     quantity: |a| match a.quantity.as_ref()? {
@@ -712,14 +759,23 @@ mod tests {
         (datum, other, output.concat())
     }
 
+    /// The served output with its datum stating the bytes of `bytes_of`, none
+    /// when it is none, and the value of `value_of`.
+    fn stating(
+        mut served: ServedOutput,
+        bytes_of: Option<&DatumBytes>,
+        value_of: &DatumBytes,
+    ) -> ServedOutput {
+        let datum = served.datum.as_mut().unwrap();
+        datum.original_cbor = bytes_of.map(|b| b.cbor.clone());
+        datum.payload = Some(Some(value_of.data.clone()));
+        served
+    }
+
     /// The output v1 serves for `bytes` with its datum stating `bytes_of` and
     /// `value_of`.
     fn served_with(bytes: &[u8], bytes_of: &DatumBytes, value_of: &DatumBytes) -> ServedOutput {
-        let mut served = v1::output(&mapped(bytes));
-        let datum = served.datum.as_mut().unwrap();
-        datum.original_cbor = Some(bytes_of.cbor.clone());
-        datum.payload = Some(Some(value_of.data.clone()));
-        served
+        stating(v1::output(&mapped(bytes)), Some(bytes_of), value_of)
     }
 
     #[test]
@@ -790,6 +846,68 @@ mod tests {
                 differing(&bytes, served, *datums).unwrap() != [OutputField::Datum]
             })
             .map(|(name, _, _)| *name)
+            .collect();
+        assert_eq!(agreeing, Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_datum_hash_resolved_from_witnesses_agrees_without_bytes_before_v1() {
+        let (datum, other, bytes) = hash_locked();
+        let carried = [other, datum.clone()];
+        let at_v1beta = stating(v1beta::output(&mapped!(v1beta, &bytes)), None, &datum);
+        let at_v1alpha = stating(v1alpha::output(&mapped!(v1alpha, &bytes)), None, &datum);
+        let cases = [("v1beta", &at_v1beta), ("v1alpha", &at_v1alpha)];
+        let differing: Vec<_> = cases
+            .iter()
+            .filter(|(_, served)| {
+                !differing(&bytes, served, Datums::Witnessed(&carried))
+                    .unwrap()
+                    .is_empty()
+            })
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(differing, Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_datum_without_bytes_differs_unless_resolved_from_witnesses_before_v1() {
+        let (datum, other, bytes) = hash_locked();
+        let carried = [other, datum.clone()];
+        let witnessed = Datums::Witnessed(&carried);
+        let v1_without = stating(v1::output(&mapped(&bytes)), None, &datum);
+        let v1beta_with = stating(
+            v1beta::output(&mapped!(v1beta, &bytes)),
+            Some(&datum),
+            &datum,
+        );
+        let v1alpha_with = stating(
+            v1alpha::output(&mapped!(v1alpha, &bytes)),
+            Some(&datum),
+            &datum,
+        );
+        let v1beta_without = stating(v1beta::output(&mapped!(v1beta, &bytes)), None, &datum);
+        let v1alpha_without = stating(v1alpha::output(&mapped!(v1alpha, &bytes)), None, &datum);
+        let [inline, _] = constructed();
+        let mut inline_v1beta = v1beta::output(&mapped!(v1beta, &inline));
+        inline_v1beta.datum.as_mut().unwrap().original_cbor = None;
+        let mut inline_v1alpha = v1alpha::output(&mapped!(v1alpha, &inline));
+        inline_v1alpha.datum.as_mut().unwrap().original_cbor = None;
+        let cases = [
+            ("v1 without bytes, carried", &bytes, &v1_without, witnessed),
+            ("v1beta with bytes, carried", &bytes, &v1beta_with, witnessed),
+            ("v1alpha with bytes, carried", &bytes, &v1alpha_with, witnessed),
+            ("v1beta without bytes, stored", &bytes, &v1beta_without, Datums::Stored),
+            ("v1alpha without bytes, stored", &bytes, &v1alpha_without, Datums::Stored),
+            ("v1beta without bytes, none carried", &bytes, &v1beta_without, UNWITNESSED),
+            ("v1beta inline without bytes", &inline, &inline_v1beta, UNWITNESSED),
+            ("v1alpha inline without bytes", &inline, &inline_v1alpha, UNWITNESSED),
+        ];
+        let agreeing: Vec<_> = cases
+            .iter()
+            .filter(|(_, ledger, served, datums)| {
+                differing(ledger, served, *datums).unwrap() != [OutputField::Datum]
+            })
+            .map(|(name, _, _, _)| *name)
             .collect();
         assert_eq!(agreeing, Vec::<&str>::new());
     }

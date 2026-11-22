@@ -22,7 +22,9 @@ use pallas::{
 
 use super::{
     eval::wire_fee,
-    named_txs, resolved_datum,
+    named_txs,
+    output::DatumParts,
+    resolved_datum,
     serve::{ReadTxAnswer, ReadTxs},
     witness_scripts, GroupBlock, TxName,
 };
@@ -242,8 +244,9 @@ impl LedgerTx {
 }
 
 /// The fee, witness and auxiliary scripts, committee thresholds, Dijkstra
-/// parameter keys and output datums a ReadTx version maps for a transaction,
-/// with no fee or keys in a message that has no field for them.
+/// parameter keys and output datums a ReadTx version maps for a transaction
+/// and the parts it states of a witness datum, with no fee or keys in a message
+/// that has no field for them.
 struct MappedTx {
     fee: Option<WireFee>,
     scripts: Vec<ScriptKey>,
@@ -251,6 +254,7 @@ struct MappedTx {
     quorum: Vec<MappedQuorum>,
     dijkstra_keys: Option<Vec<DijkstraKeys>>,
     output_datums: Vec<MappedDatum>,
+    witnessed: DatumParts,
 }
 
 /// The datum hash and bytes a transaction message maps for each output, with
@@ -338,6 +342,7 @@ macro_rules! mapped {
             quorum: quorum.collect(),
             dijkstra_keys: $keys,
             output_datums: $datums,
+            witnessed: super::output::$version::WITNESSED,
         }
     }};
 }
@@ -478,14 +483,16 @@ fn differing(ledger: &LedgerTx, mapped: &MappedTx) -> Vec<(Field, String, String
             differing.push((Field::DijkstraKeys, l, m));
         }
     }
-    let datums = &mapped.output_datums;
+    let (datums, witnessed) = (&mapped.output_datums, mapped.witnessed);
     let ledger = ledger.hash_datums.iter();
     let ledger = ledger.map(|(i, hash, bytes)| (*i, &hash[..], bytes.as_ref()));
+    let expected = ledger.clone();
+    let expected = expected.map(|(i, hash, bytes)| (i, hash, witnessed.bytes(bytes)));
     let mapped = ledger.clone().map(|(i, _, _)| match datums.get(i) {
         Some(Some((hash, bytes))) => (i, &hash[..], bytes.as_ref()),
         _ => (i, &[][..], None),
     });
-    if !ledger.clone().eq(mapped.clone()) {
+    if !expected.eq(mapped.clone()) {
         let (l, m) = (show_datums(ledger), show_datums(mapped));
         differing.push((Field::OutputDatums, l, m));
     }
@@ -670,6 +677,7 @@ fn mapped(fee: Option<WireFee>) -> MappedTx {
             Some((vec![6; 32], None)),
             None,
         ],
+        witnessed: DatumParts::Whole,
     }
 }
 
@@ -734,5 +742,34 @@ fn a_hash_datum_mapped_otherwise_than_the_ledger_resolves_it_differs() {
     assert_eq!(fields(&ledger, &short), [Field::OutputDatums]);
     let mut unmapped = mapped(None);
     unmapped.output_datums.clear();
+    assert_eq!(fields(&ledger, &unmapped), [Field::OutputDatums]);
+}
+
+fn without_bytes() -> MappedTx {
+    let mut mapped = mapped(None);
+    mapped.witnessed = DatumParts::WithoutBytes;
+    mapped.output_datums[1] = Some((vec![5; 32], None));
+    mapped
+}
+
+#[test]
+fn hash_datums_mapped_without_bytes_agree_at_a_version_that_omits_them() {
+    assert_eq!(fields(&ledger(None), &without_bytes()), Vec::<Field>::new());
+}
+
+#[test]
+fn a_hash_datum_differs_with_bytes_where_omitted_or_otherwise_mapped() {
+    let ledger = ledger(None);
+    let mut stated = without_bytes();
+    stated.output_datums[1] = Some((vec![5; 32], Some(vec![0x18, 0x2b])));
+    assert_eq!(fields(&ledger, &stated), [Field::OutputDatums]);
+    let mut other_hash = without_bytes();
+    other_hash.output_datums[1] = Some((vec![6; 32], None));
+    assert_eq!(fields(&ledger, &other_hash), [Field::OutputDatums]);
+    let mut invented = without_bytes();
+    invented.output_datums[2] = Some((vec![6; 32], Some(vec![0x00])));
+    assert_eq!(fields(&ledger, &invented), [Field::OutputDatums]);
+    let mut unmapped = without_bytes();
+    unmapped.output_datums.truncate(1);
     assert_eq!(fields(&ledger, &unmapped), [Field::OutputDatums]);
 }
