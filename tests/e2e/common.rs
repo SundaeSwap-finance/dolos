@@ -1,52 +1,58 @@
 #![allow(dead_code)]
 
-use std::net::TcpStream;
+use std::cell::RefCell;
+use std::io::{BufRead, BufReader};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use dolos_testing::relay::Relay;
 use tempfile::TempDir;
 
 pub struct Scenario {
     pub name: &'static str,
-    pub port_prefix: u16,
     pub expect_ports: bool,
 }
 
 pub const SCENARIOS: &[Scenario] = &[
     Scenario {
         name: "preview-full-explicit",
-        port_prefix: 6540,
         expect_ports: true,
     },
     Scenario {
         name: "preview-full-implicit",
-        port_prefix: 6550,
         expect_ports: true,
     },
     Scenario {
         name: "preview-min-implicit",
-        port_prefix: 6560,
         expect_ports: false,
     },
     Scenario {
         name: "mainnet-full-implicit",
-        port_prefix: 6570,
         expect_ports: true,
     },
     Scenario {
         name: "preprod-full-implicit",
-        port_prefix: 6580,
         expect_ports: true,
     },
     Scenario {
         name: "custom-network",
-        port_prefix: 6590,
         expect_ports: true,
     },
 ];
+
+/// The listen address a scenario fixture gives every server, which a workspace
+/// replaces with a port of its own.
+const UNASSIGNED: &str = r#"listen_address = "[::]:0""#;
+
+/// The interval at which a wait polls for its event.
+const POLL: Duration = Duration::from_millis(100);
+
+/// The text before the point in the line the daemon logs once it has committed
+/// a batch of blocks.
+const ROLLED: &str = "rolling forward point=";
 
 /// Where a scenario's checked-in fixture lives.
 ///
@@ -58,17 +64,6 @@ fn fixture_path(scenario: &Scenario) -> PathBuf {
         .join("tests/e2e/scenarios")
         .join(scenario.name)
 }
-
-/// Ports handed out to workspaces, one block of ten each.
-///
-/// Deliberately above every `Scenario::port_prefix` (6540..6599), which buys
-/// two things: a workspace can never collide with a daemon a previous run left
-/// holding a fixture's ports, and the rewrite in `rewrite_ports` can never
-/// rewrite a port it has itself just written.
-const WORKSPACE_PORT_BASE: u16 = 7100;
-const WORKSPACE_PORT_STRIDE: u16 = 10;
-
-static NEXT_PORT_PREFIX: AtomicU16 = AtomicU16::new(WORKSPACE_PORT_BASE);
 
 /// An isolated working directory for a single test.
 ///
@@ -82,20 +77,19 @@ static NEXT_PORT_PREFIX: AtomicU16 = AtomicU16::new(WORKSPACE_PORT_BASE);
 /// existed, since libtest runs the tests in a binary in parallel.
 ///
 /// A workspace is that fixture copied per test: its own `dolos.toml` under
-/// `CARGO_TARGET_TMPDIR`, and its own block of ports, so the suite stays
-/// parallel and adding a second test to a scenario stays safe.
+/// `CARGO_TARGET_TMPDIR`, and its own ports, so the suite stays parallel and
+/// adding a second test to a scenario stays safe.
 pub struct ScenarioWorkspace {
     name: &'static str,
     expect_ports: bool,
-    port_prefix: u16,
+    ports: Vec<(String, u16)>,
+    held: RefCell<Vec<TcpListener>>,
     dir: TempDir,
     relay: Option<Relay>,
 }
 
 impl ScenarioWorkspace {
     pub fn new(scenario: &Scenario) -> Self {
-        let port_prefix = NEXT_PORT_PREFIX.fetch_add(WORKSPACE_PORT_STRIDE, Ordering::Relaxed);
-
         let dir =
             TempDir::with_prefix_in(format!("{}-", scenario.name), env!("CARGO_TARGET_TMPDIR"))
                 .expect("failed to create scenario workspace");
@@ -105,23 +99,32 @@ impl ScenarioWorkspace {
         let config = std::fs::read_to_string(&fixture)
             .unwrap_or_else(|err| panic!("failed to read {}: {err}", fixture.display()));
 
-        let rewritten = rewrite_ports(&config, scenario.port_prefix, port_prefix);
+        let (rewritten, assigned) = assign_ports(&config);
         let (rewritten, relay) = stand_in_relay(&rewritten);
 
-        assert!(
-            !scenario.expect_ports || rewritten != config,
-            "scenario {} is declared to serve ports at {} but its dolos.toml names none",
+        assert_eq!(
+            scenario.expect_ports,
+            !assigned.is_empty(),
+            "scenario {} declares expect_ports {} but its dolos.toml has {} servers on port 0",
             scenario.name,
-            scenario.port_prefix,
+            scenario.expect_ports,
+            assigned.len(),
         );
 
         std::fs::write(dir.path().join("dolos.toml"), rewritten)
             .expect("failed to write workspace config");
 
+        let ports = assigned
+            .iter()
+            .map(|(section, l)| (section.clone(), l.local_addr().expect("a held port").port()))
+            .collect();
+        let held = assigned.into_iter().map(|(_, l)| l).collect();
+
         Self {
             name: scenario.name,
             expect_ports: scenario.expect_ports,
-            port_prefix,
+            ports,
+            held: RefCell::new(held),
             dir,
             relay,
         }
@@ -139,29 +142,74 @@ impl ScenarioWorkspace {
         self.expect_ports
     }
 
-    pub fn port(&self, suffix: u16) -> u16 {
-        self.port_prefix + suffix
+    /// Every port the workspace was given, whatever its section.
+    pub fn ports(&self) -> impl Iterator<Item = u16> + '_ {
+        self.ports.iter().map(|(_, port)| *port)
+    }
+
+    /// The ports the workspace gave to the `serve` sections of its config.
+    pub fn served_ports(&self) -> impl Iterator<Item = u16> + '_ {
+        self.ports
+            .iter()
+            .filter(|(section, _)| section.starts_with("serve."))
+            .map(|(_, port)| *port)
+    }
+
+    /// Starts the daemon on this workspace once the ports it was given are free
+    /// again.
+    pub fn spawn_daemon(&self) -> Daemon {
+        self.held.borrow_mut().clear();
+        assert_ports_released(self);
+
+        let mut child = prepare_scenario_process(self)
+            .args(["daemon"])
+            .env("NO_COLOR", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("failed to spawn daemon");
+
+        let stdout = child.stdout.take().expect("the daemon's stdout is piped");
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let lines = log.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                println!("{line}");
+                lines.lock().unwrap().push(line);
+            }
+        });
+
+        Daemon {
+            process: ProcessGuard::new(child),
+            log,
+        }
     }
 }
 
-/// Move every port in a scenario config from one block of ten to another.
-///
-/// A substring rewrite rather than a TOML round trip, so a workspace's config
-/// differs from its fixture in the ports and in nothing else. Correct only
-/// because the two blocks never overlap — see `WORKSPACE_PORT_BASE`.
-fn rewrite_ports(config: &str, from_prefix: u16, to_prefix: u16) -> String {
-    debug_assert!(
-        to_prefix >= from_prefix + WORKSPACE_PORT_STRIDE
-            || from_prefix >= to_prefix + WORKSPACE_PORT_STRIDE,
-        "port blocks {from_prefix} and {to_prefix} overlap"
-    );
+/// Gives every server a scenario config puts on port 0 a port of its own, held
+/// bound until the daemon starts, and changes nothing else in the config.
+fn assign_ports(config: &str) -> (String, Vec<(String, TcpListener)>) {
+    let mut assigned = Vec::new();
+    let mut section = String::new();
+    let mut rewritten = String::with_capacity(config.len());
 
-    (0..WORKSPACE_PORT_STRIDE).fold(config.to_string(), |acc, suffix| {
-        acc.replace(
-            &format!(":{}", from_prefix + suffix),
-            &format!(":{}", to_prefix + suffix),
-        )
-    })
+    for line in config.split_inclusive('\n') {
+        if let Some(header) = line.trim().strip_prefix('[') {
+            section = header.trim_end_matches(']').to_string();
+        }
+
+        if line.trim_end() != UNASSIGNED {
+            rewritten.push_str(line);
+            continue;
+        }
+
+        let listener = TcpListener::bind("[::]:0").expect("the kernel assigns a free port");
+        let port = listener.local_addr().expect("a bound port").port();
+        rewritten.push_str(&line.replace("[::]:0", &format!("[::]:{port}")));
+        assigned.push((section.clone(), listener));
+    }
+
+    (rewritten, assigned)
 }
 
 /// Moves a scenario's upstream peer to a loopback relay that serves the
@@ -197,50 +245,79 @@ pub fn prepare_scenario_process(workspace: &ScenarioWorkspace) -> Command {
     cmd
 }
 
-pub fn wait_for_tcp_port(workspace: &ScenarioWorkspace, port_suffix: u16, timeout: Duration) {
-    let port = workspace.port(port_suffix);
+/// A running daemon and every line it has written to stdout.
+pub struct Daemon {
+    process: ProcessGuard,
+    log: Arc<Mutex<Vec<String>>>,
+}
 
-    let start = Instant::now();
-    let mut connected = false;
-
-    while start.elapsed() < timeout {
-        if TcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
-            connected = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    if !connected {
-        panic!("timed out waiting for port {port} to open");
+impl Daemon {
+    /// The highest slot the daemon has logged a committed roll forward to.
+    pub fn rolled_to(&self) -> Option<u64> {
+        self.log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|line| line.split_once(ROLLED)?.1.split_once('(')?.0.parse().ok())
+            .max()
     }
 }
 
-pub fn wait_for_socket_file(workspace: &ScenarioWorkspace, relative_path: &str, timeout: Duration) {
-    let path = workspace.path().join(relative_path);
+impl std::ops::Deref for Daemon {
+    type Target = Child;
 
-    let start = Instant::now();
-    let mut found = false;
-
-    while start.elapsed() < timeout {
-        if std::fs::metadata(&path).is_ok() {
-            found = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
+    fn deref(&self) -> &Self::Target {
+        &self.process
     }
+}
 
-    if !found {
-        panic!(
-            "timed out waiting for file {} to appear",
-            path.to_string_lossy()
+impl std::ops::DerefMut for Daemon {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.process
+    }
+}
+
+/// Polls until `ready` holds, and fails as soon as the daemon exits first.
+pub fn wait_for(daemon: &mut Daemon, what: &str, mut ready: impl FnMut(&Daemon) -> bool) {
+    while !ready(daemon) {
+        if let Some(status) = daemon.try_wait().expect("failed to query process status") {
+            panic!("the daemon exited with {status} before {what}");
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// Waits until every port a `serve` section was given accepts a connection.
+pub fn wait_for_ports(workspace: &ScenarioWorkspace, daemon: &mut Daemon) {
+    for port in workspace.served_ports() {
+        wait_for(daemon, &format!("port {port} accepted"), |_| {
+            TcpStream::connect(("127.0.0.1", port)).is_ok()
+        });
+    }
+}
+
+/// Waits until the file at `relative_path` in the workspace exists.
+pub fn wait_for_file(workspace: &ScenarioWorkspace, daemon: &mut Daemon, relative_path: &str) {
+    let path = workspace.path().join(relative_path);
+    wait_for(daemon, &format!("{} existed", path.display()), |_| {
+        path.exists()
+    });
+}
+
+/// Waits until the daemon has committed a block past slot 0.
+pub fn wait_for_block(daemon: &mut Daemon) {
+    wait_for(daemon, "it committed a block past slot 0", |d| {
+        d.rolled_to().is_some_and(|slot| slot > 0)
+    });
+}
+
+pub fn assert_ports_released(workspace: &ScenarioWorkspace) {
+    for port in workspace.ports() {
+        assert!(
+            TcpStream::connect(("127.0.0.1", port)).is_err(),
+            "port {port} accepts connections"
         );
     }
-}
-
-pub fn assert_port_released(workspace: &ScenarioWorkspace, port_suffix: u16) {
-    let port = workspace.port(port_suffix);
-    assert!(TcpStream::connect(format!("127.0.0.1:{port}")).is_err());
 }
 
 pub fn assert_file_released(workspace: &ScenarioWorkspace, relative_path: &str) {

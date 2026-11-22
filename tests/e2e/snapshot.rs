@@ -1,14 +1,14 @@
 #![cfg(not(windows))]
 
 use std::process::Stdio;
-use std::time::Duration;
 
 #[path = "common.rs"]
 mod common;
 
 use common::*;
 
-/// Sync from the relay for a minute and return what the node ended up holding.
+/// Sync from the relay until the node commits a block past slot 0 and return
+/// what the node ended up holding.
 ///
 /// Shared by the tarball roundtrip and the stele one so both start from the
 /// same node: two roundtrips that disagreed about what they were restoring
@@ -16,24 +16,8 @@ use common::*;
 fn sync_and_summarize(workspace: &ScenarioWorkspace) -> dolos::cli::DataSummary {
     reset_and_bootstrap(workspace);
 
-    let mut cmd = prepare_scenario_process(workspace);
-    let handle = cmd
-        .args(["daemon"])
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("failed to spawn daemon");
-
-    let mut guard = ProcessGuard::new(handle);
-    std::thread::sleep(Duration::from_secs(60));
-
-    assert!(
-        guard
-            .try_wait()
-            .expect("failed to query process status")
-            .is_none(),
-        "daemon exited prematurely"
-    );
+    let mut guard = workspace.spawn_daemon();
+    wait_for_block(&mut guard);
 
     shutdown_gracefully(&mut guard);
 
@@ -87,24 +71,8 @@ fn assert_summaries_match(original: &dolos::cli::DataSummary, restored: &dolos::
 /// The last thing either roundtrip checks: a restored node is a node the daemon
 /// will start on.
 fn assert_daemon_starts(workspace: &ScenarioWorkspace) {
-    let mut cmd = prepare_scenario_process(workspace);
-    let handle = cmd
-        .args(["daemon"])
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("failed to spawn restored daemon");
-
-    let mut guard = ProcessGuard::new(handle);
-    std::thread::sleep(Duration::from_secs(10));
-
-    assert!(
-        guard
-            .try_wait()
-            .expect("failed to query restored daemon status")
-            .is_none(),
-        "restored daemon exited prematurely"
-    );
+    let mut guard = workspace.spawn_daemon();
+    wait_for_ports(workspace, &mut guard);
 
     shutdown_gracefully(&mut guard);
 }

@@ -18,16 +18,16 @@ force_protocol = 6
 listen_path = "dolos.socket"
 
 [serve.grpc]
-listen_address = "[::]:6590"
+listen_address = "[::]:0"
 
 [serve.minibf]
-listen_address = "[::]:6591"
+listen_address = "[::]:0"
 
 [serve.trp]
-listen_address = "[::]:6592"
+listen_address = "[::]:0"
 
 [serve.minikupo]
-listen_address = "[::]:6593"
+listen_address = "[::]:0"
 
 [chain]
 type = "cardano"

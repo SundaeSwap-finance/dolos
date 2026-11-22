@@ -6,11 +6,6 @@ small = { max-threads = "num-cpus" }
 medium = { max-threads = "num-cpus" }
 large = { max-threads = "num-cpus" }
 
-# The e2e daemon tests take their ports from a counter that starts again in each test process, so each runs alone.
-[[profile.default.overrides]]
-filter = 'binary_id(dolos::smoke) | binary_id(dolos::snapshot) | binary_id(dolos::sync)'
-threads-required = "num-test-threads"
-
 [[profile.default.overrides]]
 filter = '''
     binary_id(dolos-snapshot::restore_registry)

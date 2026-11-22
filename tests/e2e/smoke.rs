@@ -1,7 +1,6 @@
 #![cfg(not(windows))]
 
 use std::process::Stdio;
-use std::time::Duration;
 
 #[path = "common.rs"]
 mod common;
@@ -11,58 +10,26 @@ use common::*;
 fn daemon_runs(workspace: &ScenarioWorkspace) {
     println!("e2e smoke start: {}", workspace.name());
 
-    if workspace.expect_ports() {
-        assert_port_released(workspace, 0);
-        assert_port_released(workspace, 1);
-        assert_port_released(workspace, 2);
-    }
-
     assert_file_released(workspace, "dolos.socket");
 
     reset_and_bootstrap(workspace);
 
-    let mut cmd = prepare_scenario_process(workspace);
+    let mut guard = workspace.spawn_daemon();
 
-    let handle = cmd
-        .args(["daemon"])
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("failed to spawn process");
-
-    let mut guard = ProcessGuard::new(handle);
-
+    wait_for_ports(workspace, &mut guard);
     if workspace.expect_ports() {
-        wait_for_tcp_port(workspace, 0, Duration::from_secs(30));
-        wait_for_tcp_port(workspace, 1, Duration::from_secs(30));
-        wait_for_tcp_port(workspace, 2, Duration::from_secs(30));
-        wait_for_socket_file(workspace, "dolos.socket", Duration::from_secs(30));
+        wait_for_file(workspace, &mut guard, "dolos.socket");
     }
-
-    std::thread::sleep(Duration::from_secs(10));
-
-    // The custom network produces its own blocks, so it is the scenario that
-    // can show a fresh node's first frames on disk without an upstream.
-    let inspect_frames = workspace.name() == "custom-network";
-    if inspect_frames {
-        wait_for_segment_file(workspace, Duration::from_secs(60));
-    }
-
-    assert!(guard
-        .try_wait()
-        .expect("failed to query process status")
-        .is_none());
+    wait_for_block(&mut guard);
 
     shutdown_gracefully(&mut guard);
 
-    if workspace.expect_ports() {
-        assert_port_released(workspace, 0);
-        assert_port_released(workspace, 1);
-        assert_port_released(workspace, 2);
-    }
+    assert_ports_released(workspace);
     assert_file_released(workspace, "dolos.socket");
 
-    if inspect_frames {
+    // The custom network produces its own blocks, so it is the scenario that
+    // can show a fresh node's first frames on disk without an upstream.
+    if workspace.name() == "custom-network" {
         assert_archive_is_frames_and_reads_back(workspace);
     }
 }
@@ -78,17 +45,6 @@ fn segment_files(workspace: &ScenarioWorkspace) -> Vec<std::path::PathBuf> {
     };
     files.sort();
     files
-}
-
-fn wait_for_segment_file(workspace: &ScenarioWorkspace, timeout: Duration) {
-    let started = std::time::Instant::now();
-    while segment_files(workspace).is_empty() {
-        assert!(
-            started.elapsed() < timeout,
-            "no block segment appeared within {timeout:?}"
-        );
-        std::thread::sleep(Duration::from_millis(500));
-    }
 }
 
 /// Every byte the daemon left in its segment files is a zstd frame for the

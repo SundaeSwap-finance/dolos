@@ -18,16 +18,16 @@ force_protocol = 6
 listen_path = "dolos.socket"
 
 [serve.grpc]
-listen_address = "[::]:6550"
+listen_address = "[::]:0"
 
 [serve.minibf]
-listen_address = "[::]:6551"
+listen_address = "[::]:0"
 
 [serve.trp]
-listen_address = "[::]:6552"
+listen_address = "[::]:0"
 
 [serve.minikupo]
-listen_address = "[::]:6553"
+listen_address = "[::]:0"
 
 [mithril]
 aggregator = "https://aggregator.pre-release-preview.api.mithril.network/aggregator"

@@ -55,28 +55,28 @@ prune_height = 200
 listen_path = "dolos.socket"
 
 [serve.grpc]
-listen_address = "[::]:6540"
+listen_address = "[::]:0"
 permissive_cors = true
 
 [serve.minibf]
-listen_address = "[::]:6541"
+listen_address = "[::]:0"
 permissive_cors = true
 token_registry_url = ""
 url = ""
 max_scan_items = 3000
 
 [serve.trp]
-listen_address = "[::]:6542"
+listen_address = "[::]:0"
 max_optimize_rounds = 10
 permissive_cors = true
 extra_fees = 0
 
 [serve.minikupo]
-listen_address = "[::]:6543"
+listen_address = "[::]:0"
 permissive_cors = true
 
 [relay]
-listen_address = "[::]:6544"
+listen_address = "[::]:0"
 
 [retries]
 max_retries = 20

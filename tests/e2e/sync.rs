@@ -1,8 +1,5 @@
 #![cfg(not(windows))]
 
-use std::process::Stdio;
-use std::time::Duration;
-
 #[path = "common.rs"]
 mod common;
 
@@ -13,23 +10,9 @@ fn daemon_syncs(workspace: &ScenarioWorkspace) {
 
     reset_and_bootstrap(workspace);
 
-    let mut cmd = prepare_scenario_process(workspace);
+    let mut guard = workspace.spawn_daemon();
 
-    let handle = cmd
-        .args(["daemon"])
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("failed to spawn process");
-
-    let mut guard = ProcessGuard::new(handle);
-
-    std::thread::sleep(Duration::from_secs(60));
-
-    assert!(guard
-        .try_wait()
-        .expect("failed to query process status")
-        .is_none());
+    wait_for_block(&mut guard);
 
     shutdown_gracefully(&mut guard);
 

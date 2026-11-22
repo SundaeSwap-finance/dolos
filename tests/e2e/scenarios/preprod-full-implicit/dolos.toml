@@ -15,16 +15,16 @@ conway_path = "conway.json"
 listen_path = "dolos.socket"
 
 [serve.grpc]
-listen_address = "[::]:6580"
+listen_address = "[::]:0"
 
 [serve.minibf]
-listen_address = "[::]:6581"
+listen_address = "[::]:0"
 
 [serve.trp]
-listen_address = "[::]:6582"
+listen_address = "[::]:0"
 
 [serve.minikupo]
-listen_address = "[::]:6583"
+listen_address = "[::]:0"
 
 [chain]
 type = "cardano"
