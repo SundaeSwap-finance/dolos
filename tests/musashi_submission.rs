@@ -478,8 +478,28 @@ fn a_subtransaction_running_a_plutus_v1_to_v3_script_is_refused() {
     let mut native = tx.as_dijkstra().unwrap().clone();
     // Synthetic child: copy the captured registration fields and witnesses into
     // a child body (the top-level fee is not a subtransaction field).
-    let raw_body = native.transaction_body.raw_cbor().to_vec();
-    let child_body: n::SubTransactionBody = minicbor::decode(&raw_body).unwrap();
+    let top = (*native.transaction_body).clone();
+    let child_body = n::SubTransactionBody {
+        inputs: top.inputs,
+        outputs: top.outputs,
+        ttl: top.ttl,
+        certificates: top.certificates,
+        withdrawals: top.withdrawals,
+        auxiliary_data_hash: top.auxiliary_data_hash,
+        validity_interval_start: top.validity_interval_start,
+        mint: top.mint,
+        script_data_hash: top.script_data_hash,
+        guards: top.guards,
+        network_id: top.network_id,
+        reference_inputs: top.reference_inputs,
+        voting_procedures: top.voting_procedures,
+        proposal_procedures: top.proposal_procedures,
+        treasury_value: top.treasury_value,
+        donation: top.donation,
+        required_top_level_guards: top.required_top_level_guards,
+        direct_deposits: top.direct_deposits,
+        account_balance_intervals: top.account_balance_intervals,
+    };
     let child = n::SubTransaction {
         sub_transaction_body: KeepRaw::from(child_body),
         transaction_witness_set: native.transaction_witness_set.clone(),
