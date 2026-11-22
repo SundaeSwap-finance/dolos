@@ -33,8 +33,26 @@ jobs:
           # key each would save its own multi GB entry against a full quota.
           shared-key: test-ubuntu-latest
 
-      - name: Run the tests
+      - name: Run the small and medium tests
         run: cargo nextest run --workspace --all-targets
 
-      - name: Run e2e smoke tests
-        run: cargo nextest run --profile large --run-ignored only --test smoke
+  large:
+    name: Test (large)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-04
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.151
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-ubuntu-latest
+          save-if: false
+
+      - name: Run the large tests
+        run: cargo nextest run --profile large --workspace --all-targets

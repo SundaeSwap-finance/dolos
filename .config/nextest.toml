@@ -1,17 +1,47 @@
-# An ignored test is large, and every other test is medium.
+# Each test binary has the size of its largest test, with the timeouts of
+# https://bazel.build/reference/be/common-definitions: small 60 s, medium 300 s
+# and large 900 s. A binary not named small or large is medium.
 
 [test-groups]
 shared-ports = { max-threads = 1 }
 
-# Medium: at most 300 s.
+# Small and medium, run by a plain `cargo nextest run`.
 [profile.default]
+default-filter = '''not (
+    binary_id(dolos::smoke) | binary_id(dolos::sync) | binary_id(dolos::snapshot)
+  | binary_id(dolos-snapshot::restore_registry) | binary_id(dolos-snapshot::snapshot_verify)
+)'''
 slow-timeout = { period = "300s", terminate-after = 1 }
+
+# Small: one process, with no disk or network beyond fixtures read into memory.
+[[profile.default.overrides]]
+filter = '''
+    binary_id(dolos-cardano::avvm_reclamation) | binary_id(dolos-cardano::genesis_stake_pools)
+  | binary_id(dolos-core::block_meta) | binary_id(dolos-core::crawl_gap)
+  | binary_id(dolos-core::rollback_across_epoch) | binary_id(dolos-core::rollback_before_genesis)
+  | binary_id(dolos-core::rollback_target) | binary_id(dolos-core::submit_lock)
+  | binary_id(dolos-flatfiles::bundled_dictionary) | binary_id(dolos-minikupo)
+  | binary_id(dolos-snapshot::coverage) | binary_id(dolos-snapshot::field_registry)
+  | binary_id(dolos-testing) | binary_id(dolos::bootstrap) | binary_id(dolos::continuity)
+  | binary_id(dolos::epoch_pots) | binary_id(dolos::housekeeping) | binary_id(dolos::mempool)
+  | binary_id(ledger-oracle-judge)
+'''
+slow-timeout = { period = "60s", terminate-after = 1 }
+
+# The judge's verdict line is the record of a run.
+[[profile.default.overrides]]
+filter = 'test(=serve::grpc::v1::ledger_oracle_tests::ledger_oracle)'
+success-output = "final"
 
 # The e2e daemon tests number their ports from a counter in the test process.
 [[profile.default.overrides]]
 test-group = "shared-ports"
-filter = 'binary_id(dolos::smoke) | binary_id(dolos::snapshot) | (binary_id(dolos::sync) & test(/^daemon_syncs_for_/))'
+filter = 'binary_id(dolos::smoke) | binary_id(dolos::sync) | binary_id(dolos::snapshot)'
 
-# Large: at most 900 s, run with `--profile large --run-ignored only`.
+# Large: a live chain, the network or a container, run with `--profile large`.
 [profile.large]
+default-filter = '''
+    binary_id(dolos::smoke) | binary_id(dolos::sync) | binary_id(dolos::snapshot)
+  | binary_id(dolos-snapshot::restore_registry) | binary_id(dolos-snapshot::snapshot_verify)
+'''
 slow-timeout = { period = "900s", terminate-after = 1 }

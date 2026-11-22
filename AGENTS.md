@@ -305,8 +305,8 @@ All agents working on this repository must verify their modifications by running
 
 3. **Testing**: Run tests to verify functionality
    ```bash
-   cargo test --workspace --all-targets
-   cargo test --workspace --all-features --exclude dolos-minibf --exclude dolos-minikupo --exclude dolos-trp
+   cargo nextest run --workspace --all-targets
+   cargo nextest run --workspace --all-targets --all-features --exclude dolos-minibf --exclude dolos-minikupo --exclude dolos-trp
    ```
 
    The first command is what CI runs on every platform. The second adds the
@@ -321,17 +321,15 @@ All agents working on this repository must verify their modifications by running
    runs both commands, so a verification that passes locally cannot drift from
    what the repository keeps green.
 
-4. **Registry restore round trip** (requires Docker): the `#[ignore]`d suite
-   that spawns a real OCI registry
+4. **Large tests** (require Docker and a relay): the e2e daemon tests and the
+   registry suites, which `.config/nextest.toml` sizes large
    ```bash
-   cargo test -p dolos-snapshot --test restore_registry -- --ignored --test-threads=1
+   cargo nextest run --profile large --workspace --all-targets
    ```
 
-   Each test spawns its own registry container via `docker run` and tears it
-   down on the way out; the suite is `#[ignore]`d so plain `cargo test` stays
-   green without a container runtime. Run it when touching the Stelae pin or
-   `crates/snapshot`'s registry restore path;
-   `STELAE_TEST_REGISTRY_IMAGE` selects the server.
+   Each registry test spawns its own registry container via `docker run` and
+   tears it down on the way out. `STELAE_TEST_REGISTRY_IMAGE` selects the
+   server.
 
    These are local verification tools, deliberately not a CI job here.
    Registry interaction — transport and publication lifecycle — is implemented
