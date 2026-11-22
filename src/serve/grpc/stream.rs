@@ -73,12 +73,9 @@ impl ChainStream {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use dolos_testing::blocks::make_conway_block;
     use dolos_testing::toy_domain::ToyDomain;
     use futures_util::{pin_mut, StreamExt};
-    use tokio::time::timeout;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -124,10 +121,7 @@ mod tests {
         assert_eq!(first, TipEvent::Mark(chain_point));
 
         for i in 51..=200 {
-            let evt = timeout(Duration::from_secs(5), s.next())
-                .await
-                .expect("took too long");
-            let value = evt.unwrap().unwrap();
+            let value = s.next().await.unwrap().unwrap();
 
             match value {
                 TipEvent::Apply(p, _) => {

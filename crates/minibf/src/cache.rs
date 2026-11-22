@@ -1,8 +1,9 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
+use tokio::time::Instant;
 
 /// Internal cache entry holding a value and its metadata.
 struct Entry<T> {
@@ -252,7 +253,7 @@ mod tests {
         assert_eq!(res.unwrap(), "hello");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_cache_stale_revalidate() {
         let cache = CacheService::default();
         let ttl = Duration::from_millis(100);
@@ -270,11 +271,10 @@ mod tests {
         assert_eq!(res.unwrap(), "initial");
         assert_eq!(counter.load(Ordering::SeqCst), 1);
 
-        // 2. Wait for TTL to expire
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // 2. Let the TTL expire
+        tokio::time::advance(Duration::from_millis(200)).await;
 
-        // 3. Fetch again - should return stale "initial" but trigger background
-        //    refresh
+        // 3. Fetch again - should return stale "initial" but trigger background refresh
         let c = counter.clone();
         let fetcher = move || {
             c.fetch_add(1, Ordering::SeqCst);
@@ -285,7 +285,10 @@ mod tests {
         assert_eq!(res.unwrap(), "initial"); // Returns stale!
 
         // 4. Wait for background refresh to finish
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let entry = cache.get_entry::<String>().await;
+        while entry.lock().await.refreshing {
+            tokio::task::yield_now().await;
+        }
 
         // 5. Fetch again - should return "updated"
         let res: Result<String, CacheError<()>> = cache

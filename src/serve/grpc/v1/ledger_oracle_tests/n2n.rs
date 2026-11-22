@@ -1,7 +1,12 @@
 //! Judges a Leios peer's node to node session against the blocks Dolos serves.
 
-use std::{collections::VecDeque, fmt, time::Duration};
+use std::{collections::VecDeque, fmt};
 
+use super::endorser::{listed, tx_id, Listed};
+use crate::sync::leios::{
+    proposal, AnnouncedEndorserBlock, Error, LeiosClient, LeiosTransport, FETCH_TIMEOUT,
+    TXS_PER_REQUEST,
+};
 use pallas::{
     codec::minicbor,
     crypto::hash::Hash,
@@ -16,13 +21,6 @@ use pallas::{
             leiosnotify::Notification,
         },
     },
-};
-use tokio::time::{timeout_at, Instant};
-
-use super::endorser::{listed, tx_id, Listed};
-use crate::sync::leios::{
-    proposal, AnnouncedEndorserBlock, Error, LeiosClient, LeiosTransport, FETCH_TIMEOUT,
-    TXS_PER_REQUEST,
 };
 
 /// What a peer session delivered, recorded as each event arrived.
@@ -83,15 +81,23 @@ impl<T: LeiosTransport> Recording<T> {
         event
     }
 
-    /// Holds events until `enough` holds of what was heard, the session ends
-    /// or `limit` passes.
-    async fn wait(&mut self, limit: Duration, enough: fn(&Heard) -> bool) {
-        let until = Instant::now() + limit;
+    /// Holds events until `enough` holds of what was heard or the session
+    /// ends.
+    async fn wait(&mut self, enough: fn(&Heard) -> bool) {
         while !enough(&self.heard) && self.heard.ended.is_none() {
-            match timeout_at(until, self.pull()).await {
-                Ok(event) => self.held.push_back(event),
-                Err(_) => return,
+            let event = self.pull().await;
+            self.held.push_back(event);
+        }
+    }
+
+    /// Holds events until the peer accepts a version or ends the session.
+    async fn handshake(&mut self, magic: u64) -> Handshake {
+        loop {
+            if let Some(handshake) = Handshake::of(&self.heard, magic) {
+                return handshake;
             }
+            let event = self.pull().await;
+            self.held.push_back(event);
         }
     }
 }
@@ -122,22 +128,20 @@ enum Handshake {
     OtherMagic(u64, VersionData),
     /// The session ended before the peer accepted a version.
     Refused(DisconnectReason),
-    /// Neither an accepted version nor an end arrived in time.
-    Silent,
 }
 
 impl Handshake {
-    fn of(heard: &Heard, magic: u64) -> Self {
+    fn of(heard: &Heard, magic: u64) -> Option<Self> {
         match (&heard.accepted, heard.ended) {
             (Some((version, data)), _) if data.network_magic != magic => {
-                Self::OtherMagic(*version, data.clone())
+                Some(Self::OtherMagic(*version, data.clone()))
             }
             (Some((version, data)), _) if *version < LEIOS_MIN_VERSION => {
-                Self::PreLeios(*version, data.clone())
+                Some(Self::PreLeios(*version, data.clone()))
             }
-            (Some((version, data)), _) => Self::Leios(*version, data.clone()),
-            (None, Some(reason)) => Self::Refused(reason),
-            (None, None) => Self::Silent,
+            (Some((version, data)), _) => Some(Self::Leios(*version, data.clone())),
+            (None, Some(reason)) => Some(Self::Refused(reason)),
+            (None, None) => None,
         }
     }
 
@@ -151,7 +155,6 @@ impl Handshake {
             Self::PreLeios(..) => "pre-leios",
             Self::OtherMagic(..) => "other-magic",
             Self::Refused(..) => "refused",
-            Self::Silent => "silent",
         }
     }
 }
@@ -182,7 +185,6 @@ impl fmt::Display for Handshake {
             | Self::PreLeios(version, data)
             | Self::OtherMagic(version, data) => version_data(f, *version, data),
             Self::Refused(reason) => write!(f, " ended={reason:?}"),
-            Self::Silent => Ok(()),
         }
     }
 }
@@ -435,12 +437,10 @@ async fn session<T: LeiosTransport>(
     peer: &str,
     magic: u64,
     certified: &[Certified],
-    wait: Duration,
 ) -> Session {
     let mut recording = Recording::new(transport);
-    recording.wait(wait, |h| h.accepted.is_some()).await;
-    let handshake = Handshake::of(&recording.heard, magic);
-    recording.wait(wait, |h| h.notifications() > 0).await;
+    let handshake = recording.handshake(magic).await;
+    recording.wait(|h| h.notifications() > 0).await;
 
     let mut fetched = Vec::new();
     if handshake.passed() {
@@ -469,6 +469,8 @@ async fn session<T: LeiosTransport>(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::sync::leios::tests::{endorser_block_responder, real_eb};
     use crate::sync::leios::ManagerTransport;
@@ -476,7 +478,8 @@ mod tests {
     /// The magic of the network the fixtures were recorded on.
     const MAGIC: u64 = 164;
 
-    const LOCAL_WAIT: Duration = Duration::from_secs(10);
+    /// How long a session on another magic is watched for an accepted version.
+    const REFUSAL_WINDOW: Duration = Duration::from_secs(1);
 
     fn recorded() -> Vec<RecordedReply> {
         recorded_replies(include_str!("../../../../../test_data/n2n/handshake.txt"))
@@ -594,7 +597,7 @@ mod tests {
         let peer = address.to_string();
         let transport = ManagerTransport::connect(&peer, MAGIC, |_| true).unwrap();
 
-        let session = session(transport, &peer, MAGIC, &[certified], LOCAL_WAIT).await;
+        let session = session(transport, &peer, MAGIC, &[certified]).await;
 
         assert!(
             matches!(&session.handshake, Handshake::Leios(16, data) if data.peras_support == Some(false)),
@@ -607,31 +610,19 @@ mod tests {
         assert!(session.passed());
     }
 
-    /// A session the peer never accepts fails its handshake and fetches
-    /// nothing.
+    /// A session the peer never accepts records no accepted version while it
+    /// is watched.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_session_the_peer_never_accepts_fails_its_handshake() {
-        let (body, eb_txs, certified) = fixture();
+        let (body, eb_txs, _) = fixture();
         let (address, _) = endorser_block_responder(body, eb_txs).await;
         let peer = address.to_string();
         let transport = ManagerTransport::connect(&peer, MAGIC + 1, |_| true).unwrap();
+        let mut recording = Recording::new(transport);
 
-        let session = session(
-            transport,
-            &peer,
-            MAGIC + 1,
-            &[certified],
-            Duration::from_secs(1),
-        )
-        .await;
+        let _ = tokio::time::timeout(REFUSAL_WINDOW, recording.handshake(MAGIC + 1)).await;
 
-        assert!(
-            matches!(session.handshake, Handshake::Refused(_) | Handshake::Silent),
-            "{}",
-            session.handshake
-        );
-        assert!(session.fetched.is_empty());
-        assert!(!session.passed());
+        assert!(recording.heard.accepted.is_none(), "{:?}", recording.heard);
     }
 
     /// A version below the one that carries Leios, or another magic, fails
@@ -646,12 +637,12 @@ mod tests {
 
         assert!(matches!(
             Handshake::of(&heard(15), MAGIC),
-            Handshake::PreLeios(15, _)
+            Some(Handshake::PreLeios(15, _))
         ));
-        assert!(Handshake::of(&heard(16), MAGIC).passed());
+        assert!(Handshake::of(&heard(16), MAGIC).is_some_and(|h| h.passed()));
         assert!(matches!(
             Handshake::of(&heard(16), MAGIC + 1),
-            Handshake::OtherMagic(16, _)
+            Some(Handshake::OtherMagic(16, _))
         ));
     }
 

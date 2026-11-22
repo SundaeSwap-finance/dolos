@@ -7,7 +7,7 @@ rust-version.workspace = true
 [dependencies]
 tracing.workspace = true
 serde.workspace = true
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "time"] }
 tokio-util.workspace = true
 pallas.workspace = true
 tower = { workspace = true, features = ["util"] }
@@ -39,3 +39,4 @@ futures-util.workspace = true
 [dev-dependencies]
 dolos-testing = { path = "../testing" }
 http-body-util = "0.1.2"
+tokio = { workspace = true, features = ["test-util"] }

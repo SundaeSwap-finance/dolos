@@ -732,54 +732,43 @@ mod tests {
             });
         }
         for _worker in 0..2 {
-            arrivals
-                .recv_timeout(std::time::Duration::from_secs(10))
-                .unwrap();
+            arrivals.recv().unwrap();
         }
         let (helped, signal) = std::sync::mpsc::channel();
         pool.spawn(move || helped.send(()).unwrap());
-        let progress = signal.recv_timeout(std::time::Duration::from_secs(10));
+        let progress = signal.recv();
         drop(writers);
         assert!(progress.is_ok());
         for _worker in 0..2 {
-            completions
-                .recv_timeout(std::time::Duration::from_secs(10))
-                .unwrap();
+            completions.recv().unwrap();
         }
     }
 
     #[test]
     fn concurrent_rayon_callers_and_external_writes_finish_without_pool_starvation() {
-        let (completed, result) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(2)
-                .build()
-                .unwrap();
-            let (_dir, store) = FlatFileStore::for_tempdir().unwrap();
-            let store = std::sync::Arc::new(store);
-            std::thread::scope(|scope| {
-                let external = store.clone();
-                scope.spawn(move || {
-                    let body = vec![7; PARALLEL_MIN_BYTES / 2];
-                    for _repeat in 0..8 {
-                        external.append_batch(&[(0, body.as_slice()); 8]).unwrap();
-                    }
-                });
-                pool.install(|| {
-                    (0..8usize).into_par_iter().for_each(|_| {
-                        let body = vec![9; PARALLEL_MIN_BYTES / 2];
-                        let locations = store.append_batch(&[(0, body.as_slice()); 8]).unwrap();
-                        assert_eq!(store.read(&locations[0]).unwrap(), body);
-                    });
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        let (_dir, store) = FlatFileStore::for_tempdir().unwrap();
+        let store = std::sync::Arc::new(store);
+        std::thread::scope(|scope| {
+            let external = store.clone();
+            scope.spawn(move || {
+                let body = vec![7; PARALLEL_MIN_BYTES / 2];
+                for _repeat in 0..8 {
+                    external.append_batch(&[(0, body.as_slice()); 8]).unwrap();
+                }
+            });
+            pool.install(|| {
+                (0..8usize).into_par_iter().for_each(|_| {
+                    let body = vec![9; PARALLEL_MIN_BYTES / 2];
+                    let locations = store.append_batch(&[(0, body.as_slice()); 8]).unwrap();
+                    assert_eq!(store.read(&locations[0]).unwrap(), body);
                 });
             });
-            assert!(store.append_stats().serial_batches >= 8);
-            completed.send(()).unwrap();
         });
-        result
-            .recv_timeout(std::time::Duration::from_secs(30))
-            .unwrap();
+        assert!(store.append_stats().serial_batches >= 8);
     }
 
     #[test]

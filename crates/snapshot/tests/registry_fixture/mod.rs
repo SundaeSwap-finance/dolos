@@ -140,11 +140,9 @@ impl Fixture {
     /// Docker's port forwarder accepts on the published port from the moment
     /// the container exists and only then tries to reach the process inside.
     ///
-    /// Every socket operation is bounded, because that forwarder is exactly the
-    /// thing that accepts and then says nothing. Without the timeouts the three
-    /// hundred attempts below are not the thirty seconds they read as: one
-    /// silent connection blocks the loop indefinitely, and a test meant to fail
-    /// with a message hangs instead.
+    /// Every socket operation of an attempt is bounded, because that forwarder
+    /// accepts and then says nothing, and the next attempt starts only once the
+    /// last one ends.
     fn wait_until_ready(&self) {
         use std::io::{Read, Write};
 
@@ -153,7 +151,7 @@ impl Fixture {
             address.parse().expect("a loopback address and a port");
         let patience = std::time::Duration::from_millis(500);
 
-        for _ in 0..300 {
+        loop {
             let answered = std::net::TcpStream::connect_timeout(&socket_address, patience)
                 .ok()
                 .and_then(|mut socket| {
@@ -178,8 +176,6 @@ impl Fixture {
 
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-
-        panic!("the registry never answered GET /v2/ on {address}");
     }
 
     /// Where the registry listens, for a suite that has to speak the

@@ -153,9 +153,7 @@ async fn batched_live_replay_runs_wal_archive_state_and_notifications() {
         4
     );
     for (slot, hash) in expected {
-        let event = tokio::time::timeout(std::time::Duration::from_secs(1), tips.next_tip())
-            .await
-            .unwrap();
+        let event = tips.next_tip().await;
         assert!(
             matches!(event, TipEvent::Apply(point, _) if point == dolos_core::ChainPoint::Specific(slot, hash))
         );

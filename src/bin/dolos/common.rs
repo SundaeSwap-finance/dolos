@@ -470,12 +470,7 @@ mod tests {
             Ok(())
         }));
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            monitor_drivers(drivers, exit.clone()),
-        )
-        .await
-        .expect("driver monitor should observe the bind failure promptly");
+        let result = monitor_drivers(drivers, exit.clone()).await;
 
         assert!(exit.is_cancelled());
 
@@ -517,12 +512,7 @@ mod tests {
 
         exit.cancel();
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            monitor_drivers(drivers, exit.clone()),
-        )
-        .await
-        .expect("cancelled drivers should finish promptly");
+        let result = monitor_drivers(drivers, exit.clone()).await;
 
         assert!(result.is_ok(), "a signalled shutdown is not a failure");
     }

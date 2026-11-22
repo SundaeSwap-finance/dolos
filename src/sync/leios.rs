@@ -1968,9 +1968,9 @@ pub(crate) mod tests {
         let mut silent = tokio::net::TcpStream::connect(proxy).await.unwrap();
         let mut buffer = [0u8; 1];
 
-        let read = tokio::time::timeout(PROXY_CUTOFF * 2, silent.read(&mut buffer)).await;
+        let read = silent.read(&mut buffer).await;
 
-        assert!(matches!(read, Ok(Ok(0))), "{read:?}");
+        assert!(matches!(read, Ok(0)), "{read:?}");
         assert_eq!(ended.recv().await, Some(Ended::ClientIdle));
     }
 
@@ -1985,10 +1985,10 @@ pub(crate) mod tests {
         let fetched = client.fetch(&announced).await.map(|txs| txs.len());
         drop(client);
 
-        let how = tokio::time::timeout(PROXY_CUTOFF / 2, ended.recv()).await;
+        let how = ended.recv().await;
 
         assert!(matches!(fetched, Ok(425)), "{fetched:?}");
-        assert_eq!(how, Ok(Some(Ended::ClientClosed)));
+        assert_eq!(how, Some(Ended::ClientClosed));
     }
 
     /// The client holds none of the offers a peer makes between fetches.

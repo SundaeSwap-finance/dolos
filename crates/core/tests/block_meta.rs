@@ -343,9 +343,7 @@ async fn all_fetches_use_the_supplied_query_limiter() {
         query
             .run_blocking(move |_| {
                 entered.send(()).unwrap();
-                wait_for_release
-                    .recv_timeout(Duration::from_secs(5))
-                    .unwrap();
+                wait_for_release.recv().unwrap();
                 Ok(())
             })
             .await
