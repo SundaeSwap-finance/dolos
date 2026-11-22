@@ -2,6 +2,15 @@ name: Test
 
 on:
   workflow_call:
+    inputs:
+      cargo-args:
+        description: The cargo arguments that choose the packages and features to test.
+        type: string
+        default: ""
+      save-cache:
+        description: Whether the small job saves the shared cache.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -33,17 +42,24 @@ jobs:
           tool: cargo-nextest@0.9.151
       - uses: Swatinem/rust-cache@v2
         with:
-          # Every size and `all-features` restore one multi GB entry, which the
-          # small job saves.
+          # Every size of every caller restores one multi GB entry, which the
+          # small job of the default caller saves.
           shared-key: test-ubuntu-latest
-          save-if: ${{ matrix.size == 'small' }}
+          save-if: ${{ matrix.size == 'small' && inputs.save-cache }}
 
       # The judge is a medium test that the judge job runs in release.
       - name: Run the ${{ matrix.size }} tests
-        run: cargo nextest run --workspace --all-targets --no-fail-fast --no-tests fail --run-ignored all -E 'group(${{ matrix.size }}) - (package(dolos) & kind(lib) & test(=serve::grpc::v1::ledger_oracle_tests::ledger_oracle))'
+        env:
+          CARGO_ARGS: ${{ inputs.cargo-args }}
+        run: |
+          # shellcheck disable=SC2086
+          cargo nextest run --workspace --all-targets $CARGO_ARGS --no-fail-fast --no-tests fail --run-ignored all -E 'group(${{ matrix.size }}) - (package(dolos) & kind(lib) & test(=serve::grpc::v1::ledger_oracle_tests::ledger_oracle))'
 
       - name: Run the doctests
         if: matrix.size == 'small'
         env:
+          CARGO_ARGS: ${{ inputs.cargo-args }}
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: timeout 60
-        run: cargo test --workspace --doc
+        run: |
+          # shellcheck disable=SC2086
+          cargo test --workspace --doc $CARGO_ARGS
