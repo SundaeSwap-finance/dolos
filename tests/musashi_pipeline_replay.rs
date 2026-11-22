@@ -23,6 +23,7 @@ use pallas::ledger::traverse::{MultiEraBlock, MultiEraTx};
 use serde::Deserialize;
 
 const DIR: &str = "test_data/musashi-w36";
+const W42_DIR: &str = "test_data/leios-rc-2026w42";
 const PROVENANCE: &str = "provenance.toml";
 const NETWORK_MAGIC: u64 = 164;
 
@@ -83,17 +84,55 @@ fn block_fixtures() -> Vec<(Fixture, Vec<u8>)> {
             entry.name
         );
 
-        let path = dir().join(blocks[0]);
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("{} is unreadable: {e}", path.display()));
-        let bytes = hex::decode(text.trim())
-            .unwrap_or_else(|e| panic!("{} is not hex: {e}", path.display()));
+        let bytes = read_hex(&dir().join(blocks[0]));
 
         out.push((entry, bytes));
     }
 
     out.sort_by_key(|(entry, _)| entry.slot);
     out
+}
+
+/// The bytes of a file holding one hex line.
+fn read_hex(path: &Path) -> Vec<u8> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("{} is unreadable: {e}", path.display()));
+    hex::decode(text.trim()).unwrap_or_else(|e| panic!("{} is not hex: {e}", path.display()))
+}
+
+#[derive(Deserialize)]
+struct W42Provenance {
+    fixture: Vec<W42Fixture>,
+}
+
+#[derive(Deserialize)]
+struct W42Fixture {
+    name: String,
+    files: Vec<String>,
+}
+
+/// Every block file the rc-2026w42 fixture directory names, with its entry's
+/// name.
+fn w42_blocks() -> Vec<(String, Vec<u8>)> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(W42_DIR);
+    let path = dir.join(PROVENANCE);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{} is unreadable: {e}", path.display()));
+    let provenance: W42Provenance =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
+
+    provenance
+        .fixture
+        .into_iter()
+        .flat_map(|entry| {
+            entry
+                .files
+                .iter()
+                .filter(|file| file.ends_with(".block"))
+                .map(|file| (entry.name.clone(), read_hex(&dir.join(file))))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Only the protocol version is this chain's own. The Dijkstra parameters are
@@ -322,7 +361,7 @@ struct Replayed {
     domain: ToyDomain,
 }
 
-fn replay(entry: &Fixture, cbor: &[u8], lenient: bool) -> Replayed {
+fn replay(name: &str, cbor: &[u8], lenient: bool) -> Replayed {
     let block = MultiEraBlock::decode(cbor).unwrap();
 
     let seeds = external_inputs(&block);
@@ -342,7 +381,7 @@ fn replay(entry: &Fixture, cbor: &[u8], lenient: bool) -> Replayed {
         assert!(
             before.contains(key),
             "{} was seeded with {}#{} and the store does not hold it",
-            entry.name,
+            name,
             key.0,
             key.1
         );
@@ -437,7 +476,7 @@ fn every_harvested_block_makes_its_outputs_and_spends_its_inputs() {
 
         assert_no_forward_reference(entry, &block);
 
-        let replayed = replay(entry, cbor, true);
+        let replayed = replay(&entry.name, cbor, true);
 
         assert_eq!(
             replayed.after,
@@ -496,7 +535,7 @@ fn every_transaction_of_every_harvested_block_is_served_at_its_own_slot() {
             entry.name
         );
 
-        let replayed = replay(entry, cbor, true);
+        let replayed = replay(&entry.name, cbor, true);
 
         for (hash, slot) in hashes.iter().zip(replayed.served.iter()) {
             assert_eq!(
@@ -539,8 +578,8 @@ fn the_lenient_rule_changes_nothing_for_the_harvested_blocks() {
     );
 
     for (entry, cbor) in &fixtures {
-        let lenient = replay(entry, cbor, true);
-        let strict = replay(entry, cbor, false);
+        let lenient = replay(&entry.name, cbor, true);
+        let strict = replay(&entry.name, cbor, false);
 
         assert_eq!(
             lenient.after, strict.after,
@@ -629,7 +668,7 @@ fn every_lookup_by_hash_finds_each_sub_transaction() {
 
         sub_probes += sub_transactions(&block).len();
 
-        let replayed = replay(entry, cbor, true);
+        let replayed = replay(&entry.name, cbor, true);
         let query = AsyncQueryFacade::new(replayed.domain.clone());
 
         runtime.block_on(async {
@@ -723,6 +762,10 @@ fn a_sub_transaction_answer_keeps_the_verdict_it_was_given() {
     let mut answers = vec![];
 
     for (_, harvested) in &block_fixtures() {
+        if sub_transactions(&MultiEraBlock::decode(harvested).unwrap()).is_empty() {
+            continue;
+        }
+
         for success in [false, true] {
             let cbor = with_listing_verdict(harvested, success);
             let block = MultiEraBlock::decode(&cbor).unwrap();
@@ -810,15 +853,20 @@ fn a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent() {
     let mut answers = vec![];
     let mut past_the_first = 0;
 
-    for (entry, harvested) in &block_fixtures() {
-        if sub_transactions(&MultiEraBlock::decode(harvested).unwrap()).is_empty() {
+    let blocks = block_fixtures()
+        .into_iter()
+        .map(|(entry, bytes)| (entry.name, bytes))
+        .chain(w42_blocks());
+
+    for (name, harvested) in blocks {
+        if sub_transactions(&MultiEraBlock::decode(&harvested).unwrap()).is_empty() {
             continue;
         }
 
         for success in [true, false] {
-            let cbor = with_listing_verdict(harvested, success);
+            let cbor = with_listing_verdict(&harvested, success);
             let block = MultiEraBlock::decode(&cbor).unwrap();
-            let query = AsyncQueryFacade::new(replay(entry, &cbor, true).domain);
+            let query = AsyncQueryFacade::new(replay(&name, &cbor, true).domain);
 
             for (_, _, position, sub) in sub_transactions(&block) {
                 past_the_first += usize::from(position > 0);
@@ -830,7 +878,7 @@ fn a_sub_transaction_is_looked_up_with_the_verdict_on_its_parent() {
                     .map(|tx| (tx.hash(), tx.is_valid()));
 
                 answers.push((
-                    format!("{} {hash} {success}", entry.name),
+                    format!("{name} {hash} {success}"),
                     read,
                     Some((hash, success)),
                 ));
@@ -888,7 +936,7 @@ fn minibf_serves_each_sub_transaction_by_its_own_hash() {
 
         sub_probes += subs;
 
-        let replayed = replay(entry, cbor, true);
+        let replayed = replay(&entry.name, cbor, true);
         let config = dolos_core::config::MinibfConfig::new("[::]:0".parse().unwrap());
         let router = dolos_minibf::build_router(config, replayed.domain.clone());
 
@@ -1005,7 +1053,7 @@ fn minibf_address_routes_count_each_sub_transaction() {
             continue;
         }
 
-        let replayed = replay(entry, cbor, true);
+        let replayed = replay(&entry.name, cbor, true);
         let config = dolos_core::config::MinibfConfig::new("[::]:0".parse().unwrap());
         let router = dolos_minibf::build_router(config, replayed.domain.clone());
 
@@ -1096,7 +1144,7 @@ fn minibf_block_routes_count_each_sub_transaction() {
         let block = MultiEraBlock::decode(cbor).unwrap();
         let subs = sub_transactions(&block);
 
-        let replayed = replay(entry, cbor, true);
+        let replayed = replay(&entry.name, cbor, true);
         let config = dolos_core::config::MinibfConfig::new("[::]:0".parse().unwrap());
         let router = dolos_minibf::build_router(config, replayed.domain.clone());
         let hash = block.hash();
@@ -1239,7 +1287,7 @@ fn the_spender_of_a_sub_transaction_input_is_that_sub_transaction() {
             continue;
         }
 
-        let replayed = replay(entry, cbor, true);
+        let replayed = replay(&entry.name, cbor, true);
         let query = AsyncQueryFacade::new(replayed.domain.clone());
 
         runtime.block_on(async {

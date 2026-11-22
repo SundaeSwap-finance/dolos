@@ -60,3 +60,18 @@ source = "the block bytes a utxorpc DumpHistory served for slot 132, written as 
 expected_key_source = "cardano-cli dijkstra query pool-state --stake-pool-id 8a04e2c7db3dff509c9f5f2b8e27d715eb8f3d0665deddc2e436f414 --testnet-magic 164, blsKey.bksKey"
 node_image = "ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:rc-2026w42 (cardano-node 11.2.0.164, git rev 2d6a2a66)"
 captured_at = "2026-10-26"
+
+[[fixture]]
+name = "ranking-five-sub-transactions"
+kind = "ranking_block_with_five_sub_transactions"
+files = ["ranking-five-sub-transactions.block"]
+chain_tag = "rc-2026w42"
+network_magic = 164
+block_no = 17259
+slot = 368793
+block_hash = "4fec09635464d2bad932d7b07b7a1be7b766a8840030e313a87ba18c0259f130"
+transactions = 1032
+bytes = 257811
+sha256 = "df5d34b39baf109fb22693a8a3ab6fbf796e6dd9d4cc0627f97d874b523c57c4"
+source = "the native bytes a utxorpc v1 FetchBlock served for slot 368793, written as one hex line, sha256 over that file. Its transaction 844 lists five sub transactions, and the count is the 1032 top level transactions on the wire"
+captured_at = "2026-11-21"
