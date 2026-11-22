@@ -946,21 +946,14 @@ mod tests {
         for bytes in &outputs {
             let is_wide = inline_datum_is_wide(bytes);
             wide += usize::from(is_wide);
-            // The v1alpha and v1beta mappers state a Plutus integer by its low
-            // 64 bits.
             let served = [
-                (v1::output(&mapped!(v1, bytes)), false),
-                (v1beta::output(&mapped!(v1beta, bytes)), true),
-                (v1alpha::output(&mapped!(v1alpha, bytes)), true),
+                v1::output(&mapped!(v1, bytes)),
+                v1beta::output(&mapped!(v1beta, bytes)),
+                v1alpha::output(&mapped!(v1alpha, bytes)),
             ];
-            for (served, cuts) in &served {
-                let expected = if *cuts && is_wide {
-                    vec![OutputField::Datum]
-                } else {
-                    vec![]
-                };
+            for served in &served {
                 let differing = differing(bytes, served, UNWITNESSED).unwrap();
-                assert_eq!(differing, expected, "{}", hex::encode(bytes));
+                assert_eq!(differing, Vec::new(), "{}", hex::encode(bytes));
             }
         }
         assert!(
