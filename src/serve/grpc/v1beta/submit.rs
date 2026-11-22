@@ -417,8 +417,10 @@ mod mapping_tests {
             entry(RedeemerTag::Mint, 0, true),
         ])));
 
+        let none = u5c::cardano::RedeemerPurpose::Unspecified as i32;
+
         for report in [&failed.errors[0], &overflow.errors[0]] {
-            assert_eq!((report.purpose, report.index), (None, None), "{report:?}");
+            assert_eq!((report.purpose, report.index), (none, 0), "{report:?}");
         }
     }
 
@@ -435,14 +437,11 @@ mod mapping_tests {
 
         assert_eq!(
             report.errors.iter().map(named).collect::<Vec<_>>(),
-            [(Some(P::Spend as i32), Some(3))]
+            [(P::Spend as i32, 3)]
         );
         assert_eq!(
             report.traces.iter().map(named).collect::<Vec<_>>(),
-            [
-                (Some(P::Spend as i32), Some(3)),
-                (Some(P::Cert as i32), Some(2))
-            ]
+            [(P::Spend as i32, 3), (P::Cert as i32, 2)]
         );
     }
     #[test]

@@ -260,6 +260,14 @@ macro_rules! wire_eval {
     }};
 }
 
+/// A v1beta report's redeemer purpose, absent when the report gives the
+/// unspecified purpose.
+fn v1beta_purpose(purpose: i32) -> Option<i32> {
+    use pallas::interop::utxorpc::v1beta::spec::cardano::RedeemerPurpose;
+
+    (purpose != RedeemerPurpose::Unspecified as i32).then_some(purpose)
+}
+
 /// The response of each EvalTx version for a transaction against the group's
 /// domain.
 async fn wire_evals(group: &Group, tx: &[u8]) -> [(Layer, WireEval); 3] {
@@ -274,8 +282,8 @@ async fn wire_evals(group: &Group, tx: &[u8]) -> [(Layer, WireEval); 3] {
         v1beta,
         group,
         tx,
-        |e| named(e.purpose, e.index, &e.msg),
-        |t| { named(t.purpose, t.index, &t.msg) }
+        |e| named(v1beta_purpose(e.purpose), Some(e.index), &e.msg),
+        |t| { named(v1beta_purpose(t.purpose), Some(t.index), &t.msg) }
     );
     let v1alpha = wire_eval!(
         v1alpha,

@@ -797,21 +797,61 @@ mod tests {
         assert_eq!(agreeing, Vec::<&str>::new());
     }
 
+    /// Whether a Plutus data value holds an integer outside the signed 64 bit
+    /// range.
+    fn holds_wide_integer(data: &ledger_oracle_judge::cbor::Data) -> bool {
+        use ledger_oracle_judge::cbor::Data as D;
+        match data {
+            D::Int(i) => {
+                i.magnitude.len() > 8 || (i.magnitude.len() == 8 && i.magnitude[0] >= 0x80)
+            }
+            D::Constr(_, items) | D::List(items) => items.iter().any(holds_wide_integer),
+            D::Map(pairs) => pairs
+                .iter()
+                .any(|(k, v)| holds_wide_integer(k) || holds_wide_integer(v)),
+            D::Bytes(_) => false,
+        }
+    }
+
+    /// Whether the output's inline datum holds an integer outside the signed 64
+    /// bit range.
+    fn inline_datum_is_wide(bytes: &[u8]) -> bool {
+        let LedgerDatum::Inline { datum, .. } = LedgerOutput::decode(bytes, true).unwrap().datum
+        else {
+            return false;
+        };
+        holds_wide_integer(&ledger_oracle_judge::cbor::data(&datum.cbor).unwrap())
+    }
+
     #[test]
     fn the_mapped_form_of_every_corpus_output_agrees_with_its_bytes_at_every_version() {
         let outputs = ledger_outputs();
         assert!(!outputs.is_empty());
+        let mut wide = 0;
         for bytes in &outputs {
+            let is_wide = inline_datum_is_wide(bytes);
+            wide += usize::from(is_wide);
+            // The v1alpha and v1beta mappers state a Plutus integer by its low
+            // 64 bits.
             let served = [
-                v1::output(&mapped!(v1, bytes)),
-                v1beta::output(&mapped!(v1beta, bytes)),
-                v1alpha::output(&mapped!(v1alpha, bytes)),
+                (v1::output(&mapped!(v1, bytes)), false),
+                (v1beta::output(&mapped!(v1beta, bytes)), true),
+                (v1alpha::output(&mapped!(v1alpha, bytes)), true),
             ];
-            for served in &served {
+            for (served, cuts) in &served {
+                let expected = if *cuts && is_wide {
+                    vec![OutputField::Datum]
+                } else {
+                    vec![]
+                };
                 let differing = differing(bytes, served, UNWITNESSED).unwrap();
-                assert!(differing.is_empty(), "{} {differing:?}", hex::encode(bytes));
+                assert_eq!(differing, expected, "{}", hex::encode(bytes));
             }
         }
+        assert!(
+            wide > 0,
+            "no corpus output has an inline datum with a wide integer"
+        );
     }
 
     #[test]
