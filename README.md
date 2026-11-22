@@ -63,7 +63,7 @@ Build it as upstream Dolos is built, with Rust 1.97 or newer, matching
 
 ```sh
 cargo build --release
-cargo nextest run --workspace --all-targets
+cargo test --workspace
 ```
 
 ## Why Dolos?

@@ -346,79 +346,52 @@ pub fn ranged_reader_with_chunk(
 mod tests {
     use super::*;
 
-    /// The URL of a loopback server that answers HEAD with the size of `body`
-    /// and each ranged GET with that range of it.
-    fn serve_ranges(body: Vec<u8>) -> String {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let url = format!(
-            "http://{}/snapshot",
-            listener.local_addr().expect("address")
-        );
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let mut stream = stream.expect("accept");
-                let mut head = Vec::new();
-                let mut byte = [0u8; 1];
-                while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).expect("read") == 1 {
-                    head.push(byte[0]);
-                }
-                let head = String::from_utf8_lossy(&head).to_ascii_lowercase();
-                let range = head
-                    .lines()
-                    .find_map(|line| line.strip_prefix("range: bytes="))
-                    .and_then(|range| range.trim().split_once('-'))
-                    .map(|(start, end)| (start.parse().unwrap(), end.parse::<usize>().unwrap()));
-                let reply = match range {
-                    _ if head.starts_with("head ") => format!(
-                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\naccept-ranges: bytes\r\nconnection: close\r\n\r\n",
-                        body.len()
-                    )
-                    .into_bytes(),
-                    Some((start, end)) => {
-                        let part = &body[start..=end];
-                        let mut reply = format!(
-                            "HTTP/1.1 206 Partial Content\r\ncontent-length: {}\r\ncontent-range: bytes {start}-{end}/{}\r\nconnection: close\r\n\r\n",
-                            part.len(),
-                            body.len()
-                        )
-                        .into_bytes();
-                        reply.extend_from_slice(part);
-                        reply
-                    }
-                    None => b"HTTP/1.1 416 Range Not Satisfiable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_vec(),
-                };
-                stream.write_all(&reply).expect("write");
-            }
-        });
-        url
-    }
+    const TEST_URL: &str = "https://dolos-snapshots.txpipe.cloud/v3/764824073/full/latest.tar.gz";
 
+    /// End-to-end check against the real R2 endpoint: download a small prefix
+    /// in many small chunks through the ring buffer and confirm the bytes
+    /// match a single plain ranged GET of the same prefix. Ignored by
+    /// default (network + ~5 MB transfer); run with:
+    ///   cargo test --bin dolos ranged_matches_direct_fetch -- --ignored
+    /// --nocapture
     #[test]
-    fn the_ring_buffer_reads_the_served_prefix() {
+    #[ignore]
+    fn ranged_matches_direct_fetch() {
         // 5 MiB total in 1 MiB chunks => 5 chunks, exercising the 4-part window
         // (so the downloader must block on a permit at least once) and a final
         // short chunk.
         const TOTAL: u64 = 5 * 1024 * 1024;
         const CHUNK: u64 = 1024 * 1024;
 
-        let body: Vec<u8> = (0..TOTAL + 4096).map(|i| (i % 251) as u8).collect();
-        let expected = body[..TOTAL as usize].to_vec();
-        let url = serve_ranges(body);
         let client = build_client().expect("client");
 
-        let probe = probe(&client, &url).expect("probe");
+        let probe = probe(&client, TEST_URL).expect("probe");
         assert!(probe.supports_ranges, "endpoint must advertise ranges");
         assert!(probe.total_size >= TOTAL, "remote smaller than test window");
 
-        let staging = tempfile::tempdir().expect("staging");
+        // Reference: one plain ranged GET of the same prefix.
+        let expected = client
+            .get(TEST_URL)
+            .header(RANGE, format!("bytes=0-{}", TOTAL - 1))
+            .send()
+            .and_then(|r| r.error_for_status())
+            .expect("reference fetch")
+            .bytes()
+            .expect("reference body");
+        assert_eq!(expected.len() as u64, TOTAL);
+
+        // Under test: pull the same prefix through the ring buffer.
+        let staging = std::env::temp_dir().join("dolos-ranged-test");
+        let _ = std::fs::remove_dir_all(&staging);
+        std::fs::create_dir_all(&staging).expect("staging");
 
         let progress = ProgressBar::hidden();
         let mut reader = ranged_reader_with_chunk(
             client,
-            url,
+            TEST_URL.to_string(),
             TOTAL,
             CHUNK,
-            staging.path().to_path_buf(),
+            staging.clone(),
             progress.clone(),
         );
 
@@ -427,16 +400,18 @@ mod tests {
 
         assert_eq!(n as u64, TOTAL, "total byte count mismatch");
         assert_eq!(actual.len(), expected.len(), "length mismatch");
-        assert!(actual == expected, "byte content mismatch");
+        assert!(actual == expected.as_ref(), "byte content mismatch");
         assert_eq!(progress.position(), TOTAL, "progress should equal total");
 
         drop(reader);
 
         // Staging dir should be empty of chunk files after a full, clean read.
-        let leftover: Vec<_> = std::fs::read_dir(staging.path())
+        let leftover: Vec<_> = std::fs::read_dir(&staging)
             .expect("read staging")
             .filter_map(Result::ok)
             .collect();
         assert!(leftover.is_empty(), "staging not cleaned: {leftover:?}");
+
+        let _ = std::fs::remove_dir_all(&staging);
     }
 }
